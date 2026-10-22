@@ -11,6 +11,8 @@
       html, body, #radice { height: 100%; margin: 0; }
       body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
       #radice { display: flex; }
+      /* Niente contorno automatico del browser: l'anello di focus lo disegnano i componenti, solo da tastiera. */
+      *:focus { outline: none; }
     </style>
   </head>
   <body>

@@ -1,14 +1,17 @@
 ﻿import { useEffect, useState } from 'react';
-import { View } from 'react-native';
-import { Esito, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
+import { Pressable, View } from 'react-native';
+import { anelloFocus, Esito, Pulsante, SceltaSegmenti, type StatoPressione } from '../componenti/base.tsx';
+import { Icona } from '../componenti/Icona.tsx';
+import { Check } from 'lucide-react-native';
+import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
 import { Campo, Tendina } from '../componenti/campi.tsx';
 import { Intestazione, RigaCategoria, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Categoria } from '../dati/tipi.ts';
 import { euro, nomeMeseMinuscolo } from '../formato.ts';
-import { d, Testo } from '../tema/tema.tsx';
-import { FinestraModulo, serve } from './moduli.tsx';
+import { d, Testo, useTema } from '../tema/tema.tsx';
+import { FinestraModulo, serve, Voce } from './moduli.tsx';
 
 // Icone della libreria adatte alle categorie (CMP-01).
 const ICONE = ['house', 'zap', 'trash-2', 'sofa', 'wrench', 'utensils', 'shopping-cart', 'coffee', 'car', 'fuel', 'square-parking', 'shield', 'file-text', 'bus', 'repeat', 'tv', 'music',
@@ -47,7 +50,7 @@ export function Categorie() {
       <Intestazione titolo="Categorie" sottotitolo="Ogni categoria ha un'icona: la vedi accanto a ogni spesa, budget e movimento."
         azioni={<Pulsante tipo="primario" etichetta="Nuova categoria" icona="plus" onPress={() => setAperta({ padre: null })} />} />
       <SceltaSegmenti etichetta="Uscite o entrate" valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'uscita', testo: `Uscite · ${radici('uscita')}` }, { valore: 'entrata', testo: `Entrate · ${radici('entrata')}` }]} />
-      <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre. I colori delle categorie sono ancora da scegliere." />
+      <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre. Il colore si sceglie con la matita, tra quelli della tavolozza." />
       <Scheda>
         <View role="tree" aria-label="Categorie">
           <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
@@ -64,20 +67,45 @@ export function Categorie() {
   );
 }
 
+// Tavolozza fissa: un cerchio per colore più "nessuno". Il colore scelto ha l'anello e la spunta.
+function SceltaColore({ valore, onCambia }: { valore: string | null; onCambia: (v: string | null) => void }) {
+  const { c } = useTema();
+  const lato = d['misura-tessera-media'];
+  const cerchio = (codice: string | null, nome: string) => {
+    const scelto = (valore ?? null)?.toLowerCase() === codice?.toLowerCase() || (!valore && !codice);
+    return (
+      <Pressable key={nome} accessibilityRole="radio" aria-checked={scelto} accessibilityLabel={nome} onPress={() => onCambia(codice)}
+        style={(s: StatoPressione) => [{ width: lato, height: lato, borderRadius: lato / 2, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: codice ?? 'transparent', borderWidth: codice ? 0 : d['misura-bordo'], borderColor: c['bordo-controllo'],
+          outlineColor: scelto ? c['bordo-focus'] : 'transparent', outlineWidth: d['misura-bordo-forte'], outlineStyle: 'solid', outlineOffset: 2 } as object, anelloFocus(c, s.focused)]}>
+        {scelto && codice ? <Check size={16} color={suColoreCategoria(codice)} strokeWidth={2.5} aria-hidden /> : null}
+        {!codice ? <Icona nome="x" misura={16} colore="icona-tenue" /> : null}
+      </Pressable>
+    );
+  };
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel="Colore" style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-icona'], paddingVertical: d['spazio-testo'] }}>
+      {cerchio(null, 'Nessun colore')}
+      {coloriCategorie.map((k) => cerchio(k.codice, k.nome))}
+    </View>
+  );
+}
+
 function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { padre: string | null } | null; tipo: 'uscita' | 'entrata'; onChiudi: () => void }) {
   const rif = useRiferimenti();
   const c = stato && 'id' in stato ? stato : null;
   const [nome, setNome] = useState('');
   const [padre, setPadre] = useState('nessuna');
   const [icona, setIcona] = useState('padre');
+  const [colore, setColore] = useState<string | null>(null);
   const [sposta, setSposta] = useState<string | null>(null);
   const [inUso, setInUso] = useState(false);
   useEffect(() => {
     if (!stato) return;
-    setNome(c?.nome ?? ''); setPadre(c?.padre_id ?? ('padre' in stato ? stato.padre : null) ?? 'nessuna'); setIcona(c?.icona ?? 'padre'); setSposta(null); setInUso(false);
+    setNome(c?.nome ?? ''); setPadre(c?.padre_id ?? ('padre' in stato ? stato.padre : null) ?? 'nessuna'); setIcona(c?.icona ?? 'padre'); setColore(c?.colore ?? null); setSposta(null); setInUso(false);
   }, [stato]); // eslint-disable-line react-hooks/exhaustive-deps
   const salva = async () => {
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), padre_id: padre === 'nessuna' ? null : padre, icona: icona === 'padre' ? null : icona, ...(c ? {} : { tipo }) };
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), padre_id: padre === 'nessuna' ? null : padre, icona: icona === 'padre' ? null : icona, colore, ...(c ? {} : { tipo }) };
     if (c) await modifica(`/categorie/${c.id}`, corpo); else await crea('/categorie', corpo);
   };
   const elimina = async () => {
@@ -91,6 +119,9 @@ function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { pad
       <Campo etichetta="Nome" valore={nome} onCambia={setNome} autoFocus={!c} />
       <Tendina etichetta="Dentro" valore={padre} onCambia={setPadre} opzioni={[{ valore: 'nessuna', testo: 'Nessuna: categoria principale', rientro: 0 }, ...altre]} />
       <Tendina etichetta="Icona" valore={icona} onCambia={setIcona} opzioni={[{ valore: 'padre', testo: 'Quella della categoria padre', icona: rif.iconaCategoria(padre === 'nessuna' ? null : padre) }, ...ICONE.map((i) => ({ valore: i, testo: i.replace(/-\d$/, '').replace(/-/g, ' '), icona: i }))]} />
+      <Voce etichetta="Colore" aiuto={colore ? nomeColoreCategoria(colore) ?? undefined : 'Nessun colore'}>
+        <SceltaColore valore={colore} onCambia={setColore} />
+      </Voce>
       {inUso ? <Tendina etichetta="Sposta spese, movimenti e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} /> : null}
     </FinestraModulo>
   );

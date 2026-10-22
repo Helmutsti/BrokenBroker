@@ -3,7 +3,7 @@ import { Modal, Pressable, ScrollView, View } from 'react-native';
 import Svg, { Line, Polyline } from 'react-native-svg';
 import { euro, nomeMese, spostaMese } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { ombre, type NomeColore } from '../tema/token.ts';
+import { nomeColoreCategoria, ombre, type NomeColore } from '../tema/token.ts';
 import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
 import { Icona } from './Icona.tsx';
 
@@ -317,7 +317,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, icon
       </View>
       <View style={{ width: 120, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: colore ?? c['bordo-scheda'] }} />
-        <Testo stile="dettaglio-normale" colore="testo-terziario">{colore ?? 'da scegliere'}</Testo>
+        <Testo stile="dettaglio-normale" colore={colore ? 'testo-secondario' : 'testo-terziario'}>{nomeColoreCategoria(colore) ?? 'nessuno'}</Testo>
       </View>
       <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
       <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />

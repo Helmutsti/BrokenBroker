@@ -33,6 +33,23 @@ export const colori = {
 
 export type NomeColore = keyof typeof colori.chiaro;
 
+// Tavolozza fissa dei colori delle categorie (decisione di Manuel: si sceglie solo tra questi).
+// Toni medi, distinguibili sia sul fondo chiaro sia su quello scuro. Nel database si salva il codice.
+export const coloriCategorie = [
+  { codice: '#DC2626', nome: 'Rosso' }, { codice: '#EA580C', nome: 'Arancio' }, { codice: '#D97706', nome: 'Ambra' },
+  { codice: '#A16207', nome: 'Giallo' }, { codice: '#65A30D', nome: 'Lime' }, { codice: '#16A34A', nome: 'Verde' },
+  { codice: '#0D9488', nome: 'Verde acqua' }, { codice: '#0891B2', nome: 'Turchese' }, { codice: '#2563EB', nome: 'Blu' },
+  { codice: '#6366F1', nome: 'Indaco' }, { codice: '#9333EA', nome: 'Viola' }, { codice: '#DB2777', nome: 'Rosa' },
+] as const;
+// Colore della spunta sopra un colore di categoria: bianco o scuro, quello con più contrasto.
+export function suColoreCategoria(codice: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(codice.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? colori.chiaro['testo-su-accento'] : colori.chiaro['testo-primario'];
+}
+export const nomeColoreCategoria =(codice: string | null | undefined) =>
+  coloriCategorie.find((c) => c.codice.toLowerCase() === codice?.toLowerCase())?.nome ?? (codice ? codice.toUpperCase() : null);
+
 export const dimensioni = {
   'spazio-testo': 4, 'spazio-elenco': 4, 'spazio-icona': 8, 'spazio-pillole': 8, 'spazio-colonne': 12, 'spazio-blocco': 16, 'spazio-gruppo': 24,
   'margine-pagina': 32, 'margine-barra-laterale': 16, 'margine-scheda': 24, 'margine-finestra': 32,

@@ -135,7 +135,6 @@ Importi in euro con due decimali (`numeric(12,2)`). La visibilità è imposta da
 ## Sul tavolo
 
 - Riempimento delle barre nei componenti Figma (rinviato: "poi lo implementeremo"; nell'app le barre sono già vere).
-- Colori delle categorie: ancora da scegliere.
 - Icone delle categorie standard: applicate come da proposta del registro (migrazione 008), da confermare.
 - Pubblicare la libreria Figma (lo fa Manuel da Figma), così le schermate si possono spostare nel file dei mockup.
 - Prima prova dell'app su iPhone (serve un Mac con Xcode).

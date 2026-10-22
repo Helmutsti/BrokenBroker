@@ -69,6 +69,18 @@ Non si usano direttamente nei componenti.
 
 Significato dei colori (proposta nel registro): **verde** a posto o raggiunto, **arancio** attenzione, **rosso** superato o negativo. Ogni stato ha sempre anche un testo, mai solo il colore.
 
+## Colori delle categorie
+Tavolozza fissa (scelta di Manuel: si sceglie solo tra questi). Stessi valori in chiaro e scuro, tutti almeno 3:1 sia su `sfondo/scheda` chiaro sia scuro. In Figma: Primitivi `categoria/<nome>`. Nel database si salva il codice. La spunta sopra il colore è bianca o scura, quella con più contrasto.
+
+| Nome | Codice | | Nome | Codice |
+|---|---|---|---|---|
+| Rosso | #DC2626 | | Verde acqua | #0D9488 |
+| Arancio | #EA580C | | Turchese | #0891B2 |
+| Ambra | #D97706 | | Blu | #2563EB |
+| Giallo | #A16207 | | Indaco | #6366F1 |
+| Lime | #65A30D | | Viola | #9333EA |
+| Verde | #16A34A | | Rosa | #DB2777 |
+
 ## Spazi
 Ogni spazio ha un ruolo e il ruolo ha un solo valore. Più il legame è stretto, meno spazio c'è (guida §6.4, `componenti.md`).
 
