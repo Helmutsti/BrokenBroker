@@ -37,6 +37,8 @@ services:
     environment:
       DATABASE_URL: postgres://fp_app:${APP_DB_PASSWORD}@db:5432/finanza
       PORT: 3000
+      # "si" solo per le prove automatiche: altrimenti gli account si creano con scripts/crea-utente.ts
+      REGISTRAZIONE_APERTA: ${REGISTRAZIONE_APERTA:-no}
     ports:
       - "${API_PORTA:-3000}:3000"
     depends_on:

@@ -28,6 +28,14 @@ Nient'altro: Node e Postgres sono dentro i container.
    ```
    Risposta attesa: `{"stato":"ok"}`
 
+## Creare gli account
+
+Dall'app ci si può solo accedere. Gli account si creano così (il comando stampa la password generata):
+
+```
+docker compose exec api node scripts/crea-utente.ts nome@esempio.it Nome
+```
+
 ## Uso quotidiano
 
 | Cosa | Comando |
@@ -98,7 +106,7 @@ curl http://localhost:3000/categorie -H "Authorization: Bearer <token>"
 
 ## Prove automatiche
 
-Con l'API avviata:
+Le prove creano utenti nuovi, quindi vogliono la registrazione aperta: si avvia l'API con `REGISTRAZIONE_APERTA=si` nel file `.env` (da togliere dopo, e da non usare su un database con dati veri). Con l'API avviata:
 
 ```
 node api/prove/prove-funzioni.mjs
@@ -129,7 +137,7 @@ La versione per iPhone usa lo stesso codice (`app/index.js`); il progetto iOS va
 | Metodo | Indirizzo | Cosa fa |
 |--------|-----------|---------|
 | GET | `/salute` | controllo che API e database rispondano |
-| POST | `/accesso/registrazione` | nuovo utente (email, nome, password ≥ 10 caratteri) + categorie standard |
+| POST | `/accesso/registrazione` | nuovo utente (email, nome, password ≥ 10 caratteri) + categorie standard; chiusa se `REGISTRAZIONE_APERTA` non è `si` |
 | POST | `/accesso/accesso` | accesso con email e password → token valido 30 giorni |
 | POST | `/accesso/uscita` | chiude la sessione |
 | GET, PATCH | `/profilo` | nome, stipendio netto, giorno di paga, giorno di inizio del mese (`inizio_mese`, 1-28) |

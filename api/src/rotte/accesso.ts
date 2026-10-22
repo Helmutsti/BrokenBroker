@@ -8,7 +8,10 @@ export const rotteAccesso = Router();
 
 const formatoEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// La registrazione dall'esterno è chiusa: gli account si creano con
+// scripts/crea-utente.ts. Si apre solo per le prove (REGISTRAZIONE_APERTA=si).
 rotteAccesso.post('/registrazione', async (req, res) => {
+  if (process.env.REGISTRAZIONE_APERTA !== 'si') throw new ErroreApi(403, 'La registrazione non è aperta');
   const c = v.corpo(req.body);
   const email = v.testo(c, 'email', true, 254)!;
   const nome = v.testo(c, 'nome', true, 80)!;

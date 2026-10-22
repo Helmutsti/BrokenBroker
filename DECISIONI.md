@@ -35,7 +35,7 @@ Nasce dal file `Finanza personale.xlsx` (Desktop), che oggi contiene: spese mens
 | 12 | Linguaggio delle funzioni | Node.js con TypeScript (stesso linguaggio dell'app React Native). |
 | 13 | Framework API | Express. |
 | 14 | Accesso al database | SQL scritto a mano, dipendenze ridotte al minimo: solo il driver Postgres (`pg`). Le modifiche alla struttura sono file `.sql` numerati, applicati da un piccolo script. |
-| 15 | Accesso all'app | Email e password, gestite dall'API (password protette con hash). Sull'iPhone, in seguito, sblocco con Face ID. |
+| 15 | Accesso all'app | Email e password, gestite dall'API (password protette con hash). Sull'iPhone, in seguito, sblocco con Face ID. Solo accesso, niente registrazione dall'app: gli account si creano con un comando (`scripts/crea-utente.ts`). |
 | 16 | Cancellare una voce condivisa | Solo chi l'ha creata e condivisa può cancellarla o smettere di condividerla. L'altra persona può modificarla, ma non eliminarla. |
 | 17 | Cosa costruire per primo | Le basi: Docker, database completo, accesso, conti, categorie, movimenti. Il resto a pezzi. |
 | 18 | Figma | Nuovo file con proposta di layout, barra laterale a sinistra, versione desktop e mobile. |

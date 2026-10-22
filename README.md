@@ -29,7 +29,11 @@ Serve solo **Docker** (Docker Desktop su Windows e macOS, Docker Engine su Linux
    docker compose up -d --build
    ```
    La prima volta Docker scarica Postgres, costruisce API e app, crea il database e lo prepara.
-5. Apri **http://localhost:8080**, scegli "Registrati" e crea il tuo account: le categorie di base sono già pronte.
+5. Crea gli account (uno per persona). Il comando stampa la password, generata a caso:
+   ```
+   docker compose exec api node scripts/crea-utente.ts nome@esempio.it Nome
+   ```
+6. Apri **http://localhost:8080** e accedi: le categorie di base sono già pronte. Dall'app non ci si può registrare.
 
 Per farlo usare anche alla seconda persona dalla stessa rete, si apre `http://<indirizzo-del-computer>:8080` da un altro dispositivo.
 
