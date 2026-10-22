@@ -1,0 +1,29 @@
+{
+  "name": "brokenbroker-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "BrokenBroker: app per iPhone e pagina web (React Native, web con react-native-web e Vite)",
+  "scripts": {
+    "web": "vite",
+    "build:web": "vite build",
+    "anteprima": "vite preview",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-navigation/native": "^7.5.1",
+    "lucide-react-native": "^1.61.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-native": "^0.88.0",
+    "react-native-keychain": "^10.0.0",
+    "react-native-svg": "^15.16.0",
+    "react-native-web": "^0.21.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.1",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.5"
+  }
+}

@@ -1,0 +1,56 @@
+# Database e API della fase iniziale (decisione 11).
+# Avvio: docker compose up -d --build   (vedi INSTALLAZIONE.md)
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: finanza
+      POSTGRES_USER: fp_admin
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?imposta DB_ADMIN_PASSWORD nel file .env}
+    volumes:
+      - dati_db:/var/lib/postgresql/data
+    ports:
+      # Solo da questo computer, per ispezionare i dati con un client SQL.
+      - "127.0.0.1:${DB_PORTA:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fp_admin -d finanza"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Applica le migrazioni e termina; l'API parte solo dopo.
+  migrazioni:
+    build: ./api
+    command: ["node", "scripts/migra.ts"]
+    environment:
+      DATABASE_ADMIN_URL: postgres://fp_admin:${DB_ADMIN_PASSWORD}@db:5432/finanza
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?imposta APP_DB_PASSWORD nel file .env}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://fp_app:${APP_DB_PASSWORD}@db:5432/finanza
+      PORT: 3000
+    ports:
+      - "${API_PORTA:-3000}:3000"
+    depends_on:
+      migrazioni:
+        condition: service_completed_successfully
+
+  # La pagina web dell'app: http://localhost:8080
+  app:
+    build: ./app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORTA:-8080}:80"
+    depends_on:
+      - api
+
+volumes:
+  dati_db:
