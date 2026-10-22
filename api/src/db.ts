@@ -1,11 +1,14 @@
 import pg from 'pg';
 import type { PoolClient } from 'pg';
+import { FUSO_ORARIO } from './periodo.ts';
 
 // numeric e date arrivano come testo: gli importi restano esatti e le date
 // non subiscono conversioni di fuso orario.
 pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v);
 
 export const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+// current_date nel database segue lo stesso fuso orario dell'API (vedi periodo.ts).
+pool.on('connect', (c) => { c.query(`set timezone to ${pg.escapeLiteral(FUSO_ORARIO)}`).catch(() => {}); });
 
 // Esegue fn in una transazione dichiarando al database chi è l'utente:
 // le regole di visibilità (Row Level Security) si basano su questo.

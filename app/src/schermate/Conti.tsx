@@ -1,7 +1,7 @@
 ﻿import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Interruttore, Pulsante } from '../componenti/base.tsx';
-import { Campo, Tendina } from '../componenti/campi.tsx';
+import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
 import { Intestazione, NumeroChiave, Scheda, SchedaConto, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, leggi, modifica, useDati } from '../dati/api.ts';
 import { ICONA_CONTO, NOME_TIPO_CONTO, useRiferimenti } from '../dati/contesto.tsx';
@@ -89,7 +89,7 @@ function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; apert
       <Tendina etichetta="Tipo" valore={tipo} onCambia={setTipo} opzioni={(Object.keys(NOME_TIPO_CONTO) as TipoConto[]).map((k) => ({ valore: k, testo: NOME_TIPO_CONTO[k], icona: ICONA_CONTO[k] }))} />
       <Affiancati>
         <Meta><Campo etichetta="Saldo di partenza" valore={saldo} onCambia={setSaldo} inputMode="decimal" /></Meta>
-        <Meta><Campo etichetta="Alla data" valore={dal} onCambia={setDal} iconaPrima="calendar" aiuto="Contano i movimenti da questo giorno in poi" /></Meta>
+        <Meta><CampoData etichetta="Alla data" valore={dal} onCambia={setDal} aiuto="Contano i movimenti da questo giorno in poi" /></Meta>
       </Affiancati>
       {conto ? <Testo colore="testo-secondario">{`Saldo di oggi: ${euro(conto.saldo)}`}</Testo> : null}
       {!conto || conto.mio ? (

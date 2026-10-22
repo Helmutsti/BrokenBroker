@@ -41,6 +41,14 @@ export function importo(c: Corpo, campo: string, obbligatorio = false): string |
   return v;
 }
 
+// Prezzi di titoli: fino a 6 decimali scritti, arrotondati ai 4 del database ("121.7623").
+export function prezzo(c: Corpo, campo: string, obbligatorio = false): string | undefined {
+  if (manca(c, campo, obbligatorio)) return undefined;
+  const v = String(c[campo]).trim();
+  if (!/^\d{1,10}(\.\d{1,6})?$/.test(v)) throw errore(campo, 'deve essere un prezzo, es. 121.7623');
+  return Number(v).toFixed(4);
+}
+
 export function data(c: Corpo, campo: string, obbligatorio = false): string | undefined {
   if (manca(c, campo, obbligatorio)) return undefined;
   const v = c[campo];

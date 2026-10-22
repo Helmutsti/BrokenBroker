@@ -31,6 +31,11 @@ Le schermate con la stessa struttura. Decisa la struttura di uno schema, le sue 
 
 **Dati di esempio da non prendere per veri:** movimenti di ottobre, saldi dei conti, mesi passati del grafico, prezzo della Nikon, tetto rate 15% e debito massimo 3 mensilità (la regola dell'Excel non ha un numero), email.
 
+## Proposta v2 (2026-10-23, da confermare)
+Nella libreria, pagina "Schermate computer", sotto le schermate attuali. Link (`FYIisMC6CZ2HNCKfyGxA2q`): SC-01 v2 `node-id=57-6051` · SC-02 v2 `58-6466` · SC-04 v2 `60-7239` · SC-11 v2 `64-7766` · SC-12 Aggiungi investimento `64-8149` (non quotato: tipo qualsiasi `64-8361`, tipo oro fisico `64-8507`). Contenuti: frame "Contenuti proposta v2" `57-4690`. Decisioni e proposte in `registro.md`.
+
+**Dati di esempio da non prendere per veri (v2):** scadenze di Obiettivo Nikon (marzo 2027) e Dare alla Ele (giugno 2027), mesi del calendario annuali tranne Tari, assicurazione, vacanze e bollo, lingotto d'oro, fondo pensione Cometa.
+
 ---
 
 ## SC-01 – Panoramica (computer)

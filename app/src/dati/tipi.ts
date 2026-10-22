@@ -34,6 +34,7 @@ export type Obiettivo = {
 export type Rata = {
   id: string; oggetto: string; finanziaria: string | null; importo_totale: string | null; importo_rata: string; numero_rate: number; prima_scadenza: string;
   conto_id: string | null; categoria_id: string | null; chiusa: boolean; ultima_scadenza: string; pagate: number; rimanenti: number; residuo: string; attiva: boolean;
+  scadenza?: string | null; movimento_id?: string | null; // con ?mese=
 };
 
 export type Regole = { max_rate_contemporanee?: number; tetto_rate_percentuale?: number; max_mensilita_debito?: number };
@@ -52,9 +53,16 @@ export type Proiezione = { partenza: string; punti: { mesi: number; mese: string
 export type ControlloRate = { rate_attive: number; rata_mensile: string; debito: string; controlli: Controllo[] };
 export type EsitoAcquisto = { costo_mensile: string; rata: string | null; margine: string; peso_sul_margine: number | null; mesi_di_risparmio: number | null; regole: Controllo[]; esito: 'si' | 'attenzione' | 'no' };
 
-export type Titolo = { id: string; isin: string; ticker: string | null; nome: string; tipo: string };
-export type Posizione = Titolo & { quote: string; prezzo_medio: string | null; prezzo: string | null; prezzo_del: string | null; costo: string; valore: string; guadagno: string; guadagno_percentuale: number | null; peso: number };
-export type Portafoglio = { valore: string; costo: string; messo_dentro: string; guadagno: string; guadagno_percentuale: number | null; posizioni: Posizione[] };
+export type Titolo = { id: string; isin: string | null; ticker: string | null; nome: string; tipo: string; simbolo: string | null; borsa: string | null };
+export type Posizione = Titolo & { conto_id: string | null; conto: string | null; quote: string; prezzo_medio: string | null; prezzo: string | null; prezzo_del: string | null; costo: string; valore: string; guadagno: string; guadagno_percentuale: number | null; peso: number };
+export type TipoBene = 'fondo_pensione' | 'crowdfunding' | 'societa' | 'immobile' | 'oro' | 'altro';
+export type Bene = {
+  id: string; nome: string; tipo: TipoBene; costo: string; valore: string; valore_al: string; data_acquisto: string | null; conto_id: string | null; conto: string | null;
+  forma: 'lingotto' | 'moneta' | null; purezza: string | null; peso_grammi: string | null; dove: string | null;
+  guadagno: string; guadagno_percentuale: number | null; peso: number; valore_automatico: boolean;
+};
+export type QuotazioneOro = { euro_grammo: number; data: string; fonte: string };
+export type Portafoglio = { valore: string; valore_titoli: string; costo: string; messo_dentro: string; guadagno: string; guadagno_percentuale: number | null; posizioni: Posizione[]; beni: Bene[] };
 export type PuntoAndamento = { al: string; mese: string; valore: string; messo_dentro: string };
 export type Esposizione = Record<'classe' | 'area' | 'settore', { voce: string; peso: number }[]>;
 export type Operazione = { id: string; titolo_id: string; titolo: string; isin: string; ticker: string | null; conto_id: string | null; data: string; verso: 'acquisto' | 'vendita'; quantita: string; prezzo: string; commissioni: string; controvalore: string };

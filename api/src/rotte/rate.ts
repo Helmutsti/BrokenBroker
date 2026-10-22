@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { mesiTra } from '../periodo.ts';
-import { leggiRate } from '../rate.ts';
+import { mesiTra, oggi, periodoRichiesto } from '../periodo.ts';
+import { leggiRate, scadenzaRata } from '../rate.ts';
 import * as v from '../valida.ts';
 
 // Rate (private). Si indica il numero di rate oppure la data dell'ultima,
@@ -27,8 +27,49 @@ function importoPositivo(c: Record<string, unknown>, campo: string, obbligatorio
   return i;
 }
 
-rotteRate.get('/', async (_req, res) => {
-  res.json(await conUtente(res.locals.utenteId, (db) => leggiRate(db)));
+// ?mese=AAAA-MM aggiunge a ogni rata la scadenza nel mese e se è già stata spuntata.
+rotteRate.get('/', async (req, res) => {
+  res.json(await conUtente(res.locals.utenteId, async (db) => {
+    const rate = await leggiRate(db);
+    if (req.query.mese === undefined) return rate;
+    const p = await periodoRichiesto(db, req.query.mese);
+    const { rows } = await db.query<{ rata_id: string; id: string }>(
+      'select rata_id, id from movimenti where rata_id = any($1) and data between $2 and $3', [rate.map((r) => r.id), p.dal, p.al]);
+    return rate.map((r) => ({ ...r, scadenza: scadenzaRata(r, p), movimento_id: rows.find((m) => m.rata_id === r.id)?.id ?? null }));
+  }));
+});
+
+// La spunta "pagata": crea il movimento della rata sul suo conto, come per le spese previste.
+rotteRate.post('/:id/spunta', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  const c = v.corpo(req.body ?? {});
+  const movimento = await conUtente(res.locals.utenteId, async (db) => {
+    const p = await periodoRichiesto(db, c.mese);
+    const [r] = await leggiRate(db, id);
+    if (!r) throw nonTrovato('Rata');
+    const scadenza = scadenzaRata(r, p);
+    if (!scadenza) throw new ErroreApi(400, 'Questa rata non cade in questo mese');
+    if ((await db.query('select 1 from movimenti where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount) throw new ErroreApi(409, 'Questa rata è già pagata in questo mese');
+    const conto = v.id(c, 'conto_id') ?? r.conto_id;
+    if (!conto) throw new ErroreApi(400, 'Indica il conto da cui esce la rata: lo puoi impostare nella rata');
+    const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : scadenza);
+    if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
+    return (await db.query(
+      `insert into movimenti (conto_id, data, importo, esercente, categoria_id, inserito_da, rata_id)
+       values ($1, $2, $3, $4, $5, fp_me(), $6) returning id, data, importo::text as importo`,
+      [conto, data, `-${r.importo_rata}`, r.finanziaria ? `${r.oggetto} · ${r.finanziaria}` : r.oggetto, r.categoria_id, id])).rows[0];
+  });
+  res.status(201).json(movimento);
+});
+
+rotteRate.delete('/:id/spunta', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  await conUtente(res.locals.utenteId, async (db) => {
+    const p = await periodoRichiesto(db, req.query.mese);
+    const { rowCount } = await db.query('delete from movimenti where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al]);
+    if (!rowCount) throw nonTrovato('Spunta');
+  });
+  res.status(204).end();
 });
 
 rotteRate.get('/:id', async (req, res) => {

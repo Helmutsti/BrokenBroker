@@ -1,6 +1,6 @@
 import {
   Archive, ArrowDown, ArrowDownLeft, ArrowLeftRight, ArrowUp, ArrowUpRight, Banknote, Bed, Briefcase, Bus, Calculator, Calendar, CalendarCheck, CalendarClock,
-  CalendarRange, Camera, Car, Cat, ChartColumn, ChartLine, ChartPie, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleX, Coffee,
+  CalendarRange, Camera, Car, Cat, ChartColumn, ChartLine, ChartPie, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleX, Coffee,
   CreditCard, Ellipsis, Eye, EyeOff, Factory, FileText, Fuel, Gamepad2, Gift, Glasses, Globe, Heart, House, Info, KeyRound, Landmark, Laptop, Layers,
   LayoutDashboard, ListChecks, Lock, LogOut, type LucideIcon, Mail, Music, Package, Pencil, Percent, PiggyBank, Pill, Plane, Plus, Refrigerator, Repeat,
   Scale, Search, Shield, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Smartphone, Sofa, SquareParking, Stethoscope, Tags, Target, Ticket, Trash2,
@@ -18,7 +18,7 @@ export type Misura = 16 | 20 | 24;
 const ICONE: Record<string, LucideIcon> = {
   'layout-dashboard': LayoutDashboard, 'calendar-check': CalendarCheck, target: Target, 'arrow-left-right': ArrowLeftRight, wallet: Wallet,
   'chart-line': ChartLine, 'chart-pie': ChartPie, tags: Tags, user: User, 'log-out': LogOut, plus: Plus, pencil: Pencil, x: X,
-  'chevron-down': ChevronDown, 'chevron-left': ChevronLeft, 'chevron-right': ChevronRight, search: Search, archive: Archive, eye: Eye, 'eye-off': EyeOff,
+  'chevron-down': ChevronDown, 'chevron-up': ChevronUp, 'chevron-left': ChevronLeft, 'chevron-right': ChevronRight, search: Search, archive: Archive, eye: Eye, 'eye-off': EyeOff,
   mail: Mail, lock: Lock, 'key-round': KeyRound, 'user-plus': UserPlus, users: Users, info: Info, 'circle-check': CircleCheck, 'circle-x': CircleX,
   'circle-alert': CircleAlert, 'sliders-horizontal': SlidersHorizontal, calculator: Calculator, 'chart-column': ChartColumn, 'list-checks': ListChecks,
   'calendar-clock': CalendarClock, 'calendar-range': CalendarRange, calendar: Calendar, scale: Scale, 'trending-up': TrendingUp,

@@ -9,8 +9,12 @@ const testo = (d: Date) => d.toISOString().slice(0, 10);
 const daTesto = (s: string) => new Date(`${s}T00:00:00Z`);
 const giorniNelMese = (anno: number, mese0: number) => new Date(Date.UTC(anno, mese0 + 1, 0)).getUTCDate();
 
+// "Oggi" è il giorno di chi usa l'app (di base l'Italia), non quello di Greenwich:
+// dopo mezzanotte in Italia è già domani anche se in UTC non lo è ancora.
+export const FUSO_ORARIO = process.env.FUSO_ORARIO || 'Europe/Rome';
+const formatoGiorno = new Intl.DateTimeFormat('en-CA', { timeZone: FUSO_ORARIO, year: 'numeric', month: '2-digit', day: '2-digit' });
 export function oggi(): string {
-  return testo(new Date());
+  return formatoGiorno.format(new Date());
 }
 
 // Aggiunge n mesi tenendo il giorno; se il mese è più corto si ferma all'ultimo giorno.

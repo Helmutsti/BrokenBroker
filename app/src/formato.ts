@@ -31,6 +31,20 @@ export function leggiImporto(testo: string): string | null {
   return normale;
 }
 
+// Prezzo di un titolo: come un importo ma fino a 6 decimali, es. "121,7623". null se non valido.
+export function leggiPrezzo(testo: string): string | null {
+  const pulito = testo.replace(/[€\s]/g, '');
+  const normale = pulito.includes(',') ? pulito.replace(/\./g, '').replace(',', '.') : pulito;
+  if (!/^\d{1,10}(\.\d{1,6})?$/.test(normale)) return null;
+  return normale;
+}
+// Prezzo dell'API in testo da modificare: tutti i decimali che servono, almeno 2 ("121,7623", "130,00").
+export const prezzoInTesto = (v: string | number | null | undefined) => {
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v), dec = Math.max(2, (String(Number(n.toFixed(4))).split('.')[1] ?? '').length);
+  return numero(n, dec);
+};
+
 // Importo dell'API in testo da modificare: "1234.50" → "1.234,50".
 export const importoInTesto = (v: string | number | null | undefined) => (v === null || v === undefined || v === '' ? '' : numero(v).replace('−', '-'));
 

@@ -126,7 +126,7 @@ export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale' 
 // ---- Gruppo di righe (titolo e totale) ----
 export function TitoloGruppo({ testo, destra }: { testo: string; destra?: string }) {
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'] }}>
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>
       <Testo stile="etichetta-gruppo" colore="testo-secondario">{testo}</Testo>
       {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario">{destra}</Testo> : null}
     </View>
@@ -136,7 +136,7 @@ export function TitoloGruppo({ testo, destra }: { testo: string; destra?: string
 // Riga premibile con evidenza al passaggio del mouse.
 function RigaPremibile({ onPress, children, linea, etichetta, padding = 'margine-riga-v' }: { onPress?: () => void; children: ReactNode; linea?: boolean; etichetta?: string; padding?: 'margine-riga-v' | 'margine-voce-v' }) {
   const { c } = useTema();
-  const stile = (h?: boolean) => ({ flexDirection: 'row' as const, alignItems: 'center' as const, gap: d['spazio-colonne'], paddingVertical: d[padding],
+  const stile = (h?: boolean) => ({ flexDirection: 'row' as const, alignItems: 'center' as const, gap: d['spazio-colonne'], paddingVertical: d[padding], paddingHorizontal: d['margine-voce-h'],
     borderBottomWidth: linea ? d['misura-bordo'] : 0, borderBottomColor: c['bordo-separatore'], backgroundColor: h ? c['sfondo-hover'] : 'transparent' });
   if (!onPress) return <View style={stile()}>{children}</View>;
   return <Pressable accessibilityRole="button" accessibilityLabel={etichetta} onPress={onPress} style={(s: StatoPressione) => [stile(s.hovered), anelloFocus(c, s.focused)]}>{children}</Pressable>;
@@ -145,17 +145,17 @@ function RigaPremibile({ onPress, children, linea, etichetta, padding = 'margine
 const Col = ({ w, children, destra }: { w: number; children: ReactNode; destra?: boolean }) => <View style={{ width: w, alignItems: destra ? 'flex-end' : 'flex-start' }}>{children}</View>;
 
 // ---- CMP-24 Voce da spuntare ----
-export function VoceDaSpuntare({ nome, conto, importo, icona, fatta, onSpunta, onApri }: { nome: string; conto: string; importo: string; icona: string; fatta: boolean; onSpunta?: () => void; onApri?: () => void }) {
+export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatta, onSpunta, onApri }: { nome: string; conto: string; importo: string; sottoImporto?: string; icona: string; fatta: boolean; onSpunta?: () => void; onApri?: () => void }) {
   const col: NomeColore = fatta ? 'testo-secondario' : 'testo-primario';
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
         <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} />
         <Pressable onPress={onApri} disabled={!onApri} style={{ flex: 1 }}><Testo colore={col} numberOfLines={1}>{nome}</Testo></Pressable>
       </View>
       <Col w={140}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
-      <Col w={110} destra><Testo stile="corpo-forte" colore={col}>{importo}</Testo></Col>
+      <Col w={110} destra><Testo stile="corpo-forte" colore={col}>{importo}</Testo>{sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottoImporto}</Testo> : null}</Col>
     </View>
   );
 }
@@ -166,7 +166,7 @@ export function VoceBudget({ nome, nota, conto, importo, icona, valore, stato, o
   const tono: ToneAvanzamento = stato === 'normale' ? 'accento' : stato === 'attenzione' ? 'attenzione' : 'errore';
   const colNota: NomeColore = stato === 'normale' ? 'testo-secondario' : stato === 'attenzione' ? 'testo-attenzione' : 'testo-errore';
   return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2 }}>
+    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <View style={{ width: d['misura-bersaglio'], alignItems: 'center' }}><Anello valore={valore} tono={tono} /></View>
         <Icona nome={icona} misura={16} />
@@ -254,7 +254,7 @@ export function RigaAvanzamento({ nome, importo, percentuale, valore, stato = 'i
     </View>
   );
   if (compatta) return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ gap: d['spazio-testo'], paddingVertical: d['margine-voce-v'] / 2 }}>
+    <Pressable onPress={onApri} disabled={!onApri} style={{ gap: d['spazio-testo'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
         <View style={{ flex: 1 }}>{testa}</View>
         <Testo stile="corpo-forte">{importo}</Testo>
@@ -264,7 +264,7 @@ export function RigaAvanzamento({ nome, importo, percentuale, valore, stato = 'i
     </Pressable>
   );
   return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] }}>
+    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'] }}>
       {testa}
       <Col w={150} destra><Testo colore="testo-secondario">{importo}</Testo></Col>
       <Barra valore={valore} tono={tono} larghezza={260} />
@@ -407,15 +407,18 @@ export function GraficoLinea({ punti, altezza = 200 }: { punti: { etichetta: str
   const x = (i: number) => (punti.length < 2 ? 0 : (i / (punti.length - 1)) * larghezza);
   const y = (v: number) => altezza - ((v - min) / (max - min || 1)) * (altezza - 8) - 4;
   const linea = (k: 'valore' | 'messo') => punti.map((p, i) => `${x(i)},${y(p[k])}`).join(' ');
+  // Al massimo 12 etichette, distribuite in modo uniforme dal primo all'ultimo punto.
+  const quante = Math.min(punti.length, 12);
+  const etichette = quante < 2 ? punti.map((_, i) => i) : [...new Set(Array.from({ length: quante }, (_, k) => Math.round((k * (punti.length - 1)) / (quante - 1))))];
   return (
     <View style={{ gap: d['spazio-blocco'] }}>
-      <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}><VoceLegenda testo="Valore" colore="avanzamento-accento" /><VoceLegenda testo="Messo dentro" colore="testo-terziario" tratteggio /></View>
+      <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}><VoceLegenda testo="Valore" colore="avanzamento-accento" /><VoceLegenda testo="Investiti" colore="testo-terziario" tratteggio /></View>
       <Svg width="100%" height={altezza} viewBox={`0 0 ${larghezza} ${altezza}`} preserveAspectRatio="none" aria-hidden>
         {[0, 1, 2, 3, 4].map((i) => <Line key={i} x1={0} x2={larghezza} y1={(i * altezza) / 4} y2={(i * altezza) / 4} stroke={c['bordo-separatore']} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
         <Polyline points={linea('messo')} fill="none" stroke={c['testo-terziario']} strokeWidth={d['misura-bordo-forte']} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
         <Polyline points={linea('valore')} fill="none" stroke={c['avanzamento-accento']} strokeWidth={d['misura-bordo-forte']} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{punti.map((p) => <Testo key={p.etichetta} stile="dettaglio-normale" colore="testo-secondario">{p.etichetta}</Testo>)}</View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{etichette.map((i) => <Testo key={i} stile="dettaglio-normale" colore="testo-secondario">{punti[i].etichetta}</Testo>)}</View>
     </View>
   );
 }
@@ -443,7 +446,110 @@ export function RigaPosizione({ titolo, codice, quote, prezzoMedio, prezzoOggi, 
 // Intestazione delle colonne della riga posizione.
 export function IntestazionePosizioni() {
   const t = (s: string, w?: number) => (w ? <Col w={w} destra><Testo stile="dettaglio-forte" colore="testo-secondario">{s}</Testo></Col> : <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1 }}>{s}</Testo>);
-  return <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingBottom: d['spazio-testo'] }}>{t('Titolo')}{t('Quote', 90)}{t('Prezzo medio', 90)}{t('Prezzo oggi', 90)}{t('Valore', 110)}{t('Guadagno', 170)}{t('Peso', 56)}</View>;
+  return <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>{t('Investimento')}{t('Quantità', 90)}{t('Prezzo medio', 90)}{t('Prezzo oggi', 90)}{t('Valore', 110)}{t('Guadagno', 170)}{t('Peso', 56)}</View>;
+}
+
+// ---- Riga scadenza annuale (proposta v2) ----
+// Una spesa annuale o periodica in arrivo: quando esce e se il salvadanaio la copre.
+export function RigaScadenzaAnnuale({ nome, quando, importo, dodicesimo, icona, copertura, onApri }: {
+  nome: string; quando: string; importo: string; dodicesimo?: string; icona: string; copertura?: { testo: string; tono: Tono }; onApri?: () => void;
+}) {
+  return (
+    <RigaPremibile onPress={onApri} linea etichetta={nome}>
+      <Tessera icona={icona} misura="piccola" />
+      <Testo stile="corpo-forte" numberOfLines={1} style={{ flex: 1 }}>{nome}</Testo>
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{quando}</Testo>
+      <View style={{ alignItems: 'flex-end', gap: d['spazio-testo'] }}>
+        <Testo stile="corpo-forte">{importo}</Testo>
+        {dodicesimo ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`1/12: ${dodicesimo}`}</Testo> : null}
+      </View>
+      {copertura ? <Etichetta testo={copertura.testo} tono={copertura.tono} /> : null}
+    </RigaPremibile>
+  );
+}
+
+// ---- Calendario delle annuali (proposta v2) ----
+// Quanto esce in ognuno dei prossimi 12 mesi: barre alte come l'importo.
+export function CalendarioAnnuali({ mesi, altezza = 80 }: { mesi: { etichetta: string; importo: number; attuale?: boolean; attenzione?: boolean }[]; altezza?: number }) {
+  const { c } = useTema();
+  const massimo = Math.max(1, ...mesi.map((m) => m.importo));
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-testo'] }}>
+      {mesi.map((m) => (
+        <View key={m.etichetta} style={{ flex: 1, alignItems: 'center', gap: d['spazio-testo'] }}>
+          <Testo stile="dettaglio-forte" colore={m.importo ? 'testo-primario' : 'testo-terziario'}>{m.importo ? euro(m.importo, { decimali: 0 }) : '–'}</Testo>
+          <View style={{ width: 32, height: Math.max(4, Math.round((m.importo / massimo) * altezza)), borderTopLeftRadius: d['raggio-controllo-interno'], borderTopRightRadius: d['raggio-controllo-interno'],
+            backgroundColor: c[!m.importo ? 'avanzamento-traccia' : m.attenzione ? 'avanzamento-attenzione' : 'avanzamento-accento'] }} />
+          <Testo stile={m.attuale ? 'dettaglio-forte' : 'dettaglio-normale'} colore={m.attuale ? 'testo-accento' : 'testo-secondario'}>{m.etichetta}</Testo>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ---- Riga obiettivo (proposta v2) ----
+// Un obiettivo nell'elenco per scadenza: quanto c'è, quanto manca, quanto versare al mese.
+export function RigaObiettivo({ nome, scadenza, messo, avanzamento, tonoBarra = 'accento', mancano, alMese, stato, icona, condiviso, onVersa, onApri }: {
+  nome: string; scadenza: string; messo: string; avanzamento: number; tonoBarra?: ToneAvanzamento; mancano: string; alMese: string;
+  stato: { testo: string; tono: Tono }; icona: string; condiviso?: boolean; onVersa: () => void; onApri: () => void;
+}) {
+  const numero = (etichetta: string, valore: string) => (
+    <View style={{ width: 120, alignItems: 'flex-end', gap: d['spazio-testo'] }}>
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{etichetta}</Testo><Testo stile="corpo-forte">{valore}</Testo>
+    </View>
+  );
+  return (
+    <RigaPremibile onPress={onApri} etichetta={nome}>
+      <Tessera icona={icona} misura="media" />
+      <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+          <Testo stile="corpo-forte" numberOfLines={1}>{nome}</Testo>
+          {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
+        </View>
+        <Testo stile="dettaglio-normale" colore="testo-secondario">{scadenza}</Testo>
+      </View>
+      <View style={{ width: 200, gap: d['spazio-testo'] }}>
+        <Barra valore={avanzamento} tono={tonoBarra} />
+        <Testo stile="dettaglio-normale" colore="testo-secondario">{messo}</Testo>
+      </View>
+      {numero('Mancano', mancano)}
+      {numero('Da versare al mese', alMese)}
+      <View style={{ width: 170, alignItems: 'flex-end' }}><Etichetta testo={stato.testo} tono={stato.tono} /></View>
+      <Pulsante etichetta="Versa" icona="plus" onPress={onVersa} />
+    </RigaPremibile>
+  );
+}
+
+// ---- Tabella di un portafoglio (proposta v4) ----
+// Tabella arrotondata: prima la voce (nome in evidenza, dettaglio piccolo sotto),
+// poi i numeri allineati a destra.
+export type RigaTabellaPortafoglio = { chiave: string; nome: string; dettaglio: string; prezzo: string; valore: string; guadagno: string; positivo: boolean; onApri?: () => void };
+export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe: RigaTabellaPortafoglio[]; titoloColonna?: string }) {
+  const { c } = useTema();
+  const num = (testo: string, w: number, stile: 'dettaglio-forte' | 'corpo-normale' | 'corpo-forte', colore: NomeColore) => (
+    <View style={{ width: w, alignItems: 'flex-end' }}><Testo stile={stile} colore={colore}>{testo}</Testo></View>
+  );
+  return (
+    <View style={{ borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-controllo'], overflow: 'hidden' }}>
+      <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], backgroundColor: c['sfondo-tenue'] }}>
+        <View style={{ flex: 1 }}><Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo></View>
+        {num('Prezzo oggi', 120, 'dettaglio-forte', 'testo-secondario')}{num('Valore', 130, 'dettaglio-forte', 'testo-secondario')}{num('Guadagno', 170, 'dettaglio-forte', 'testo-secondario')}
+      </View>
+      {righe.map((r, i) => (
+        <Pressable key={r.chiave} accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
+          style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-riga-v'], paddingHorizontal: d['margine-voce-h'],
+            borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+          <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+            <Testo stile="corpo-forte" numberOfLines={1}>{r.nome}</Testo>
+            <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{r.dettaglio}</Testo>
+          </View>
+          {num(r.prezzo, 120, 'corpo-normale', 'testo-secondario')}
+          {num(r.valore, 130, 'corpo-forte', 'testo-primario')}
+          {num(r.guadagno, 170, 'corpo-forte', r.positivo ? 'testo-ok' : 'testo-errore')}
+        </Pressable>
+      ))}
+    </View>
+  );
 }
 
 // ---- CMP-39 Scheda esposizione ----

@@ -57,7 +57,7 @@ async function pianoDelMese(db: PoolClient, p: Periodo) {
   };
   return {
     voci, spese, rate,
-    da_pagare: fisse.filter((s) => !s.uscita),
+    da_pagare: [...fisse, ...investimenti].filter((s) => !s.uscita),
     budget_dettaglio: budget,
   };
 }
@@ -69,6 +69,9 @@ async function riepilogoMese(db: PoolClient, p: Periodo) {
   const risparmio = resta + voci.investimenti;
   const pct = s > 0 ? Math.round((risparmio / s) * 1000) / 10 : null;
   const reali = await movimentiDel(db, p);
+  const pagate = new Set((await db.query<{ rata_id: string }>('select distinct rata_id from movimenti where rata_id = any($1) and data between $2 and $3',
+    [rate.map((r) => r.id), p.dal, p.al])).rows.map((x) => x.rata_id));
+  const rateDaPagare = rate.filter((r) => !pagate.has(r.id));
   const budgetResiduo = somma(budget_dettaglio, (b) => Math.max(0, Number(b.importo) - Number(b.speso ?? 0)) * b.mia_percentuale / 100);
   return {
     periodo: { mese: p.mese, dal: p.dal, al: p.al },
@@ -78,7 +81,8 @@ async function riepilogoMese(db: PoolClient, p: Periodo) {
     risparmio: cent(risparmio),
     risparmio_percentuale: pct,
     semaforo: semaforo(pct),
-    da_pagare: { numero: da_pagare.length, totale: cent(somma(da_pagare, (x) => Number(x.mia_quota))) },
+    // Da pagare: spese fisse e investimenti non spuntati, più le rate del mese non ancora pagate.
+    da_pagare: { numero: da_pagare.length + rateDaPagare.length, totale: cent(somma(da_pagare, (x) => Number(x.mia_quota)) + somma(rateDaPagare, (r) => Number(r.importo_rata))) },
     budget_residuo: cent(budgetResiduo),
     rate_del_mese: rate.length,
     reali: { entrate: cent(reali.entrate), uscite: cent(reali.uscite), saldo: cent(reali.entrate - reali.uscite) },

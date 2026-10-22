@@ -1,13 +1,13 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Barra, Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
-import { Campo, Tendina } from '../componenti/campi.tsx';
-import { Intestazione, RigaAvanzamento, Scheda, TestataObiettivo, TitoloGruppo, Vuoto } from '../componenti/composti.tsx';
+import { Esito, Interruttore, Pulsante, SceltaSegmenti, type Tono } from '../componenti/base.tsx';
+import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
+import { Intestazione, NumeroChiave, RigaAvanzamento, RigaObiettivo, Scheda, TitoloGruppo, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, leggi, modifica, useDati } from '../dati/api.ts';
-import type { Condivisione, Obiettivo, Persona, Traguardo } from '../dati/tipi.ts';
-import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, percento } from '../formato.ts';
+import type { Condivisione, ElencoSpese, Obiettivo, Persona, Traguardo } from '../dati/tipi.ts';
+import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, nomeMese, oggiIso, percento } from '../formato.ts';
 import { d, Testo } from '../tema/tema.tsx';
-import { Caricamento } from './comuni.tsx';
+import { Caricamento, fraMesi, prossimeAnnuali, ritmoObiettivo } from './comuni.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
 
 // SC-04 Obiettivi (decisione 20): obiettivi annidabili con sotto-obiettivi
@@ -15,97 +15,130 @@ import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
 
 const tuttiGliObiettivi = (xs: Obiettivo[]): Obiettivo[] => xs.flatMap((o) => [o, ...tuttiGliObiettivi(o.figli)]);
 const statoDi = (pct: number | null) => (pct === null ? 'in-corso' : pct >= 100 ? 'completo' : 'in-corso');
-const descrizione = (o: Obiettivo) => [o.scadenza ? `Entro ${data(o.scadenza)}` : 'Senza scadenza',
-  o.traguardo === null && o.figli.length ? 'traguardo = somma dei sotto-obiettivi' : null, o.crea_spesa ? 'crea la spesa al traguardo' : null].filter(Boolean).join(' · ');
 const valore = (o: Obiettivo) => (o.traguardo_effettivo ? `${euroTondi(o.saldo).replace(' €', '')} / ${euroTondi(o.traguardo_effettivo)}` : euro(o.saldo));
 
+// Gruppi per mese di scadenza, dal più vicino; in fondo quelli senza scadenza.
+function gruppiPerScadenza(xs: Obiettivo[]) {
+  const ordinati = [...xs].sort((a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999'));
+  const gruppi: { titolo: string; obiettivi: Obiettivo[] }[] = [];
+  for (const o of ordinati) {
+    const titolo = !o.scadenza ? 'Senza scadenza' : `${nomeMese(o.scadenza.slice(0, 7))} · ${fraMesi(o.scadenza)}`;
+    const g = gruppi.find((x) => x.titolo === titolo);
+    if (g) g.obiettivi.push(o); else gruppi.push({ titolo, obiettivi: [o] });
+  }
+  return gruppi;
+}
+
+function statoObiettivo(o: Obiettivo, mancaAnnuali?: number): { testo: string; tono: Tono } {
+  if (mancaAnnuali) return { testo: `Mancano ${euro(mancaAnnuali)} alle annuali`, tono: 'attenzione' };
+  if (o.traguardi.length) {
+    const coperti = o.traguardi.filter((t) => t.percentuale >= 100).length;
+    return { testo: `Copre ${coperti} su ${o.traguardi.length}`, tono: coperti === o.traguardi.length ? 'ok' : 'attenzione' };
+  }
+  if (o.percentuale !== null && o.percentuale >= 100) return { testo: 'Raggiunto', tono: 'ok' };
+  if (o.scadenza && o.scadenza < oggiIso()) return { testo: 'Scaduto', tono: 'errore' };
+  if (Number(o.saldo) <= 0) return { testo: 'Da iniziare', tono: 'neutro' };
+  return { testo: o.scadenza ? 'In corso' : 'Quando puoi', tono: o.scadenza ? 'accento' : 'neutro' };
+}
+
+// SC-04 Obiettivi (proposta v2): un solo elenco in ordine di scadenza. Per ognuno
+// quanto c'è, quanto manca e quanto versare al mese per arrivarci in tempo;
+// sotto-obiettivi aperti sotto il padre, traguardi di copertura in un riepilogo.
 export function Obiettivi() {
   const { dati, errore } = useDati<Obiettivo[]>('/obiettivi');
+  const spese = useDati<ElencoSpese>('/spese-previste').dati;
   const [modifica_, setModifica] = useState<{ obiettivo: Obiettivo | null; padre?: string } | null>(null);
   const [versa, setVersa] = useState<Obiettivo | null>(null);
   const [traguardo, setTraguardo] = useState<{ obiettivo: Obiettivo; traguardo: Traguardo | null } | null>(null);
+  const [aperti, setAperti] = useState<Set<string>>(new Set());
   if (!dati) return <Caricamento errore={errore} />;
 
-  const grandi = dati.filter((o) => o.figli.length || o.traguardi.length);
-  const piccoli = dati.filter((o) => !o.figli.length && !o.traguardi.length);
   const totale = dati.reduce((t, o) => t + Number(o.saldo), 0);
+  const mancanoTutto = dati.reduce((t, o) => t + (ritmoObiettivo(o).mancano ?? 0), 0);
+  const alMeseTutto = dati.reduce((t, o) => t + (ritmoObiettivo(o).alMese ?? 0), 0);
+  // Salvadanai delle spese annuali: quanto manca per le uscite dei prossimi mesi.
+  const annuali = spese ? prossimeAnnuali(spese.spese, dati) : null;
+  const mancaPer = (o: Obiettivo) => annuali?.elenco.filter((x) => x.s.obiettivo_id === o.id && x.copertura.tono === 'attenzione')
+    .reduce((t, x) => t + Number(x.copertura.testo.replace(/[^\d,]/g, '').replace(',', '.')), 0) || 0;
+  const apriChiudi = (id: string) => setAperti((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const azioni = (o: Obiettivo) => (
-    <>
-      <Pulsante etichetta="Versa" icona="plus" onPress={() => setVersa(o)} />
-      <Pulsante etichetta="Modifica" onPress={() => setModifica({ obiettivo: o })} />
-    </>
-  );
+  const riga = (o: Obiettivo) => {
+    const { traguardo: t, mancano, alMese } = ritmoObiettivo(o);
+    const stato = statoObiettivo(o, mancaPer(o));
+    const scad = [o.scadenza ? `Entro ${data(o.scadenza)}` : 'Senza scadenza', o.figli.length ? `${o.figli.length} sotto-obiettivi` : null,
+      o.traguardi.length ? `${o.traguardi.length} traguardi di copertura` : null, o.crea_spesa ? 'crea la spesa al traguardo' : null].filter(Boolean).join(' · ');
+    return (
+      <RigaObiettivo key={o.id} nome={o.nome} scadenza={scad} icona={o.traguardi.length ? 'shield-check' : 'target'} condiviso={o.condiviso}
+        messo={t !== null ? `${euro(o.saldo)} / ${euro(t)} · ${percento(o.percentuale)}` : euro(o.saldo)} avanzamento={o.percentuale ?? 0}
+        tonoBarra={stato.tono === 'attenzione' ? 'attenzione' : stato.tono === 'ok' ? 'ok' : 'accento'}
+        mancano={mancano === null ? '—' : euro(mancano)} alMese={alMese === null ? '—' : euro(alMese)} stato={stato}
+        onVersa={() => setVersa(o)} onApri={() => setModifica({ obiettivo: o })} />
+    );
+  };
 
   return (
     <>
-      <Intestazione titolo="Obiettivi" sottotitolo={`Messi da parte in tutto: ${euro(totale)} · un obiettivo può contenere sotto-obiettivi (ceste da riempire) o traguardi di copertura`}
+      <Intestazione titolo="Obiettivi" sottotitolo="In ordine di scadenza: per ognuno quanto manca e quanto versare al mese per arrivarci in tempo."
         azioni={<Pulsante tipo="primario" etichetta="Nuovo obiettivo" icona="plus" onPress={() => setModifica({ obiettivo: null })} />} />
-      {dati.length === 0 ? <Scheda><Vuoto testo="Nessun obiettivo. Comincia dal fondo di emergenza: un obiettivo senza scadenza, con i traguardi che vuoi coprire." /></Scheda> : null}
-      {grandi.map((o) => {
-        const coperti = o.traguardi.filter((t) => t.percentuale >= 100);
-        const primo = o.traguardi.find((t) => t.percentuale < 100);
-        return (
-          <Scheda key={o.id}>
-            <TestataObiettivo nome={o.nome} descrizione={descrizione(o)} valore={valore(o)} percentuale={percento(o.percentuale)} avanzamento={o.percentuale ?? 0}
-              condiviso={o.condiviso} icona={o.traguardi.length ? 'shield-check' : 'target'} tono={o.traguardi.length ? 'ok' : 'accento'} azioni={azioni(o)} />
-            {o.traguardi.length ? (
-              <View style={{ gap: d['spazio-testo'] }}>
-                <TitoloGruppo testo="Traguardi di copertura" />
-                <Testo stile="dettaglio-normale" colore="testo-secondario">Non ricevono soldi: dicono se l'obiettivo, così com'è, basta a coprire per intero ciascuna emergenza.</Testo>
-                <View style={{ gap: d['spazio-elenco'] }}>
-                  {o.traguardi.map((t) => <RigaAvanzamento key={t.id} nome={t.nome} importo={euroTondi(t.importo)} valore={t.percentuale} percentuale={t.percentuale >= 100 ? '100% ✓' : percento(t.percentuale)}
-                    stato={t.percentuale >= 100 ? 'completo' : 'attenzione'} icona="shield" onApri={() => setTraguardo({ obiettivo: o, traguardo: t })} />)}
-                </View>
-                <Esito tono={primo ? 'attenzione' : 'ok'} testo={primo
-                  ? `Copre per intero ${coperti.length} ${coperti.length === 1 ? 'traguardo' : 'traguardi'} su ${o.traguardi.length}. Per coprire anche "${primo.nome}" mancano ${euro(Number(primo.importo) - Number(o.saldo))}.`
-                  : 'Copre per intero tutti i traguardi.'} />
+      <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}>
+        <NumeroChiave etichetta="Messo da parte" valore={euro(totale)} icona="piggy-bank" nota={`In ${dati.length} ${dati.length === 1 ? 'obiettivo' : 'obiettivi'}`} />
+        <NumeroChiave etichetta="Mancano in tutto" valore={euro(mancanoTutto)} icona="target" nota="Ai traguardi di tutti gli obiettivi" />
+        <NumeroChiave etichetta="Da versare ogni mese" valore={euro(alMeseTutto)} icona="calendar-clock" nota="Per arrivare in tempo a tutte le scadenze" />
+      </View>
+      <Scheda>
+        {dati.length === 0 ? <Vuoto testo="Nessun obiettivo. Comincia dal fondo di emergenza: un obiettivo senza scadenza, con i traguardi che vuoi coprire." /> : (
+          <View style={{ gap: d['spazio-blocco'] }}>
+            {gruppiPerScadenza(dati).map((g) => (
+              <View key={g.titolo} style={{ gap: d['spazio-testo'] }}>
+                <TitoloGruppo testo={g.titolo} />
+                {g.obiettivi.map((o) => {
+                  const primo = o.traguardi.find((t) => t.percentuale < 100);
+                  const coperti = o.traguardi.filter((t) => t.percentuale >= 100).length;
+                  return (
+                    <View key={o.id} style={{ gap: d['spazio-testo'] }}>
+                      {riga(o)}
+                      {o.figli.length ? (
+                        <View style={{ paddingLeft: 56, gap: d['spazio-testo'] }}>
+                          {o.figli.map((f) => <RigaAvanzamento key={f.id} nome={f.nome} importo={valore(f)} valore={f.percentuale ?? 0} percentuale={f.percentuale !== null && f.percentuale >= 100 ? '100% ✓' : percento(f.percentuale)}
+                            stato={statoDi(f.percentuale)} icona="target" onApri={() => setVersa(f)} />)}
+                          <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta="Aggiungi sotto-obiettivo" icona="plus" onPress={() => setModifica({ obiettivo: null, padre: o.id })} /></View>
+                        </View>
+                      ) : null}
+                      {o.traguardi.length ? (
+                        <View style={{ paddingLeft: 56, gap: d['spazio-testo'] }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+                            <View style={{ flex: 1 }}>
+                              <Esito tono={primo ? 'attenzione' : 'ok'} testo={primo
+                                ? `Copre per intero ${coperti} ${coperti === 1 ? 'traguardo' : 'traguardi'} su ${o.traguardi.length}. Per coprire anche "${primo.nome}" mancano ${euro(Number(primo.importo) - Number(o.saldo))}.`
+                                : 'Copre per intero tutti i traguardi.'} />
+                            </View>
+                            <Pulsante tipo="testo" etichetta={aperti.has(o.id) ? 'Nascondi i traguardi' : 'Mostra i traguardi'} icona={aperti.has(o.id) ? 'chevron-up' : 'chevron-down'} onPress={() => apriChiudi(o.id)} />
+                          </View>
+                          {aperti.has(o.id) ? (
+                            <View style={{ gap: d['spazio-elenco'] }}>
+                              {o.traguardi.map((t) => <RigaAvanzamento key={t.id} nome={t.nome} importo={euroTondi(t.importo)} valore={t.percentuale} percentuale={t.percentuale >= 100 ? '100% ✓' : percento(t.percentuale)}
+                                stato={t.percentuale >= 100 ? 'completo' : 'attenzione'} icona="shield" onApri={() => setTraguardo({ obiettivo: o, traguardo: t })} />)}
+                              <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => setTraguardo({ obiettivo: o, traguardo: null })} /></View>
+                            </View>
+                          ) : null}
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
-            ) : null}
-            {o.figli.length ? (
-              <View style={{ gap: d['spazio-testo'] }}>
-                <TitoloGruppo testo="Sotto-obiettivi" />
-                <Testo stile="dettaglio-normale" colore="testo-secondario">Ceste con soldi propri: si versa in ciascuna, l'obiettivo ne fa la somma.</Testo>
-                <View style={{ gap: d['spazio-elenco'] }}>
-                  {o.figli.map((f) => <RigaAvanzamento key={f.id} nome={f.nome} importo={valore(f)} valore={f.percentuale ?? 0} percentuale={f.percentuale !== null && f.percentuale >= 100 ? '100% ✓' : percento(f.percentuale)}
-                    stato={statoDi(f.percentuale)} icona="target" onApri={() => setVersa(f)} />)}
-                </View>
-              </View>
-            ) : null}
-            <View style={{ flexDirection: 'row', gap: d['spazio-colonne'] }}>
-              <Pulsante tipo="testo" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => setTraguardo({ obiettivo: o, traguardo: null })} />
-              <Pulsante tipo="testo" etichetta="Aggiungi sotto-obiettivo" icona="plus" onPress={() => setModifica({ obiettivo: null, padre: o.id })} />
-            </View>
-          </Scheda>
-        );
-      })}
-      {piccoli.length ? (
-        <View style={{ gap: d['spazio-blocco'] }}>
-          {grandi.length ? <Testo stile="titolo-scheda">Altri obiettivi</Testo> : null}
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-blocco'] }}>
-            {piccoli.map((o) => (
-              <Scheda key={o.id} titolo={o.nome} icona="target" style={{ width: 268 }}
-                azione={o.condiviso ? <Testo stile="dettaglio-forte" colore="testo-accento">Condiviso</Testo> : undefined}>
-                <View style={{ gap: d['spazio-testo'] }}>
-                  <Testo stile="dettaglio-normale" colore="testo-secondario">{descrizione(o)}</Testo>
-                  <Testo stile="corpo-forte">{valore(o)}</Testo>
-                  <Barra valore={o.percentuale ?? 0} />
-                  <Testo stile="dettaglio-normale" colore="testo-secondario">{percento(o.percentuale)}</Testo>
-                </View>
-                <View style={{ flexDirection: 'row', gap: d['spazio-icona'] }}>{azioni(o)}</View>
-              </Scheda>
             ))}
           </View>
-        </View>
-      ) : null}
-      <FinestraObiettivo stato={modifica_} obiettivi={dati} onChiudi={() => setModifica(null)} />
+        )}
+      </Scheda>
+      <FinestraObiettivo stato={modifica_} obiettivi={dati} onChiudi={() => setModifica(null)} onTraguardo={(o) => { setModifica(null); setTraguardo({ obiettivo: o, traguardo: null }); }} />
       <FinestraVersa obiettivo={versa} onChiudi={() => setVersa(null)} />
       <FinestraTraguardo stato={traguardo} onChiudi={() => setTraguardo(null)} />
     </>
   );
 }
 
-function FinestraObiettivo({ stato, obiettivi, onChiudi }: { stato: { obiettivo: Obiettivo | null; padre?: string } | null; obiettivi: Obiettivo[]; onChiudi: () => void }) {
+function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo }: { stato: { obiettivo: Obiettivo | null; padre?: string } | null; obiettivi: Obiettivo[]; onChiudi: () => void; onTraguardo: (o: Obiettivo) => void }) {
   const o = stato?.obiettivo ?? null;
   const persone = useDati<Persona[]>(stato ? '/persone' : null).dati ?? [];
   const altra = persone.find((p) => !p.io);
@@ -149,7 +182,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi }: { stato: { obiettivo:
       <Tendina etichetta="Dentro un altro obiettivo" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" />
       <Affiancati>
         <Meta><Campo etichetta="Traguardo" valore={traguardo} onCambia={setTraguardo} segnaposto="Facoltativo" inputMode="decimal" aiuto={o?.figli.length ? 'Vuoto: la somma dei sotto-obiettivi' : undefined} /></Meta>
-        <Meta><Campo etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} segnaposto="GG/MM/AAAA, facoltativa" iconaPrima="calendar" /></Meta>
+        <Meta><CampoData facoltativa etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} /></Meta>
       </Affiancati>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" />
@@ -167,6 +200,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi }: { stato: { obiettivo:
           {condiviso && !altra && !o?.condiviso ? <Campo etichetta="Email dell'altra persona" valore={email} onCambia={setEmail} iconaPrima="mail" inputMode="email" /> : null}
         </>
       ) : null}
+      {o && !o.traguardi.length ? <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => onTraguardo(o)} /></View> : null}
     </FinestraModulo>
   );
 }
@@ -187,7 +221,7 @@ function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | null; o
       <SceltaSegmenti etichetta="Versa o preleva" larghezzaPiena valore={verso} onCambia={setVerso} opzioni={[{ valore: 'versa', testo: 'Metto via' }, { valore: 'preleva', testo: 'Prelevo' }]} />
       <Affiancati>
         <Meta><Campo etichetta="Importo" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus /></Meta>
-        <Meta><Campo etichetta="Data" valore={giorno} onCambia={setGiorno} iconaPrima="calendar" /></Meta>
+        <Meta><CampoData etichetta="Data" valore={giorno} onCambia={setGiorno} /></Meta>
       </Affiancati>
       {dettaglio?.versamenti?.length ? (
         <Voce etichetta="Ultimi movimenti dell'obiettivo">

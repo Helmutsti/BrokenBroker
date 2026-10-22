@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { SceltaSegmenti } from '../componenti/base.tsx';
-import { Campo, Tendina } from '../componenti/campi.tsx';
+import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
 import { cancella, crea, leggi, modifica } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Movimento } from '../dati/tipi.ts';
@@ -67,7 +67,7 @@ export function FinestraMovimento({ aperta, onChiudi, movimento }: { aperta: boo
       ) : null}
       <Affiancati>
         <Meta><Campo etichetta="Importo" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus={!movimento} disattivato={!!movimento?.trasferimento_id} /></Meta>
-        <Meta><Campo etichetta="Data" valore={data} onCambia={setData} segnaposto="GG/MM/AAAA" iconaPrima="calendar" /></Meta>
+        <Meta><CampoData etichetta="Data" valore={data} onCambia={setData} /></Meta>
       </Affiancati>
       {tipo === 'trasferimento' ? (
         <Affiancati>

@@ -80,3 +80,85 @@ export function Tendina<T extends string>({ etichetta, valore, opzioni, onCambia
     </View>
   );
 }
+
+// ---- Campo data con calendario (proposta v4) ----
+// Si sceglie il giorno da un calendario del mese invece di scriverlo. Riceve e
+// restituisce la data come testo GG/MM/AAAA, come il campo di testo.
+const MESI_CAL = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'];
+const GIORNI_CAL = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+const isoDa = (testo: string) => {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(testo.trim());
+  return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
+};
+const testoDa = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
+const oggiCal = () => { const o = new Date(); return `${o.getFullYear()}-${String(o.getMonth() + 1).padStart(2, '0')}-${String(o.getDate()).padStart(2, '0')}`; };
+
+export function CampoData({ etichetta, valore, onCambia, segnaposto = 'Scegli il giorno', aiuto, facoltativa, disattivato }: {
+  etichetta?: string; valore: string; onCambia: (v: string) => void; segnaposto?: string; aiuto?: string; facoltativa?: boolean; disattivato?: boolean;
+}) {
+  const { c } = useTema();
+  const ref = useRef<ComponentRef<typeof View>>(null);
+  const [aperta, setAperta] = useState<null | { x: number; y: number }>(null);
+  const scelto = isoDa(valore);
+  const [mese, setMese] = useState(() => (scelto ?? oggiCal()).slice(0, 7));
+  const apri = () => {
+    setMese((scelto ?? oggiCal()).slice(0, 7));
+    ref.current?.measureInWindow((x: number, y: number, _w: number, h: number) => {
+      // Se sotto non c'è posto il calendario si apre sopra il campo.
+      const alto = 340, sotto = y + h + 4;
+      setAperta({ x, y: typeof window !== 'undefined' && sotto + alto > window.innerHeight ? Math.max(8, y - alto - 4) : sotto });
+    });
+  };
+  const scegli = (iso: string | null) => { onCambia(iso ? testoDa(iso) : ''); setAperta(null); };
+  const [a, m] = mese.split('-').map(Number);
+  const primo = (new Date(Date.UTC(a, m - 1, 1)).getUTCDay() + 6) % 7;
+  const giorni = new Date(Date.UTC(a, m, 0)).getUTCDate();
+  const celle: (string | null)[] = [...Array(primo).fill(null), ...Array.from({ length: giorni }, (_, i) => `${mese}-${String(i + 1).padStart(2, '0')}`)];
+  while (celle.length % 7) celle.push(null);
+  const sposta = (n: number) => { const t = a * 12 + (m - 1) + n; setMese(`${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`); };
+  const oggi = oggiCal();
+  const leggibile = scelto ? `${Number(scelto.slice(8, 10))} ${MESI_CAL[Number(scelto.slice(5, 7)) - 1]} ${scelto.slice(0, 4)}` : null;
+  return (
+    <View style={{ gap: d['spazio-testo'], opacity: disattivato ? d['opacita-disattivato'] : 1 }}>
+      {etichetta ? <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo> : null}
+      <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`${etichetta ?? ''} ${leggibile ?? segnaposto}`} aria-expanded={!!aperta} disabled={disattivato} onPress={apri}
+        style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']),
+          borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+        <Icona nome="calendar" misura={16} />
+        <Testo numberOfLines={1} colore={leggibile ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{leggibile ?? segnaposto}</Testo>
+        <Icona nome="chevron-down" misura={16} />
+      </Pressable>
+      {aiuto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiuto}</Testo> : null}
+      <Modal transparent visible={!!aperta} onRequestClose={() => setAperta(null)}>
+        <Pressable accessibilityLabel="Chiudi il calendario" style={{ flex: 1 }} onPress={() => setAperta(null)}>
+          {aperta ? (
+            <Pressable onPress={() => {}} accessibilityRole="dialog" aria-label={`Calendario ${MESI_CAL[m - 1]} ${a}`}
+              style={{ position: 'absolute', left: aperta.x, top: aperta.y, width: 292, padding: d['margine-gruppo-controlli'] * 3, gap: d['spazio-testo'], backgroundColor: c['sfondo-scheda'],
+                borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as object}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Mese prima" onPress={() => sposta(-1)} style={{ padding: d['spazio-testo'] * 2 }}><Icona nome="chevron-left" misura={16} /></Pressable>
+                <Testo stile="corpo-forte" style={{ flex: 1, textAlign: 'center' }}>{`${MESI_CAL[m - 1].charAt(0).toUpperCase()}${MESI_CAL[m - 1].slice(1)} ${a}`}</Testo>
+                <Pressable accessibilityRole="button" accessibilityLabel="Mese dopo" onPress={() => sposta(1)} style={{ padding: d['spazio-testo'] * 2 }}><Icona nome="chevron-right" misura={16} /></Pressable>
+              </View>
+              <View style={{ flexDirection: 'row' }}>{GIORNI_CAL.map((g, i) => <Testo key={i} stile="dettaglio-forte" colore="testo-terziario" style={{ width: 38, textAlign: 'center' }}>{g}</Testo>)}</View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {celle.map((iso, i) => iso ? (
+                  <Pressable key={iso} accessibilityRole="button" accessibilityLabel={`${Number(iso.slice(8, 10))} ${MESI_CAL[m - 1]} ${a}`} aria-selected={iso === scelto} onPress={() => scegli(iso)}
+                    style={(s: StatoPressione) => ({ width: 38, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: d['raggio-controllo-interno'],
+                      backgroundColor: iso === scelto ? c['sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent',
+                      borderWidth: iso === oggi && iso !== scelto ? d['misura-bordo'] : 0, borderColor: c['bordo-focus'] })}>
+                    <Testo stile={iso === oggi || iso === scelto ? 'corpo-forte' : 'corpo-normale'} colore={iso === scelto ? 'testo-su-accento' : 'testo-primario'}>{String(Number(iso.slice(8, 10)))}</Testo>
+                  </Pressable>
+                ) : <View key={`v${i}`} style={{ width: 38, height: 34 }} />)}
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: d['spazio-testo'] }}>
+                <Pressable accessibilityRole="button" onPress={() => scegli(oggi)} style={{ padding: d['spazio-testo'] * 2 }}><Testo stile="corpo-forte" colore="testo-accento">Oggi</Testo></Pressable>
+                {facoltativa && scelto ? <Pressable accessibilityRole="button" onPress={() => scegli(null)} style={{ padding: d['spazio-testo'] * 2 }}><Testo colore="testo-secondario">Togli la data</Testo></Pressable> : null}
+              </View>
+            </Pressable>
+          ) : null}
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
