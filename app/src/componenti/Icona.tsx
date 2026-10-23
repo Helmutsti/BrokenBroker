@@ -13,7 +13,7 @@ import { useTema } from '../tema/tema.tsx';
 // Il nome è quello di Lucide (es. "house", "shopping-cart"), lo stesso salvato
 // nelle categorie del database. Solo queste icone finiscono nel pacchetto.
 
-export type Misura = 16 | 20 | 24;
+export type Misura = 12 | 16 | 20 | 24;
 
 const ICONE: Record<string, LucideIcon> = {
   'layout-dashboard': LayoutDashboard, 'calendar-check': CalendarCheck, target: Target, 'arrow-left-right': ArrowLeftRight, wallet: Wallet,
@@ -31,8 +31,9 @@ const ICONE: Record<string, LucideIcon> = {
   refrigerator: Refrigerator, 'shield-check': ShieldCheck, check: Check,
 };
 
-export function Icona({ nome, misura = 20, colore = 'icona-predefinita' }: { nome: string; misura?: Misura; colore?: NomeColore }) {
+// `tinta`: un colore di categoria (tavolozza fissa) al posto del colore da token.
+export function Icona({ nome, misura = 20, colore = 'icona-predefinita', tinta }: { nome: string; misura?: Misura; colore?: NomeColore; tinta?: string }) {
   const { c } = useTema();
   const Disegno = ICONE[nome] ?? Ellipsis;
-  return <Disegno size={misura} color={c[colore]} strokeWidth={2} aria-hidden />;
+  return <Disegno size={misura} color={tinta ?? c[colore]} strokeWidth={2} aria-hidden />;
 }

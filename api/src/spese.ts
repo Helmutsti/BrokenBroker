@@ -10,6 +10,8 @@ export type SpesaDelMese = {
   conto_id: string | null; conto: string | null; categoria_id: string | null; categoria: string | null;
   categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: 'fissa' | 'budget' | 'investimento'; attiva: boolean; note: string | null; obiettivo_id: string | null;
+  // La spesa "mettici da parte": spuntata, versa nel salvadanaio indicato.
+  alimenta_obiettivo_id: string | null;
   mia: boolean; condivisa: boolean; percentuale_scritta: string | null;
   pagato: string; movimento_id: string | null; speso: string | null;
   // calcolati
@@ -34,7 +36,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
                select k.id, k.padre_id, k.icona from categorie k join su on k.id = su.padre_id where su.icona is null)
              select icona from su where icona is not null limit 1) as icona,
             coalesce(c.colore, pc.colore) as colore,
-            s.tipo, s.attiva, s.note, s.obiettivo_id,
+            s.tipo, s.attiva, s.note, s.obiettivo_id, s.alimenta_obiettivo_id,
             s.proprietario_id = fp_me() as mia,
             exists (select 1 from condivisioni x where x.spesa_prevista_id = s.id) as condivisa,
             (select q.percentuale::text from quote q where q.spesa_prevista_id = s.id and q.utente_id = fp_me()) as percentuale_scritta,

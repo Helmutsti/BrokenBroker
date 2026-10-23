@@ -133,7 +133,8 @@ Ogni spazio ha un ruolo e il ruolo ha un solo valore. Più il legame è stretto,
 | misura/bordo · bordo-forte | 1 · 2 | spessore di contorni e linee; linee dei grafici e anello di focus |
 | misura/interruttore-larghezza · altezza | 36 · 20 | interruttore |
 | misura/pomello · pomello-margine | 16 · 2 | pomello dell'interruttore e spazio attorno |
-| misura/spunta | 20 | quadrato della spunta (la zona cliccabile resta `misura/bersaglio`) |
+| misura/spunta | 16 | quadrato della spunta (la zona cliccabile resta `misura/bersaglio`; era 20, ridotto su richiesta di Manuel il 2026-10-23) |
+| misura/segno-spunta | 12 | il segno ✓ dentro la spunta |
 | misura/avatar-piccolo · grande | 32 · 48 | avatar |
 | misura/rientro-albero · rientro-albero-doppio | 32 · 64 | rientro delle categorie di secondo e terzo livello |
 | opacita/disattivato | 45 % | componenti disattivati |

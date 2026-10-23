@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Esito, Pulsante, type StatoPressione } from '../componenti/base.tsx';
 import { Tendina } from '../componenti/campi.tsx';
-import { Intestazione, NumeroChiave, Scheda, Vuoto } from '../componenti/composti.tsx';
-import { modifica, useDati } from '../dati/api.ts';
+import { CifraModificabile, Intestazione, NumeroChiave, Scheda, Vuoto } from '../componenti/composti.tsx';
+import { crea, modifica, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { ElencoSpese, Obiettivo, Spesa } from '../dati/tipi.ts';
 import { euro, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
@@ -19,20 +19,23 @@ const mesiPassati = (da: string, a: string) => {
   return (a2 - a1) * 12 + (m2 - m1) - (g2 < g1 ? 1 : 0);
 };
 
-type RigaAnnuale = { s: Spesa; quando: string; ogni: number; passati: number; costa: number; dovrebbe: number; ce: number };
+type RigaAnnuale = { s: Spesa; quando: string; ogni: number; passati: number; costa: number; dovrebbe: number; ce: number; figlio: Obiettivo | null };
 
 // Le spese annuali si riempiono di un dodicesimo al mese fino alla scadenza: per
-// ognuna quanto dovrebbe esserci oggi, e i soldi del salvadanaio vanno prima alle
-// scadenze più vicine (decisione di Manuel, proposta v5).
-function riempimento(spese: Spesa[], saldo: number, oggi = oggiIso()) {
+// ognuna quanto dovrebbe esserci oggi. Una spesa con il suo sotto-obiettivo ha i
+// soldi di quel sotto-obiettivo; per le altre i soldi liberi del salvadanaio vanno
+// prima alle scadenze più vicine (decisione di Manuel, proposta v5).
+function riempimento(spese: Spesa[], liberi: number, figli: Obiettivo[], oggi = oggiIso()) {
   const righe: RigaAnnuale[] = spese.filter(eAnnuale).map((s) => {
     const quando = prossimaScadenza(s.prossima_scadenza, s.ogni_mesi, oggi)!;
     const ogni = s.ogni_mesi!, costa = Number(s.mia_quota);
     const passati = Math.max(0, Math.min(ogni, mesiPassati(aggiungiMesi(quando, -ogni), oggi)));
-    return { s, quando, ogni, passati, costa, dovrebbe: Math.round((costa * passati / ogni) * 100) / 100, ce: 0 };
+    const figlio = figli.find((f) => f.paga_spesa?.id === s.id) ?? null;
+    return { s, quando, ogni, passati, costa, dovrebbe: Math.round((costa * passati / ogni) * 100) / 100, ce: figlio ? Number(figlio.saldo) : 0, figlio };
   }).filter((x) => x.quando).sort((a, b) => a.quando.localeCompare(b.quando));
-  let resto = saldo;
-  for (const r of righe) { r.ce = Math.max(0, Math.min(r.dovrebbe, resto)); resto -= r.ce; }
+  let resto = liberi;
+  for (const r of righe) if (!r.figlio) { r.ce = Math.max(0, Math.min(r.dovrebbe, resto)); resto -= r.ce; }
+  const saldo = liberi + righe.reduce((t, r) => t + (r.figlio ? r.ce : 0), 0);
   const dovrebbe = righe.reduce((t, r) => t + r.dovrebbe, 0);
   return { righe, dovrebbe, indietro: Math.max(0, dovrebbe - saldo), inPiu: Math.max(0, saldo - dovrebbe), annuo: righe.reduce((t, r) => t + (r.costa * 12) / r.ogni, 0) };
 }
@@ -45,6 +48,7 @@ export function Salvadanai() {
   const sp = useDati<ElencoSpese>(`/spese-previste?mese=${rif.mese}`);
   const [spesa, setSpesa] = useState<Spesa | 'nuova' | null>(null);
   const [versa, setVersa] = useState<Obiettivo | null>(null);
+  const [errore, setErrore] = useState<string | null>(null);
   const profilo = rif.profilo;
   if (!ob.dati || !sp.dati || !profilo) return <Caricamento errore={ob.errore ?? sp.errore} />;
   const tutti = tuttiGliObiettivi(ob.dati);
@@ -52,25 +56,42 @@ export function Salvadanai() {
   const scelto = profilo.obiettivo_annuali ?? attive.find((s) => eAnnuale(s) && s.obiettivo_id)?.obiettivo_id ?? tutti.find((o) => /spese annuali/i.test(o.nome))?.id ?? null;
   const salvadanaio = tutti.find((o) => o.id === scelto) ?? null;
   const saldo = Number(salvadanaio?.saldo ?? 0);
-  const r = riempimento(attive, saldo);
-  const altri = ob.dati.filter((o) => o.id !== salvadanaio?.id);
-  const fondi = altri.filter((o) => o.traguardi.length), obiettivi = altri.filter((o) => !o.traguardi.length);
-  const somma = (xs: Obiettivo[]) => xs.reduce((t, o) => t + Number(o.saldo), 0);
-  const coperti = fondi.flatMap((o) => o.traguardi), copertiOk = coperti.filter((t) => t.percentuale >= 100).length;
+  // I soldi liberi sono quelli del salvadanaio fuori dai sotto-obiettivi delle spese.
+  const figliSpese = salvadanaio?.figli.filter((f) => f.paga_spesa) ?? [];
+  const r = riempimento(attive, saldo - figliSpese.reduce((t, f) => t + Number(f.saldo), 0), figliSpese);
+  const senzaSotto = r.righe.filter((x) => !x.figlio).length;
+  const dividi = async () => {
+    setErrore(null);
+    try { await crea(`/obiettivi/${salvadanaio!.id}/annuali`); } catch (e) { setErrore((e as Error).message); }
+  };
+  const nei = ob.dati.reduce((t, o) => t + Number(o.saldo), 0);
+  // Quanto entra ogni mese dalle voci "mettici da parte" in Spese (quelle annuali contano un dodicesimo).
+  const alimentati = tutti.filter((o) => o.alimentato_da);
+  const alMese = alimentati.reduce((t, o) => t + Number(o.alimentato_da!.importo) / (o.alimentato_da!.ogni_mesi ?? 1), 0);
 
   return (
     <>
       <Intestazione titolo="Salvadanai" sottotitolo="Quello che metti da parte: spese annuali, emergenze e obiettivi." />
       <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}>
-        <NumeroChiave etichetta="Per le spese annuali" valore={euro(saldo)} icona="calendar-clock" tono={r.indietro > 0.005 ? 'attenzione' : 'normale'}
-          nota={r.indietro > 0.005 ? `Oggi dovrebbero essere ${euro(r.dovrebbe)} · indietro di ${euro(r.indietro)}` : `In pari: oggi ne servono ${euro(r.dovrebbe)}`} />
-        <NumeroChiave etichetta="Fondo emergenza" valore={euro(somma(fondi))} icona="shield-check" nota={coperti.length ? `Copre ${copertiOk} emergenze su ${coperti.length}` : 'Nessun traguardo di copertura'} />
-        <NumeroChiave etichetta="Obiettivi" valore={euro(somma(obiettivi))} icona="target" nota={`In ${obiettivi.length} ${obiettivi.length === 1 ? 'obiettivo' : 'obiettivi'}`} />
+        <NumeroChiave etichetta="Nei salvadanai" valore={euro(nei)} icona="piggy-bank" nota={`In ${ob.dati.length} ${ob.dati.length === 1 ? 'salvadanaio' : 'salvadanai'}`} />
+        <NumeroChiave etichetta="Ogni mese in Spese" valore={euro(alMese)} icona="calendar-check"
+          nota={alimentati.length ? `Da ${alimentati.length} ${alimentati.length === 1 ? 'salvadanaio' : 'salvadanai'}` : 'Nessun salvadanaio è ancora una voce di Spese'} />
+        <NumeroChiave etichetta="Spese annuali" valore={r.indietro > 0.005 ? `Indietro di ${euro(r.indietro)}` : 'In pari'} icona="calendar-clock" tono={r.indietro > 0.005 ? 'attenzione' : 'normale'}
+          nota={`Oggi dovrebbero esserci ${euro(r.dovrebbe)}, ce ne sono ${euro(saldo)}`} />
       </View>
-      <Scheda titolo="Spese annuali" icona="calendar-clock" nota={`Ogni mese ci metti ${euro(r.annuo / 12)}`}
-        azione={salvadanaio ? <Pulsante tipo="testo" etichetta="Versa" icona="plus" onPress={() => setVersa(salvadanaio)} /> : undefined}>
+      <Scheda titolo={salvadanaio?.nome ?? 'Spese annuali'} icona="calendar-clock"
+        nota={salvadanaio?.alimentato_da ? `Ogni mese in Spese: ${euro(salvadanaio.alimentato_da.importo)}` : `Ogni mese ci vorrebbero ${euro(r.annuo / 12)}`}
+        azione={salvadanaio ? <CifraModificabile cifra={euro(saldo)} etichetta={`Cambia la cifra del salvadanaio: ${euro(saldo)}`} onPress={() => setVersa(salvadanaio)} /> : undefined}>
         <View style={{ gap: d['spazio-blocco'] }}>
-          {r.righe.length === 0 ? <Vuoto testo="Nessuna spesa annuale. Aggiungine una scegliendo «Ogni anno» o «Ogni N mesi»." /> : <TabellaAnnuali righe={r.righe} onApri={setSpesa} />}
+          {r.righe.length === 0 ? <Vuoto testo="Nessuna spesa annuale. Aggiungine una scegliendo «Ogni anno» o «Ogni N mesi»." />
+            : <TabellaAnnuali righe={r.righe} onApri={setSpesa} onCifra={(f) => setVersa(f)} />}
+          {errore ? <Esito tono="errore" testo={errore} /> : null}
+          {salvadanaio && senzaSotto ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+              <View style={{ flex: 1 }}><Esito tono="informazione" testo={`${senzaSotto === 1 ? 'Una spesa non ha' : `${senzaSotto} spese non hanno`} ancora il suo sotto-obiettivo: dividendo il salvadanaio, ogni spesa ha i suoi soldi e la sua data, e nasce la voce mensile in Spese che lo riempie.`} /></View>
+              <Pulsante etichetta="Dividi per spesa" icona="layers" onPress={dividi} />
+            </View>
+          ) : null}
           {r.righe.length ? (
             <Esito tono={r.indietro > 0.005 ? 'attenzione' : 'ok'} testo={r.indietro > 0.005
               ? `Ogni spesa si riempie di un dodicesimo al mese, così alla scadenza è pronta. Oggi dovrebbero esserci ${euro(r.dovrebbe)}, nel salvadanaio ce ne sono ${euro(saldo)}: sei indietro di ${euro(r.indietro)}. I soldi vanno prima alle scadenze più vicine.`
@@ -94,7 +115,7 @@ export function Salvadanai() {
 }
 
 // Tabella arrotondata come quella dei portafogli: prima la spesa, poi i numeri.
-function TabellaAnnuali({ righe, onApri }: { righe: RigaAnnuale[]; onApri: (s: Spesa) => void }) {
+function TabellaAnnuali({ righe, onApri, onCifra }: { righe: RigaAnnuale[]; onApri: (s: Spesa) => void; onCifra: (o: Obiettivo) => void }) {
   const { c } = useTema();
   const col = (testo: string, w: number, stile: 'dettaglio-forte' | 'corpo-normale' | 'corpo-forte', colore: NomeColore, sinistra = false) => (
     <View style={{ width: w, alignItems: sinistra ? 'flex-start' : 'flex-end' }}><Testo stile={stile} colore={colore}>{testo}</Testo></View>
@@ -117,7 +138,13 @@ function TabellaAnnuali({ righe, onApri }: { righe: RigaAnnuale[]; onApri: (s: S
             {col(`${nomeMeseMinuscolo(r.quando.slice(0, 7))}${anno} · ${r.passati} mesi su ${r.ogni}`, 220, 'corpo-normale', 'testo-secondario', true)}
             {col(euro(r.costa), 110, 'corpo-normale', 'testo-secondario')}
             {col(euro(r.dovrebbe), 140, 'corpo-normale', 'testo-secondario')}
-            {col(euro(r.ce), 110, 'corpo-forte', pari ? 'testo-ok' : 'testo-attenzione')}
+            {r.figlio ? (
+              // Con il suo sotto-obiettivo la cifra si cambia cliccandola, come negli altri salvadanai.
+              <Pressable accessibilityRole="button" accessibilityLabel={`Cambia la cifra di ${r.s.nome}: ${euro(r.ce)}`} onPress={() => onCifra(r.figlio!)}
+                style={(s: StatoPressione) => ({ width: 110, alignItems: 'flex-end', borderRadius: d['raggio-controllo-interno'], backgroundColor: s.hovered ? c['sfondo-tenue'] : 'transparent' })}>
+                <Testo stile="corpo-forte" colore={pari ? 'testo-ok' : 'testo-attenzione'}>{euro(r.ce)}</Testo>
+              </Pressable>
+            ) : col(euro(r.ce), 110, 'corpo-forte', pari ? 'testo-ok' : 'testo-attenzione')}
           </Pressable>
         );
       })}

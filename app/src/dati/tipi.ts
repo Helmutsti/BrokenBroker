@@ -18,6 +18,7 @@ export type Spesa = {
   id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; conto_id: string | null; conto: string | null;
   categoria_id: string | null; categoria: string | null; categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: TipoSpesa; attiva: boolean; note: string | null; obiettivo_id: string | null; mia: boolean; condivisa: boolean;
+  alimenta_obiettivo_id: string | null; // "mettici da parte": spuntata, versa in questo salvadanaio
   pagato: string; movimento_id: string | null; speso: string | null; scadenza: string | null; nel_mese: boolean; uscita: boolean;
   mia_percentuale: number; mia_quota: string; quota_mensile: string; quote?: { utente_id: string; nome: string; percentuale: string }[];
 };
@@ -29,6 +30,8 @@ export type Obiettivo = {
   id: string; padre_id: string | null; nome: string; traguardo: string | null; scadenza: string | null; crea_spesa: boolean; spesa_creata_id: string | null;
   mio: boolean; condiviso: boolean; versato: string; saldo: string; traguardo_effettivo: string | null; percentuale: number | null;
   traguardi: Traguardo[]; figli: Obiettivo[];
+  paga_spesa: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string } | null;
+  alimentato_da: { id: string; importo: string; ogni_mesi: number | null; conto_id: string | null } | null;
   versamenti?: { id: string; data: string; importo: string; utente: string }[];
 };
 

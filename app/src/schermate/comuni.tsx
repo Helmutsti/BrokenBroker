@@ -67,8 +67,9 @@ export const segnoQuota = (s: Spesa) => (s.mia_percentuale === 50 ? ' · ½' : s
 
 export const tuttiGliObiettivi = (xs: Obiettivo[]): Obiettivo[] => xs.flatMap((o) => [o, ...tuttiGliObiettivi(o.figli)]);
 
-// Spese annuali o periodiche: escono ogni N mesi (N > 1), budget esclusi.
-export const eAnnuale = (s: Spesa) => s.attiva && s.tipo !== 'budget' && s.ogni_mesi !== null && s.ogni_mesi > 1;
+// Spese annuali o periodiche: escono ogni N mesi (N > 1), budget esclusi; non le
+// spese "mettici da parte", che riempiono un salvadanaio invece di uscire.
+export const eAnnuale = (s: Spesa) => s.attiva && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1;
 
 export type ScadenzaAnnuale = { s: Spesa; quando: string; copertura: { testo: string; tono: Tono } };
 
@@ -123,6 +124,31 @@ export const fraMesi = (scadenza: string) => {
   const n = mesiFino(scadenza) - 1;
   return n <= 0 ? 'questo mese' : n === 1 ? 'fra 1 mese' : `fra ${n} mesi`;
 };
+
+// Quanto mettere da parte per arrivare al traguardo in tempo: al mese (quanto manca
+// diviso i mesi rimasti) o all'anno (diviso gli anni rimasti, almeno uno). Per un
+// obiettivo con sotto-obiettivi è la somma di quanto serve a ciascuno; senza
+// scadenza non c'è proposta.
+export function proposta(o: Obiettivo, ogni: 1 | 12): number | null {
+  if (o.figli.length) {
+    const parti = o.figli.map((f) => proposta(f, ogni)).filter((x): x is number => x !== null);
+    return parti.length ? parti.reduce((t, x) => t + x, 0) : null;
+  }
+  const { mancano } = ritmoObiettivo(o);
+  if (mancano === null || !o.scadenza || o.scadenza < oggiIso()) return null;
+  const mesi = mesiFino(o.scadenza);
+  return ogni === 1 ? mancano / mesi : mancano / Math.max(1, Math.ceil(mesi / 12));
+}
+
+// Come si divide una cifra che entra in un salvadanaio con sotto-obiettivi: come fa l'API,
+// in proporzione a quanto serve a ciascuno al mese, al massimo quanto gli manca; il resto
+// resta nel salvadanaio.
+const bisogno = (o: Obiettivo): number => { const { mancano, alMese } = ritmoObiettivo(o); return alMese ?? mancano ?? 0; };
+export function divisioneTraSotto(o: Obiettivo, importo: number) {
+  const tot = o.figli.reduce((t, f) => t + bisogno(f), 0);
+  const parti = o.figli.map((f) => ({ obiettivo: f, importo: tot > 0 ? Math.min(importo * bisogno(f) / tot, ritmoObiettivo(f).mancano ?? Infinity) : 0 }));
+  return { parti, resto: Math.max(0, importo - parti.reduce((t, p) => t + p.importo, 0)) };
+}
 
 // Quanto manca al traguardo e quanto versare ogni mese per arrivarci in tempo.
 export function ritmoObiettivo(o: Obiettivo) {

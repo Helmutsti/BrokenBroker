@@ -4,6 +4,7 @@ import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodoRichiesto } from '../periodo.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
+import { dividiVersamento } from './obiettivi.ts';
 
 export const rotteSpese = Router();
 
@@ -50,6 +51,7 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     attiva: v.booleano(c, 'attiva'),
     note: v.annullabile(c, 'note', () => v.testo(c, 'note', false, 500)),
     obiettivo_id: v.annullabile(c, 'obiettivo_id', () => v.id(c, 'obiettivo_id')),
+    alimenta_obiettivo_id: v.annullabile(c, 'alimenta_obiettivo_id', () => v.id(c, 'alimenta_obiettivo_id')),
   };
 }
 
@@ -113,6 +115,13 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     if (s.obiettivo_id) {
       await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, spunta_id) values ($1, fp_me(), $2, $3, $4)',
         [s.obiettivo_id, data, `-${s.mia_quota}`, spunta.id]);
+    }
+    // "Mettici da parte": la cifra entra nel salvadanaio, divisa tra i sotto-obiettivi.
+    if (s.alimenta_obiettivo_id) {
+      for (const { obiettivo_id, importo } of await dividiVersamento(db, s.alimenta_obiettivo_id, Number(s.mia_quota))) {
+        await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, spunta_id) values ($1, fp_me(), $2, $3, $4)',
+          [obiettivo_id, data, importo, spunta.id]);
+      }
     }
     return spunta;
   });

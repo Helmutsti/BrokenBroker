@@ -184,7 +184,7 @@ export function Spunta({ fatta, onPress, etichetta, disattivato }: { fatta: bool
         <View style={{ width: d['misura-spunta'], height: d['misura-spunta'], borderRadius: d['raggio-controllo-interno'], alignItems: 'center', justifyContent: 'center',
           backgroundColor: fatta ? c[s.hovered ? 'sfondo-accento-hover' : 'sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent',
           borderWidth: fatta ? 0 : d['misura-bordo-forte'], borderColor: c['bordo-controllo'] }}>
-          {fatta ? <Icona nome="check" misura={16} colore="icona-su-accento" /> : null}
+          {fatta ? <Icona nome="check" misura={d['misura-segno-spunta']} colore="icona-su-accento" /> : null}
         </View>
       )}
     </Pressable>

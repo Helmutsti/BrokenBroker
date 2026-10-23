@@ -1,9 +1,9 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Modal, Pressable, ScrollView, View } from 'react-native';
 import Svg, { Line, Polyline } from 'react-native-svg';
 import { euro, nomeMese, spostaMese } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { nomeColoreCategoria, ombre, type NomeColore } from '../tema/token.ts';
+import { nomeColoreCategoria, ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
 import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
 import { Icona } from './Icona.tsx';
 
@@ -133,6 +133,22 @@ export function TitoloGruppo({ testo, destra }: { testo: string; destra?: string
   );
 }
 
+// Gruppo di una categoria: l'icona passa dalle righe al gruppo, in una tessera nel
+// colore della categoria (fondo tenue, icona piena); senza colore la tessera è neutra.
+export function TitoloCategoria({ nome, icona, colore, destra }: { nome: string; icona: string; colore: string | null; destra?: string }) {
+  const { c } = useTema();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>
+      <View style={{ width: d['misura-bersaglio'], height: d['misura-bersaglio'], borderRadius: d['raggio-controllo-interno'], alignItems: 'center', justifyContent: 'center',
+        backgroundColor: colore ? tintaCategoria(colore) : c['sfondo-tenue'] }}>
+        <Icona nome={icona} misura={16} tinta={colore ?? undefined} />
+      </View>
+      <Testo stile="corpo-forte" style={{ flex: 1 }} numberOfLines={1}>{nome}</Testo>
+      {destra ? <Testo stile="corpo-forte">{destra}</Testo> : null}
+    </View>
+  );
+}
+
 // Riga premibile con evidenza al passaggio del mouse.
 function RigaPremibile({ onPress, children, linea, etichetta, padding = 'margine-riga-v' }: { onPress?: () => void; children: ReactNode; linea?: boolean; etichetta?: string; padding?: 'margine-riga-v' | 'margine-voce-v' }) {
   const { c } = useTema();
@@ -145,31 +161,59 @@ function RigaPremibile({ onPress, children, linea, etichetta, padding = 'margine
 const Col = ({ w, children, destra }: { w: number; children: ReactNode; destra?: boolean }) => <View style={{ width: w, alignItems: destra ? 'flex-end' : 'flex-start' }}>{children}</View>;
 
 // ---- CMP-24 Voce da spuntare ----
-export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatta, onSpunta, onApri }: { nome: string; conto: string; importo: string; sottoImporto?: string; icona: string; fatta: boolean; onSpunta?: () => void; onApri?: () => void }) {
+// Senza `icona` la riga sta in un gruppo di categoria, che ha l'icona. Con `dettaglio`
+// la riga si apre (parte chiusa) e mostra sotto le sue parti, che non si spuntano.
+export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatta, onSpunta, onApri, dettaglio }: {
+  nome: string; conto: string; importo: string; sottoImporto?: string; icona?: string | null; fatta: boolean; onSpunta?: () => void; onApri?: () => void;
+  dettaglio?: { etichetta: string; righe: { nome: string; importo: string }[]; nota?: string };
+}) {
+  const { c } = useTema();
+  const [aperta, setAperta] = useState(false);
   const col: NomeColore = fatta ? 'testo-secondario' : 'testo-primario';
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
-      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-        <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
-        <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} />
-        <Pressable onPress={onApri} disabled={!onApri} style={{ flex: 1 }}><Testo colore={col} numberOfLines={1}>{nome}</Testo></Pressable>
+    <View style={{ gap: d['spazio-elenco'] }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+          <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
+          {icona ? <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} /> : null}
+          <Pressable onPress={onApri} disabled={!onApri} style={{ flexShrink: 1 }}><Testo colore={col} numberOfLines={1}>{nome}</Testo></Pressable>
+          {dettaglio ? (
+            <Pressable accessibilityRole="button" aria-expanded={aperta} accessibilityLabel={`${aperta ? 'Chiudi' : 'Apri'} ${dettaglio.etichetta}`} onPress={() => setAperta(!aperta)}
+              style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], paddingVertical: d['margine-etichetta-v'],
+                borderRadius: d['raggio-controllo-interno'], backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
+              <Testo stile="dettaglio-normale" colore="testo-secondario">{dettaglio.etichetta}</Testo>
+              <Icona nome={aperta ? 'chevron-up' : 'chevron-down'} misura={16} colore="icona-tenue" />
+            </Pressable>
+          ) : null}
+        </View>
+        <Col w={140}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
+        <Col w={110} destra><Testo stile="corpo-forte" colore={col}>{importo}</Testo>{sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottoImporto}</Testo> : null}</Col>
       </View>
-      <Col w={140}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
-      <Col w={110} destra><Testo stile="corpo-forte" colore={col}>{importo}</Testo>{sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottoImporto}</Testo> : null}</Col>
+      {dettaglio && aperta ? (
+        <View style={{ gap: d['spazio-elenco'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'] }}>
+          {dettaglio.righe.map((r) => (
+            <View key={r.nome} style={{ flexDirection: 'row', gap: d['spazio-colonne'] }}>
+              <Testo colore="testo-secondario" style={{ flex: 1 }} numberOfLines={1}>{r.nome}</Testo>
+              <Testo colore="testo-secondario">{r.importo}</Testo>
+            </View>
+          ))}
+          {dettaglio.nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{dettaglio.nota}</Testo> : null}
+        </View>
+      ) : null}
     </View>
   );
 }
 
 // ---- CMP-25 Voce budget ----
 export type StatoBudget = 'normale' | 'attenzione' | 'superato';
-export function VoceBudget({ nome, nota, conto, importo, icona, valore, stato, onApri }: { nome: string; nota: string; conto: string; importo: string; icona: string; valore: number; stato: StatoBudget; onApri?: () => void }) {
+export function VoceBudget({ nome, nota, conto, importo, icona, valore, stato, onApri }: { nome: string; nota: string; conto: string; importo: string; icona?: string | null; valore: number; stato: StatoBudget; onApri?: () => void }) {
   const tono: ToneAvanzamento = stato === 'normale' ? 'accento' : stato === 'attenzione' ? 'attenzione' : 'errore';
   const colNota: NomeColore = stato === 'normale' ? 'testo-secondario' : stato === 'attenzione' ? 'testo-attenzione' : 'testo-errore';
   return (
     <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <View style={{ width: d['misura-bersaglio'], alignItems: 'center' }}><Anello valore={valore} tono={tono} /></View>
-        <Icona nome={icona} misura={16} />
+        {icona ? <Icona nome={icona} misura={16} /> : null}
         <View style={{ flex: 1, gap: d['spazio-testo'] }}>
           <Testo>{nome}</Testo>
           <Barra valore={valore} tono={tono} />
@@ -487,11 +531,24 @@ export function CalendarioAnnuali({ mesi, altezza = 80 }: { mesi: { etichetta: s
   );
 }
 
+// La cifra di un salvadanaio, grande e premibile: apre la finestra per cambiarla.
+export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string; etichetta: string; onPress: () => void }) {
+  const { c } = useTema();
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={etichetta} onPress={onPress}
+      style={(s: StatoPressione) => [{ paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
+        backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
+      <Testo stile="numero-grande">{cifra}</Testo>
+    </Pressable>
+  );
+}
+
 // ---- Riga obiettivo (proposta v2) ----
 // Un obiettivo nell'elenco per scadenza: quanto c'è, quanto manca, quanto versare al mese.
-export function RigaObiettivo({ nome, scadenza, messo, avanzamento, tonoBarra = 'accento', mancano, alMese, stato, icona, condiviso, onVersa, onApri }: {
-  nome: string; scadenza: string; messo: string; avanzamento: number; tonoBarra?: ToneAvanzamento; mancano: string; alMese: string;
-  stato: { testo: string; tono: Tono }; icona: string; condiviso?: boolean; onVersa: () => void; onApri: () => void;
+// La cifra messa da parte è in grande e si cambia cliccandola (al posto di "Versa").
+export function RigaObiettivo({ nome, scadenza, messo, cifra, avanzamento, tonoBarra = 'accento', mancano, alMese, stato, icona, condiviso, onCifra, onApri }: {
+  nome: string; scadenza: string; messo: string; cifra: string; avanzamento: number; tonoBarra?: ToneAvanzamento; mancano: string; alMese: string;
+  stato: { testo: string; tono: Tono }; icona: string; condiviso?: boolean; onCifra: () => void; onApri: () => void;
 }) {
   const numero = (etichetta: string, valore: string) => (
     <View style={{ width: 120, alignItems: 'flex-end', gap: d['spazio-testo'] }}>
@@ -515,7 +572,7 @@ export function RigaObiettivo({ nome, scadenza, messo, avanzamento, tonoBarra = 
       {numero('Mancano', mancano)}
       {numero('Da versare al mese', alMese)}
       <View style={{ width: 170, alignItems: 'flex-end' }}><Etichetta testo={stato.testo} tono={stato.tono} /></View>
-      <Pulsante etichetta="Versa" icona="plus" onPress={onVersa} />
+      <View style={{ width: 150, alignItems: 'flex-end' }}><CifraModificabile cifra={cifra} etichetta={`Cambia la cifra di ${nome}: ${cifra}`} onPress={onCifra} /></View>
     </RigaPremibile>
   );
 }

@@ -2,7 +2,8 @@ import { Router } from 'express';
 import type { PoolClient } from 'pg';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { oggi } from '../periodo.ts';
+import { aggiungiMesi, mesiTra, oggi, periodoRichiesto } from '../periodo.ts';
+import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
 
 // Obiettivi annidabili (decisione 20) con versamenti, traguardi di copertura e
@@ -15,8 +16,21 @@ type Nodo = {
   crea_spesa: boolean; spesa_creata_id: string | null; mio: boolean; condiviso: boolean; versato: string;
   saldo?: string; traguardo_effettivo?: string | null; percentuale?: number | null;
   traguardi?: { id: string; nome: string; importo: string; ordine: number; percentuale: number }[];
+  // La spesa annuale che questo obiettivo paga: traguardo e scadenza vengono da lei.
+  paga_spesa?: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string } | null;
+  // La spesa "mettici da parte" che riempie l'obiettivo.
+  alimentato_da?: { id: string; importo: string; ogni_mesi: number | null; conto_id: string | null } | null;
   figli: Nodo[];
 };
+
+// Prossima uscita da `da` di una voce che parte da `prima` e si ripete ogni `ogni` mesi.
+function prossimaUscita(prima: string | null, ogni: number, da: string): string {
+  let q = prima ?? da;
+  for (let k = 1; q < da && k < 2400; k++) q = aggiungiMesi(prima ?? da, k * ogni);
+  return q;
+}
+// Mesi da oggi alla scadenza, almeno 1: il mese della scadenza conta.
+const mesiFino = (scadenza: string, da: string) => Math.max(1, mesiTra(da, scadenza) + 1);
 
 const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 const percento = (parte: number, tutto: number) => Math.min(100, Math.round((parte / tutto) * 100));
@@ -34,7 +48,21 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
        from obiettivi o order by o.nome`)).rows;
   const traguardi = (await db.query(
     `select id, obiettivo_id, nome, importo::text as importo, ordine from traguardi_copertura order by ordine, importo`)).rows;
-  const perId = new Map(nodi.map((n) => [n.id, { ...n, figli: [] as Nodo[] }]));
+  const collegate = (await db.query<{ id: string; nome: string; obiettivo_id: string | null; alimenta_obiettivo_id: string | null; ogni_mesi: number | null;
+    prossima_scadenza: string | null; importo: string; conto_id: string | null }>(
+    `select id, nome, obiettivo_id, alimenta_obiettivo_id, ogni_mesi, prossima_scadenza, importo::text as importo, conto_id from spese_previste
+      where attiva and (alimenta_obiettivo_id is not null or (obiettivo_id is not null and ogni_mesi > 1 and tipo <> 'budget'))`)).rows;
+  const oggiQui = oggi();
+  const perId = new Map(nodi.map((n) => {
+    const paga = collegate.find((s) => s.obiettivo_id === n.id && s.ogni_mesi && s.ogni_mesi > 1);
+    const alim = collegate.find((s) => s.alimenta_obiettivo_id === n.id);
+    const nodo: Nodo = { ...n, figli: [],
+      paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui) } : null,
+      alimentato_da: alim ? { id: alim.id, importo: alim.importo, ogni_mesi: alim.ogni_mesi, conto_id: alim.conto_id } : null };
+    // Un salvadanaio di una spesa annuale si prepara per la prossima uscita, del suo importo.
+    if (nodo.paga_spesa) { nodo.scadenza = nodo.paga_spesa.prossima; if (nodo.traguardo === null) nodo.traguardo = nodo.paga_spesa.importo; }
+    return [n.id, nodo];
+  }));
   const radici: Nodo[] = [];
   for (const n of perId.values()) {
     const padre = n.padre_id ? perId.get(n.padre_id) : undefined;
@@ -54,6 +82,32 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
   };
   radici.forEach(calcola);
   return radici;
+}
+
+// Quanto serve ogni mese a un obiettivo per arrivare al traguardo in tempo
+// (senza scadenza: tutto quello che manca, come peso).
+function bisogno(n: Nodo, da: string): number {
+  const manca = n.traguardo_effettivo === null ? 0 : Math.max(0, Number(n.traguardo_effettivo) - Number(n.saldo));
+  return n.scadenza && n.scadenza >= da ? manca / mesiFino(n.scadenza, da) : manca;
+}
+
+// Un versamento in un obiettivo con sotto-obiettivi si divide tra loro in
+// proporzione a quanto serve a ciascuno ogni mese, senza superare quanto gli
+// manca; il resto resta nell'obiettivo. Senza sotto-obiettivi va tutto lì.
+export async function dividiVersamento(db: PoolClient, id: string, importo: number): Promise<{ obiettivo_id: string; importo: string }[]> {
+  const n = trova(await alberoObiettivi(db), id);
+  if (!n || !n.figli.length || importo <= 0) return [{ obiettivo_id: id, importo: cent(importo) }];
+  const da = oggi();
+  const pesi = n.figli.map((f) => ({ f, peso: bisogno(f, da), manca: f.traguardo_effettivo === null ? 0 : Math.max(0, Number(f.traguardo_effettivo) - Number(f.saldo)) }));
+  const totale = pesi.reduce((t, x) => t + x.peso, 0);
+  const parti: { obiettivo_id: string; importo: string }[] = [];
+  let resto = Math.round(importo * 100);
+  if (totale > 0) for (const x of pesi) {
+    const centesimi = Math.min(resto, Math.round(x.manca * 100), Math.round((importo * x.peso / totale) * 100));
+    if (centesimi > 0) { parti.push({ obiettivo_id: x.f.id, importo: (centesimi / 100).toFixed(2) }); resto -= centesimi; }
+  }
+  if (resto > 0) parti.push({ obiettivo_id: id, importo: (resto / 100).toFixed(2) });
+  return parti;
 }
 
 function trova(radici: Nodo[], id: string): Nodo | undefined {
@@ -158,8 +212,12 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
   if (Number(importo) === 0) throw new ErroreApi(400, "L'importo non può essere zero");
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
     if (!(await db.query('select 1 from obiettivi where id = $1', [id])).rowCount) throw nonTrovato('Obiettivo');
-    await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo) values ($1, fp_me(), coalesce($2::date, current_date), $3)',
-      [id, v.data(c, 'data') ?? null, importo]);
+    // Con dividi = true un versamento positivo si divide tra i sotto-obiettivi.
+    const parti = v.booleano(c, 'dividi') && Number(importo) > 0 ? await dividiVersamento(db, id, Number(importo)) : [{ obiettivo_id: id, importo }];
+    for (const x of parti) {
+      await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo) values ($1, fp_me(), coalesce($2::date, current_date), $3)',
+        [x.obiettivo_id, v.data(c, 'data') ?? null, x.importo]);
+    }
     await creaSpeseRaggiunte(db, id);
     return trova(await alberoObiettivi(db), id);
   });
@@ -174,6 +232,51 @@ rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
     throw visibile ? new ErroreApi(403, "Può cancellarlo chi l'ha fatto o il proprietario dell'obiettivo") : nonTrovato('Versamento');
   });
   res.status(204).end();
+});
+
+// Il salvadanaio delle spese annuali diviso per spesa: per ogni spesa annuale o
+// periodica ancora senza salvadanaio nasce un sotto-obiettivo che la paga (traguardo
+// e scadenza vengono dalla spesa). I soldi già messi da parte vanno ai sotto-obiettivi
+// come se si fossero riempiti di un dodicesimo al mese, prima le scadenze più vicine.
+// Se manca, nasce la spesa mensile che riempie il salvadanaio (somma dei dodicesimi).
+rotteObiettivi.post('/:id/annuali', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
+    const padre = trova(await alberoObiettivi(db), id);
+    if (!padre) throw nonTrovato('Obiettivo');
+    if (!padre.mio) throw new ErroreApi(403, "Solo chi ha creato l'obiettivo può dividerlo");
+    const da = oggi();
+    const spese = (await speseDelMese(db, await periodoRichiesto(db, undefined)))
+      .filter((s) => s.attiva && s.mia && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1 && (!s.obiettivo_id || s.obiettivo_id === id));
+    const nuove: { figlio: string; quando: string; dovrebbe: number }[] = [];
+    for (const s of spese) {
+      const figlio = (await db.query<{ id: string }>(
+        'insert into obiettivi (proprietario_id, nome, padre_id, traguardo) values (fp_me(), $1, $2, $3) returning id', [s.nome, id, s.mia_quota])).rows[0].id;
+      await db.query('update spese_previste set obiettivo_id = $2 where id = $1', [s.id, figlio]);
+      const quando = prossimaUscita(s.prossima_scadenza, s.ogni_mesi!, da);
+      const passati = Math.max(0, Math.min(s.ogni_mesi!, mesiTra(aggiungiMesi(quando, -s.ogni_mesi!), da) - (Number(da.slice(8)) < Number(quando.slice(8)) ? 1 : 0)));
+      nuove.push({ figlio, quando, dovrebbe: Math.round(Number(s.mia_quota) * passati / s.ogni_mesi! * 100) / 100 });
+    }
+    let resto = Math.max(0, Number(padre.versato));
+    for (const x of nuove.sort((a, b) => a.quando.localeCompare(b.quando))) {
+      const parte = Math.min(resto, x.dovrebbe);
+      if (parte <= 0) continue;
+      await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo) values ($1, fp_me(), $2, $3), ($4, fp_me(), $2, $5)',
+        [id, da, (-parte).toFixed(2), x.figlio, parte.toFixed(2)]);
+      resto -= parte;
+    }
+    const aggiornato = trova(await alberoObiettivi(db), id)!;
+    const tutte = (await speseDelMese(db, await periodoRichiesto(db, undefined))).filter((s) => s.attiva && s.ogni_mesi && s.ogni_mesi > 1 && s.obiettivo_id
+      && s.obiettivo_id !== id && trova([aggiornato], s.obiettivo_id));
+    const alMese = tutte.reduce((t, s) => t + Number(s.mia_quota) / s.ogni_mesi!, 0);
+    if (!padre.alimentato_da && alMese > 0) {
+      await db.query(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, tipo, alimenta_obiettivo_id)
+                      values (fp_me(), $1, $2, 1, 'investimento', $3)`, [padre.nome, cent(alMese), id]);
+    }
+    await db.query('update utenti set obiettivo_annuali = $1 where id = fp_me()', [id]);
+    return trova(await alberoObiettivi(db), id);
+  });
+  res.json(obiettivo);
 });
 
 // Traguardi di copertura.

@@ -19,10 +19,11 @@ import { Salvadanai } from './schermate/Salvadanai.tsx';
 import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
 // Sezioni della barra laterale (flussi.md): l'ordine è quello delle bozze approvate.
-// Proposta v5: le sezioni dei 3 fogli dell'Excel (Mese, Salvadanai, Investimenti) più
+// Proposta v5: le sezioni dei 3 fogli dell'Excel (Spese, Salvadanai, Investimenti) più
 // Categorie. Conti, Movimenti e Analisi restano raggiungibili da Impostazioni.
+// La sezione delle spese del mese si chiama "Spese" (richiesta di Manuel, prima "Mese").
 const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element; nascosta?: boolean })[] = [
-  { chiave: 'mese', testo: 'Mese', icona: 'calendar-check', percorso: '', schermata: Panoramica },
+  { chiave: 'mese', testo: 'Spese', icona: 'calendar-check', percorso: '', schermata: Panoramica },
   { chiave: 'salvadanai', testo: 'Salvadanai', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
   { chiave: 'investimenti', testo: 'Investimenti', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
   { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },

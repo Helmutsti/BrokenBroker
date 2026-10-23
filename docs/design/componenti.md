@@ -413,7 +413,7 @@ Il fondo dei controlli tenui (segmenti, riquadri) non è mai uguale alla superfi
 ### Varianti e dimensioni
 - **Valore:** Fatta (quadratino `sfondo/accento` con segno "check" 16 in `icona/su-accento`) · Da fare (fondo `sfondo/scheda`, contorno `bordo/controllo` 2 px).
 - **Stato:** Default, Hover (`sfondo/hover` sulla zona cliccabile), Focus (anello), Disattivato. In totale sono 8 varianti (2 valori × 4 stati).
-- **Misure:** quadratino 20 (`misura/spunta`). Zona cliccabile 24 × 24 (`misura/bersaglio`, come richiede WCAG 2.2, criterio 2.5.8).
+- **Misure:** quadratino 16 (`misura/spunta`), segno 12 (`misura/segno-spunta`). Zona cliccabile 24 × 24 (`misura/bersaglio`, come richiede WCAG 2.2, criterio 2.5.8).
 - **Consiglio:** rendere cliccabile tutta la riga, non solo il quadratino.
 
 ### Stati

@@ -47,6 +47,8 @@ export function suColoreCategoria(codice: string): string {
   const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? colori.chiaro['testo-su-accento'] : colori.chiaro['testo-primario'];
 }
+// Fondo tenue di una tessera di categoria: il colore della categoria trasparente.
+export const tintaCategoria = (codice: string) => codice + Math.round(dimensioni['opacita-tinta-categoria'] * 255).toString(16).padStart(2, '0');
 export const nomeColoreCategoria =(codice: string | null | undefined) =>
   coloriCategorie.find((c) => c.codice.toLowerCase() === codice?.toLowerCase())?.nome ?? (codice ? codice.toUpperCase() : null);
 
@@ -61,10 +63,10 @@ export const dimensioni = {
   'misura-tessera-piccola': 28, 'misura-tessera-media': 32, 'misura-tessera-grande': 40,
   'misura-bersaglio': 24, 'misura-avanzamento': 8, 'misura-bordo': 1, 'misura-bordo-forte': 2,
   'misura-interruttore-larghezza': 36, 'misura-interruttore-altezza': 20, 'misura-pomello': 16, 'misura-pomello-margine': 2,
-  'misura-spunta': 20, 'misura-avatar-piccolo': 32, 'misura-avatar-grande': 48,
+  'misura-spunta': 16, 'misura-segno-spunta': 12, 'misura-avatar-piccolo': 32, 'misura-avatar-grande': 48,
   'misura-rientro-albero': 32, 'misura-rientro-albero-doppio': 64,
   'larghezza-barra-laterale': 256, 'larghezza-finestra': 600, 'larghezza-accesso': 448,
-  'durata-rapida': 120, 'durata-normale': 200, 'opacita-disattivato': 0.45,
+  'durata-rapida': 120, 'durata-normale': 200, 'opacita-disattivato': 0.45, 'opacita-tinta-categoria': 0.16,
 } as const;
 
 export const carattere = 'IBM Plex Sans';
