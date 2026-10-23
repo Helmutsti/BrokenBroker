@@ -42,6 +42,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
               where m.spesa_prevista_id = s.id and m.data between $1 and $2) as pagato,
             (select m.id from movimenti m where m.spesa_prevista_id = s.id and m.data between $1 and $2
               order by m.data limit 1) as movimento_id,
+            exists (select 1 from spunte x where x.spesa_prevista_id = s.id and x.data between $1 and $2) as spuntata,
             case when s.tipo = 'budget' then
               (select coalesce(sum(-m.importo), 0)::text from movimenti m
                 where m.data between $1 and $2 and m.trasferimento_id is null
@@ -64,7 +65,8 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
       ...s,
       scadenza,
       nel_mese: s.attiva && scadenza !== null,
-      uscita: Number(s.pagato) > 0,
+      // Uscita: spuntata (la spunta è un segno) o pagata con un movimento collegato.
+      uscita: s.spuntata || Number(s.pagato) > 0,
       mia_percentuale: pct,
       mia_quota: cent(importo * pct / 100),
       quota_mensile: cent(s.ogni_mesi && s.ogni_mesi > 1 ? importo * pct / 100 / s.ogni_mesi : importo * pct / 100),

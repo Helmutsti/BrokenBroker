@@ -31,6 +31,9 @@ Le schermate con la stessa struttura. Decisa la struttura di uno schema, le sue 
 
 **Dati di esempio da non prendere per veri:** movimenti di ottobre, saldi dei conti, mesi passati del grafico, prezzo della Nikon, tetto rate 15% e debito massimo 3 mensilità (la regola dell'Excel non ha un numero), email.
 
+## Proposta v5 · 3 sezioni (2026-10-23, da confermare)
+Pagina Figma "Proposta v5 · 3 sezioni" (`74-8098`): V5-01 Mese `75-226` · V5-02 Salvadanai `76-724` · V5-03 Aggiungi o modifica una spesa `78-1004` · V5-04 Investimenti `78-1427`. La pagina "Schermate computer" mostra com'è l'app oggi; le versioni superate sono in "Archivio · versioni superate".
+
 ## Proposta v2 (2026-10-23, da confermare)
 Nella libreria, pagina "Schermate computer", sotto le schermate attuali. Link (`FYIisMC6CZ2HNCKfyGxA2q`): SC-01 v2 `node-id=57-6051` · SC-02 v2 `58-6466` · SC-04 v2 `60-7239` · SC-11 v2 `64-7766` · SC-12 Aggiungi investimento `64-8149` (non quotato: tipo qualsiasi `64-8361`, tipo oro fisico `64-8507`). Contenuti: frame "Contenuti proposta v2" `57-4690`. Decisioni e proposte in `registro.md`.
 

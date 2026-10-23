@@ -44,8 +44,11 @@ function statoObiettivo(o: Obiettivo, mancaAnnuali?: number): { testo: string; t
 // SC-04 Obiettivi (proposta v2): un solo elenco in ordine di scadenza. Per ognuno
 // quanto c'è, quanto manca e quanto versare al mese per arrivarci in tempo;
 // sotto-obiettivi aperti sotto il padre, traguardi di copertura in un riepilogo.
-export function Obiettivi() {
-  const { dati, errore } = useDati<Obiettivo[]>('/obiettivi');
+// Dentro Salvadanai (proposta v5): fondo emergenza (obiettivi con traguardi di copertura) e
+// obiettivi, completi di sotto-obiettivi e traguardi. `escludi`: il salvadanaio delle annuali.
+export function Obiettivi({ escludi }: { escludi?: string | null }) {
+  const tutti = useDati<Obiettivo[]>('/obiettivi');
+  const dati = tutti.dati?.filter((o) => o.id !== escludi) ?? null, errore = tutti.errore;
   const spese = useDati<ElencoSpese>('/spese-previste').dati;
   const [modifica_, setModifica] = useState<{ obiettivo: Obiettivo | null; padre?: string } | null>(null);
   const [versa, setVersa] = useState<Obiettivo | null>(null);
@@ -76,19 +79,11 @@ export function Obiettivi() {
     );
   };
 
-  return (
-    <>
-      <Intestazione titolo="Obiettivi" sottotitolo="In ordine di scadenza: per ognuno quanto manca e quanto versare al mese per arrivarci in tempo."
-        azioni={<Pulsante tipo="primario" etichetta="Nuovo obiettivo" icona="plus" onPress={() => setModifica({ obiettivo: null })} />} />
-      <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}>
-        <NumeroChiave etichetta="Messo da parte" valore={euro(totale)} icona="piggy-bank" nota={`In ${dati.length} ${dati.length === 1 ? 'obiettivo' : 'obiettivi'}`} />
-        <NumeroChiave etichetta="Mancano in tutto" valore={euro(mancanoTutto)} icona="target" nota="Ai traguardi di tutti gli obiettivi" />
-        <NumeroChiave etichetta="Da versare ogni mese" valore={euro(alMeseTutto)} icona="calendar-clock" nota="Per arrivare in tempo a tutte le scadenze" />
-      </View>
-      <Scheda>
-        {dati.length === 0 ? <Vuoto testo="Nessun obiettivo. Comincia dal fondo di emergenza: un obiettivo senza scadenza, con i traguardi che vuoi coprire." /> : (
+  const elenco = (lista: Obiettivo[], titolo: string, nota: string, icona: string, vuoto: string) => (
+    <Scheda titolo={titolo} nota={nota} icona={icona} azione={<Pulsante tipo="testo" etichetta={titolo === 'Obiettivi' ? 'Nuovo obiettivo' : 'Nuovo fondo'} icona="plus" onPress={() => setModifica({ obiettivo: null })} />}>
+        {lista.length === 0 ? <Vuoto testo={vuoto} /> : (
           <View style={{ gap: d['spazio-blocco'] }}>
-            {gruppiPerScadenza(dati).map((g) => (
+            {gruppiPerScadenza(lista).map((g) => (
               <View key={g.titolo} style={{ gap: d['spazio-testo'] }}>
                 <TitoloGruppo testo={g.titolo} />
                 {g.obiettivi.map((o) => {
@@ -130,7 +125,13 @@ export function Obiettivi() {
             ))}
           </View>
         )}
-      </Scheda>
+    </Scheda>
+  );
+
+  return (
+    <>
+      {elenco(dati.filter((o) => o.traguardi.length), 'Fondo emergenza', 'Un solo salvadanaio: le soglie dicono cosa copre', 'shield-check', 'Nessun fondo di emergenza. Crea un obiettivo senza scadenza e aggiungi i traguardi che vuoi coprire.')}
+      {elenco(dati.filter((o) => !o.traguardi.length), 'Obiettivi', 'In ordine di scadenza: quanto manca e quanto versare al mese', 'target', 'Nessun obiettivo.')}
       <FinestraObiettivo stato={modifica_} obiettivi={dati} onChiudi={() => setModifica(null)} onTraguardo={(o) => { setModifica(null); setTraguardo({ obiettivo: o, traguardo: null }); }} />
       <FinestraVersa obiettivo={versa} onChiudi={() => setVersa(null)} />
       <FinestraTraguardo stato={traguardo} onChiudi={() => setTraguardo(null)} />
@@ -205,7 +206,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo }: { stato:
   );
 }
 
-function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | null; onChiudi: () => void }) {
+export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | null; onChiudi: () => void }) {
   const [verso, setVerso] = useState<'versa' | 'preleva'>('versa');
   const [importo, setImporto] = useState('');
   const [giorno, setGiorno] = useState('');

@@ -209,14 +209,15 @@ export function SceltaSegmenti<T extends string>({ opzioni, valore, onCambia, et
 }) {
   const { c } = useTema();
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
+    // Alta come campi, tendine e pulsanti: le opzioni riempiono l'altezza e il testo sta al centro.
+    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', height: ALTEZZA_CONTROLLO, padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
       {opzioni.map((o) => {
         const scelta = o.valore === valore;
         return (
           <Pressable key={o.valore} accessibilityRole="radio" aria-checked={scelta} onPress={() => onCambia(o.valore)}
-            style={(s: StatoPressione) => [{ flexGrow: larghezzaPiena ? 1 : 0, alignItems: 'center', paddingVertical: d['margine-etichetta-v'] + 2, paddingHorizontal: d['margine-voce-h'],
+            style={(s: StatoPressione) => [{ flexGrow: larghezzaPiena ? 1 : 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: dentroIlBordo(d['margine-voce-h']),
               borderRadius: d['raggio-controllo-interno'], backgroundColor: scelta ? c['sfondo-scheda'] : s.hovered ? c['sfondo-hover'] : 'transparent',
-              borderWidth: scelta ? d['misura-bordo'] : 0, borderColor: c['bordo-controllo'] }, anelloFocus(c, s.focused)]}>
+              borderWidth: d['misura-bordo'], borderColor: scelta ? c['bordo-controllo'] : 'transparent' }, anelloFocus(c, s.focused)]}>
             <Testo stile={scelta ? 'dettaglio-forte' : 'dettaglio-normale'} colore={scelta ? 'testo-accento' : 'testo-secondario'}>{o.testo}</Testo>
           </Pressable>
         );

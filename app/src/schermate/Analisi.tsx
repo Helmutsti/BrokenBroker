@@ -75,7 +75,7 @@ export function Analisi() {
   );
 }
 
-function PossoPermettermelo() {
+export function PossoPermettermelo() {
   const [cosa, setCosa] = useState('');
   const [prezzo, setPrezzo] = useState('');
   const [modo, setModo] = useState<'subito' | 'rate'>('subito');

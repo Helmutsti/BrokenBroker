@@ -1,6 +1,7 @@
 // Forme delle risposte dell'API (importi come testo decimale, date AAAA-MM-GG).
 
-export type Profilo = { id: string; email: string; nome: string; stipendio_netto: string | null; giorno_paga: number | null; inizio_mese: number; creato_il: string };
+export type Profilo = { id: string; email: string; nome: string; stipendio_netto: string | null; giorno_paga: number | null; inizio_mese: number; creato_il: string;
+  sul_conto: string | null; sul_conto_al: string | null; obiettivo_annuali: string | null };
 
 export type TipoConto = 'corrente' | 'carta' | 'risparmio' | 'investimenti' | 'contanti' | 'digitale';
 export type Conto = { id: string; nome: string; tipo: TipoConto; saldo_iniziale: string; data_saldo_iniziale: string; archiviato: boolean; mio: boolean; condiviso: boolean; saldo: string };
@@ -34,7 +35,7 @@ export type Obiettivo = {
 export type Rata = {
   id: string; oggetto: string; finanziaria: string | null; importo_totale: string | null; importo_rata: string; numero_rate: number; prima_scadenza: string;
   conto_id: string | null; categoria_id: string | null; chiusa: boolean; ultima_scadenza: string; pagate: number; rimanenti: number; residuo: string; attiva: boolean;
-  scadenza?: string | null; movimento_id?: string | null; // con ?mese=
+  scadenza?: string | null; pagata?: boolean; // con ?mese=
 };
 
 export type Regole = { max_rate_contemporanee?: number; tetto_rate_percentuale?: number; max_mensilita_debito?: number };

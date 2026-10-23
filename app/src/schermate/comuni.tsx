@@ -13,7 +13,7 @@ export function Caricamento({ errore }: { errore?: string | null }) {
   return <View style={{ padding: d['spazio-gruppo'], alignItems: 'center' }}><ActivityIndicator color={c['sfondo-accento']} /></View>;
 }
 
-const aggiungiMesi = (iso: string, n: number) => {
+export const aggiungiMesi = (iso: string, n: number) => {
   const [a, m, g] = iso.split('-').map(Number);
   const t = a * 12 + (m - 1) + n, aa = Math.floor(t / 12), mm = t % 12;
   const ultimo = new Date(Date.UTC(aa, mm + 1, 0)).getUTCDate();

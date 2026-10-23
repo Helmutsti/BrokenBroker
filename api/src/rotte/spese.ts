@@ -93,8 +93,8 @@ rotteSpese.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// La spunta "uscito": crea il movimento collegato alla spesa nel mese.
-// Se la spesa è pagata da un obiettivo, i soldi escono anche dall'obiettivo.
+// La spunta "uscito" è solo un segno nel mese, come nell'Excel: niente movimento
+// sul conto. Una spesa pagata da un salvadanaio, spuntata, preleva da lì.
 rotteSpese.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
@@ -105,38 +105,36 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     if (s.tipo === 'budget') throw new ErroreApi(400, 'Un budget si riempie con i movimenti, non si spunta');
     if (!s.nel_mese) throw new ErroreApi(400, 'Questa spesa non cade in questo mese');
     if (s.uscita) throw new ErroreApi(409, 'Questa spesa è già uscita in questo mese');
-    const conto = v.id(c, 'conto_id') ?? s.conto_id;
-    if (!conto) throw new ErroreApi(400, 'Indica il conto da cui è uscita');
-    const importo = v.importo(c, 'importo') ?? s.importo;
     // Di base oggi se siamo nel mese, altrimenti il giorno della scadenza.
     const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : s.scadenza ?? p.dal);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
-    const movimento = (await db.query(
-      `insert into movimenti (conto_id, data, importo, esercente, categoria_id, inserito_da, spesa_prevista_id, obiettivo_id)
-       values ($1, $2, $3, $4, $5, fp_me(), $6, $7) returning id, data, importo::text as importo`,
-      [conto, data, `-${importo}`, s.nome, s.categoria_id, id, s.obiettivo_id])).rows[0];
+    const spunta = (await db.query<{ id: string; data: string }>(
+      'insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
     if (s.obiettivo_id) {
-      await db.query(
-        `insert into versamenti (obiettivo_id, utente_id, data, importo, movimento_id) values ($1, fp_me(), $2, $3, $4)`,
-        [s.obiettivo_id, data, `-${importo}`, movimento.id]);
+      await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, spunta_id) values ($1, fp_me(), $2, $3, $4)',
+        [s.obiettivo_id, data, `-${s.mia_quota}`, spunta.id]);
     }
-    return movimento;
+    return spunta;
   });
   res.status(201).json(risultato);
 });
 
-// Toglie la spunta: cancella i movimenti collegati nel mese (e i prelievi dall'obiettivo).
+// Toglie la spunta del mese (e il prelievo dal salvadanaio). Toglie anche le
+// spunte fatte prima con un movimento collegato.
 rotteSpese.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
+    const spunte = (await db.query('delete from spunte where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount ?? 0;
     const { rows } = await db.query<{ id: string }>(
       'select id from movimenti where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al]);
-    if (!rows.length) throw nonTrovato('Spunta');
-    const ids = rows.map((r) => r.id);
-    await db.query('delete from versamenti where movimento_id = any($1)', [ids]);
-    const { rowCount } = await db.query('delete from movimenti where id = any($1)', [ids]);
-    if (rowCount !== ids.length) throw new ErroreApi(403, "Può togliere la spunta chi l'ha messa o il proprietario del conto");
+    if (!rows.length && !spunte) throw nonTrovato('Spunta');
+    if (rows.length) {
+      const ids = rows.map((r) => r.id);
+      await db.query('delete from versamenti where movimento_id = any($1)', [ids]);
+      const { rowCount } = await db.query('delete from movimenti where id = any($1)', [ids]);
+      if (rowCount !== ids.length) throw new ErroreApi(403, "Può togliere la spunta chi l'ha messa o il proprietario del conto");
+    }
   });
   res.status(204).end();
 });

@@ -34,7 +34,7 @@ export function BarraLaterale({ voci, attiva, onNaviga, onAggiungi, profilo, onP
       <View style={{ gap: d['spazio-elenco'] }}>{voci.map((v) => voce(v, () => onNaviga(v.chiave)))}</View>
       <View style={{ flex: 1 }} />
       <View style={{ gap: d['spazio-elenco'] }}>
-        {voce({ chiave: 'impostazioni', testo: profilo ? `${profilo} · Profilo` : 'Profilo', icona: 'user' }, onProfilo)}
+        {voce({ chiave: 'impostazioni', testo: 'Impostazioni', icona: 'sliders-horizontal' }, onProfilo)}
         {voce({ chiave: 'esci', testo: 'Esci', icona: 'log-out' }, onEsci)}
       </View>
     </View>

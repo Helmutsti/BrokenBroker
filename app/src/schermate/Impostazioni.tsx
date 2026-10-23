@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useNavigation } from '@react-navigation/native';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Avatar, Esito, Pulsante } from '../componenti/base.tsx';
 import { Campo } from '../componenti/campi.tsx';
@@ -25,6 +26,7 @@ function useSalva() {
 // SC-09 Impostazioni.
 export function Impostazioni() {
   const rif = useRiferimenti();
+  const navigazione = useNavigation();
   const p = rif.profilo;
   const regole = useDati<Regole>('/regole').dati;
   const persone = useDati<Persona[]>('/persone').dati ?? [];
@@ -108,6 +110,17 @@ export function Impostazioni() {
                 ))}
               </View>
             ) : null}
+          </Scheda>
+          <Scheda titolo="Altro" icona="ellipsis" nota="Pagine che non servono ogni giorno">
+            <View style={{ gap: d['spazio-elenco'] }}>
+              {([['conti', 'Conti', 'wallet', 'I tuoi conti, condivisi e archiviati'], ['movimenti', 'Movimenti', 'arrow-left-right', 'Le spese fuori lista che hai aggiunto'],
+                ['analisi', 'Analisi', 'chart-pie', 'Mese per mese, patrimonio e proiezioni']] as const).map(([chiave, testo, icona, nota]) => (
+                <View key={chiave} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+                  <View style={{ flex: 1 }}><Testo stile="corpo-forte">{testo}</Testo><Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo></View>
+                  <Pulsante etichetta="Apri" icona={icona} onPress={() => navigazione.navigate(chiave as never)} />
+                </View>
+              ))}
+            </View>
           </Scheda>
         </View>
       </View>

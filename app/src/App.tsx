@@ -14,21 +14,21 @@ import { Conti } from './schermate/Conti.tsx';
 import { Impostazioni } from './schermate/Impostazioni.tsx';
 import { Investimenti } from './schermate/Investimenti.tsx';
 import { Movimenti } from './schermate/Movimenti.tsx';
-import { Obiettivi } from './schermate/Obiettivi.tsx';
 import { Panoramica } from './schermate/Panoramica.tsx';
-import { SpesePreviste } from './schermate/SpesePreviste.tsx';
+import { Salvadanai } from './schermate/Salvadanai.tsx';
 import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
 // Sezioni della barra laterale (flussi.md): l'ordine è quello delle bozze approvate.
-const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
-  { chiave: 'panoramica', testo: 'Panoramica', icona: 'layout-dashboard', percorso: '', schermata: Panoramica },
-  { chiave: 'spese', testo: 'Spese previste', icona: 'calendar-check', percorso: 'spese-previste', schermata: SpesePreviste },
-  { chiave: 'obiettivi', testo: 'Obiettivi', icona: 'target', percorso: 'obiettivi', schermata: Obiettivi },
-  { chiave: 'movimenti', testo: 'Movimenti', icona: 'arrow-left-right', percorso: 'movimenti', schermata: Movimenti },
-  { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti },
+// Proposta v5: le sezioni dei 3 fogli dell'Excel (Mese, Salvadanai, Investimenti) più
+// Categorie. Conti, Movimenti e Analisi restano raggiungibili da Impostazioni.
+const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element; nascosta?: boolean })[] = [
+  { chiave: 'mese', testo: 'Mese', icona: 'calendar-check', percorso: '', schermata: Panoramica },
+  { chiave: 'salvadanai', testo: 'Salvadanai', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
   { chiave: 'investimenti', testo: 'Investimenti', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
-  { chiave: 'analisi', testo: 'Analisi', icona: 'chart-pie', percorso: 'analisi', schermata: Analisi },
   { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
+  { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti, nascosta: true },
+  { chiave: 'movimenti', testo: 'Movimenti', icona: 'arrow-left-right', percorso: 'movimenti', schermata: Movimenti, nascosta: true },
+  { chiave: 'analisi', testo: 'Analisi', icona: 'chart-pie', percorso: 'analisi', schermata: Analisi, nascosta: true },
 ];
 
 // Navigatore con la barra laterale a sinistra e la schermata a destra.
@@ -40,7 +40,7 @@ function NavigatoreLaterale(props: { children: React.ReactNode; initialRouteName
   return (
     <NavigationContent>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: c['sfondo-pagina'] }}>
-        <BarraLaterale voci={SEZIONI} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)} onAggiungi={rif.nuovoMovimento}
+        <BarraLaterale voci={SEZIONI.filter((s) => !s.nascosta)} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)} onAggiungi={rif.nuovoMovimento}
           profilo={rif.profilo?.nome ?? ''} onProfilo={() => navigation.navigate('impostazioni')} onEsci={props.onEsci} />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: d['margine-pagina'], gap: d['spazio-gruppo'], maxWidth: 1184, width: '100%' }}>
           {descriptors[attiva.key].render()}

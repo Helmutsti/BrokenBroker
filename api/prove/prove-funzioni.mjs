@@ -53,12 +53,13 @@ verifica(sp('Tari', nov).scadenza === '2026-11-20' && sp('Luce', nov).nel_mese =
 
 // Spunta
 const sp1 = await r('POST', `/spese-previste/${affitto.j.id}/spunta`, A, { mese: '2026-10', data: '2026-10-12' });
-verifica(sp1.s === 201 && sp1.j.importo === '-700.00', 'spunta crea movimento', sp1.j);
+// La spunta è un segno (proposta v5): nessun movimento sul conto.
+verifica(sp1.s === 201 && sp1.j.data === '2026-10-12' && sp1.j.importo === undefined, 'spunta è un segno', sp1.j);
 verifica((await r('POST', `/spese-previste/${affitto.j.id}/spunta`, A, { mese: '2026-10' })).s === 409, 'doppia spunta 409');
 verifica((await r('POST', `/spese-previste/${spesaBudget.id}/spunta`, A, { mese: '2026-10' })).s === 400, 'budget non si spunta');
 verifica((await r('POST', `/spese-previste/${luceSp.id}/spunta`, A, { mese: '2026-10', data: '2026-12-01' })).s === 400, 'data fuori dal mese');
 let ott2 = (await r('GET', '/spese-previste?mese=2026-10', A)).j;
-verifica(sp('Affitto', ott2).uscita === true && sp('Affitto', ott2).movimento_id === sp1.j.id, 'affitto uscito');
+verifica(sp('Affitto', ott2).uscita === true && sp('Affitto', ott2).movimento_id === null, 'affitto uscito senza movimento');
 
 // Budget: si riempie con i movimenti della categoria e delle sottocategorie
 await r('POST', '/movimenti', A, { conto_id: conto.id, importo: '-45.30', esercente: 'Esselunga', categoria_id: supermercato.id, data: '2026-10-20' });
@@ -162,7 +163,7 @@ const mese = (await r('GET', '/analisi/mese?mese=2026-10', A)).j;
 verifica(mese.voci.fisse === '420.00' && mese.voci.periodiche_mensilizzate === '50.00' && mese.voci.budget === '400.00', 'voci del mese', mese.voci);
 verifica(mese.voci.rate === '150.00' && mese.resta === '980.00' && mese.semaforo === 'ok', 'quanto resta', mese);
 const st = (await r('GET', '/analisi/storico?mesi=3&mese=2026-10', A)).j;
-verifica(st.length === 3 && st[2].mese === '2026-10' && st[2].uscite === '765.30', 'storico', st[2]);
+verifica(st.length === 3 && st[2].mese === '2026-10' && st[2].uscite === '65.30', 'storico: solo i movimenti veri, non le spunte', st[2]);
 const pat = (await r('GET', '/analisi/patrimonio', A)).j;
 verifica(pat.investimenti === '1950.00', 'patrimonio', pat);
 const pro = (await r('GET', '/analisi/proiezione', A)).j;
