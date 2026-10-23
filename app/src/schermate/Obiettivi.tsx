@@ -55,7 +55,7 @@ export function Obiettivi({ escludi }: { escludi?: string | null }) {
     <View style={{ gap: d['spazio-testo'] }}>
       {figli.map((f) => (
         <View key={f.id} style={{ gap: d['spazio-testo'] }}>
-          <RigaAvanzamento nome={f.nome} importo={valore(f)} valore={f.percentuale ?? 0} percentuale={f.percentuale !== null && f.percentuale >= 100 ? '100% ✓' : percento(f.percentuale)}
+          <RigaAvanzamento nome={f.paga_spesa ? `${f.nome} · esce a ${nomeMese(f.paga_spesa.prossima.slice(0, 7)).toLowerCase()}` : f.nome} importo={valore(f)} valore={f.percentuale ?? 0} percentuale={f.percentuale !== null && f.percentuale >= 100 ? '100% ✓' : percento(f.percentuale)}
             stato={statoDi(f.percentuale)} icona="target" compatta={livello > 0} onApri={() => setVersa(f)} />
           {f.figli.length ? (
             <View style={{ gap: d['spazio-testo'], paddingLeft: d['margine-voce-h'], borderLeftWidth: d['misura-bordo-forte'], borderLeftColor: c['bordo-separatore'] }}>
@@ -148,8 +148,13 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
   const [ogni, setOgni] = useState<'1' | '12'>('1');
   const [quota, setQuota] = useState('');
   const [conto, setConto] = useState<string | null>(null);
+  // "È una spesa che si ripete": l'obiettivo genera una spesa di Spese che paga lui
+  // (cifra = traguardo, prima uscita = scadenza); la spesa si gestisce poi anche da Spese.
+  const [eSpesa, setESpesa] = useState(false);
+  const [ogniSpesa, setOgniSpesa] = useState<'1' | '3' | '6' | '12'>('12');
   useEffect(() => {
     if (!stato) return;
+    setESpesa(!!o?.paga_spesa); setOgniSpesa(String(o?.paga_spesa?.ogni_mesi ?? 12) as '1' | '3' | '6' | '12');
     setNome(o?.nome ?? ''); setPadre(o?.padre_id ?? stato.padre ?? 'nessuno'); setTraguardo(importoInTesto(o?.traguardo));
     setScadenza(dataInTesto(o?.scadenza)); setCreaSpesa(o?.crea_spesa ?? false); setCondiviso(o?.condiviso ?? false); setEmail('');
     const a = o?.alimentato_da;
@@ -180,7 +185,13 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
     const s = scadenza.trim() ? serve(leggiData(scadenza), 'Scrivi la scadenza come GG/MM/AAAA') : null;
     if (creaSpesa && !t && !o?.figli.length) throw new Error('Per creare la spesa serve un traguardo');
     const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), padre_id: padre === 'nessuno' ? null : padre, traguardo: t, scadenza: s, crea_spesa: creaSpesa };
+    if (eSpesa && (!t || !s)) throw new Error('Per una spesa che si ripete servono quanto costa e la prossima uscita');
     const salvato = o ? await modifica<Obiettivo>(`/obiettivi/${o.id}`, corpo) : await crea<Obiettivo>('/obiettivi', corpo);
+    const pagata = o?.paga_spesa ?? null;
+    if (eSpesa) {
+      const spesa = { nome: corpo.nome, importo: t, ogni_mesi: Number(ogniSpesa), prossima_scadenza: s, obiettivo_id: salvato.id };
+      if (pagata) await modifica(`/spese-previste/${pagata.id}`, spesa); else await crea('/spese-previste', { ...spesa, tipo: 'fissa' });
+    } else if (pagata) await cancella(`/spese-previste/${pagata.id}`);
     // La spesa "mettici da parte": nasce, cambia o sparisce con l'interruttore.
     const alimento = o?.alimentato_da ?? null;
     if (daParte) {
@@ -200,9 +211,22 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
       onElimina={o?.mio ? () => cancella(`/obiettivi/${o.id}`).then(() => undefined) : undefined} etichettaElimina={o?.figli.length ? 'Elimina con i sotto-obiettivi' : 'Elimina'}>
       <Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!o} />
       <Tendina etichetta="Dentro un altro obiettivo" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" />
+      <View style={{ gap: d['spazio-testo'] }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+          <Interruttore acceso={eSpesa} onCambia={setESpesa} etichetta="È una spesa che si ripete" />
+          <View style={{ flex: 1 }}>
+            <Testo>È una spesa che si ripete</Testo>
+            <Testo stile="dettaglio-normale" colore="testo-secondario">{eSpesa
+              ? 'Compare in Spese, nel gruppo Annuali se esce ogni più di un mese, e la paga questo salvadanaio. Si apre e si modifica anche da lì.'
+              : 'Per esempio la Tari o l’assicurazione: ogni volta che esce la paga questo salvadanaio.'}</Testo>
+          </View>
+        </View>
+        {eSpesa ? <SceltaSegmenti etichetta="Ogni quanto esce" larghezzaPiena valore={ogniSpesa} onCambia={setOgniSpesa}
+          opzioni={[{ valore: '1', testo: 'Ogni mese' }, { valore: '3', testo: 'Ogni 3 mesi' }, { valore: '6', testo: 'Ogni 6 mesi' }, { valore: '12', testo: 'Ogni anno' }]} /> : null}
+      </View>
       <Affiancati>
-        <Meta><Campo etichetta="Traguardo" valore={traguardo} onCambia={setTraguardo} segnaposto="Facoltativo" inputMode="decimal" aiuto={o?.figli.length ? 'Vuoto: la somma dei sotto-obiettivi' : undefined} /></Meta>
-        <Meta><CampoData facoltativa etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} /></Meta>
+        <Meta><Campo etichetta={eSpesa ? 'Quanto costa' : 'Traguardo'} valore={traguardo} onCambia={setTraguardo} segnaposto={eSpesa ? '0,00' : 'Facoltativo'} inputMode="decimal" aiuto={!eSpesa && o?.figli.length ? 'Vuoto: la somma dei sotto-obiettivi' : undefined} /></Meta>
+        <Meta><CampoData facoltativa={!eSpesa} etichetta={eSpesa ? 'Prossima uscita' : 'Scadenza'} valore={scadenza} onCambia={setScadenza} /></Meta>
       </Affiancati>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" />

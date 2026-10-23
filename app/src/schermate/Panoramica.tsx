@@ -1,16 +1,15 @@
-import { useNavigation } from '@react-navigation/native';
 import { type ReactNode, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
-import { Finestra, Intestazione, NumeroChiave, RigaRata, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceBudget, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
+import { Finestra, Intestazione, NumeroChiave, RigaRata, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, TitoloGruppoApribile, VoceBudget, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { ControlloRate, ElencoSpese, Obiettivo, Proiezione, Rata, RiepilogoMese, Spesa } from '../dati/tipi.ts';
 import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, nomeMese, oggiIso } from '../formato.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { PossoPermettermelo } from './Analisi.tsx';
-import { Caricamento, divisioneTraSotto, eAnnuale, scadenzaRataNel, tuttiGliObiettivi } from './comuni.tsx';
+import { Caricamento, divisioneTraSotto, eAnnuale, prossimaScadenza, quando, scadenzaRataNel, tuttiGliObiettivi } from './comuni.tsx';
 import { Affiancati, FinestraModulo, Meta, serve } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 
@@ -20,7 +19,6 @@ import { FinestraSpesa } from './SpesePreviste.tsx';
 // cosa succede se nulla cambia e "posso permettermelo?".
 export function Panoramica() {
   const rif = useRiferimenti();
-  const navigazione = useNavigation();
   const { mese, setMese } = rif;
   const riepilogo = useDati<RiepilogoMese>(`/analisi/mese?mese=${mese}`);
   const spese = useDati<ElencoSpese>(`/spese-previste?mese=${mese}`);
@@ -35,6 +33,7 @@ export function Panoramica() {
   const [spente, setSpente] = useState(false);
   const [raggruppa, setRaggruppa] = useState<'tipo' | 'categoria'>('tipo');
   const [ordina, setOrdina] = useState<'scadenza' | 'nome'>('scadenza');
+  const [apriAnnuali, setApriAnnuali] = useState(false);
   const tuttiObiettivi = tuttiGliObiettivi(useDati<Obiettivo[]>('/obiettivi').dati ?? []);
 
   const r = riepilogo.dati, el = spese.dati, profilo = rif.profilo;
@@ -120,13 +119,34 @@ export function Panoramica() {
   const TITOLI: Record<Tipo, string> = { fisse: 'Fisse', budget: 'Budget del mese · si riempiono con le spese', rate: 'Rate', investimenti: 'Investimenti',
     salvadanai: 'Salvadanai · spuntata, la cifra entra nel salvadanaio', annuali: 'Annuali che escono in questo mese' };
   const radice = (id: string | null) => { let c = rif.categoria(id); while (c?.padre_id) c = rif.categoria(c.padre_id); return c ?? null; };
+  // Per tipo, le annuali sono un gruppo sempre presente che si apre: dentro ci sono tutte,
+  // si aprono e si modificano come le altre spese; si spuntano solo nel mese in cui escono.
+  // Chiuso mostra quelle che escono questo mese; aperto è una vista a rotazione: dal mese in
+  // corso in avanti, un mese dopo l'altro (richiesta di Manuel).
+  const prossima = (s: Spesa) => (s.nel_mese && s.scadenza ? s.scadenza : prossimaScadenza(s.prossima_scadenza, s.ogni_mesi, p.dal) ?? '9999');
+  const annualiTutte = el.spese.filter(eAnnuale).sort((a, b) => prossima(a).localeCompare(prossima(b)) || a.nome.localeCompare(b.nome, 'it'));
+  const annoAnnuali = annualiTutte.reduce((t, s) => t + (Number(s.mia_quota) * 12) / s.ogni_mesi!, 0);
+  const rigaAnnuale = (s: Spesa): Riga => ({ chiave: s.id, nome: s.nome, scadenza: s.scadenza, tipo: 'annuali', categoria: s.categoria_id, importo: Number(s.mia_quota), vista: () => s.nel_mese
+    ? voce(s, true, 'calendar', s.obiettivo_id ? 'dal salvadanaio' : `1/12: ${euro(Number(s.mia_quota) / s.ogni_mesi!)}`)
+    : <VoceDaSpuntare key={s.id} nome={s.nome} conto={quando(s)} importo={euro(s.mia_quota)} sottoImporto={s.obiettivo_id ? 'dal salvadanaio' : `1/12: ${euro(Number(s.mia_quota) / s.ogni_mesi!)}`}
+        icona={s.icona ?? 'calendar'} fatta={false} onApri={() => setSpesa(s)} /> });
+  const rotazione = () => annualiTutte.flatMap((s, i) => {
+    const m = prossima(s).slice(0, 7), primo = i === 0 || prossima(annualiTutte[i - 1]).slice(0, 7) !== m;
+    const etichetta: Riga[] = primo && m !== '9999' ? [{ chiave: `mese-${m}`, nome: '', scadenza: null, tipo: 'annuali', categoria: null, importo: 0, vista: () => (
+      <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ paddingHorizontal: d['margine-voce-h'], paddingTop: d['spazio-icona'] }}>{m === mese ? `${nomeMese(m)} · questo mese` : nomeMese(m)}</Testo>) }] : [];
+    return [...etichetta, rigaAnnuale(s)];
+  });
   const gruppi = raggruppa === 'tipo'
-    ? (Object.keys(TITOLI) as Tipo[]).map((t) => ({ chiave: t, titolo: <TitoloGruppo key={t} testo={TITOLI[t]} />, righe: righe.filter((x) => x.tipo === t) }))
+    ? (Object.keys(TITOLI) as Tipo[]).map((t) => t === 'annuali'
+      ? { chiave: t, righe: apriAnnuali ? rotazione() : annualiDelMese.map(rigaAnnuale), sempre: annualiTutte.length > 0,
+        titolo: <TitoloGruppoApribile key={t} testo={`Annuali · ${annualiDelMese.length ? `${annualiDelMese.length} ${annualiDelMese.length === 1 ? 'esce' : 'escono'} questo mese` : 'nessuna esce questo mese'}`}
+          destra={`${annualiTutte.length} ${annualiTutte.length === 1 ? 'spesa' : 'spese'} · ${euro(annoAnnuali)} all'anno · ${euro(annoAnnuali / 12)} al mese`} aperto={apriAnnuali} onCambia={setApriAnnuali} /> }
+      : { chiave: t, titolo: <TitoloGruppo key={t} testo={TITOLI[t]} />, righe: righe.filter((x) => x.tipo === t), sempre: false })
     : [...new Map(righe.map((x) => [radice(x.categoria)?.id ?? '', radice(x.categoria)])).entries()]
       .sort(([, a], [, b]) => (a ? 0 : 1) - (b ? 0 : 1) || (a?.nome ?? '').localeCompare(b?.nome ?? '', 'it'))
       .map(([id, c]) => {
         const dentro = righe.filter((x) => (radice(x.categoria)?.id ?? '') === id);
-        return { chiave: id || 'senza', righe: dentro, titolo: <TitoloCategoria key={id || 'senza'} nome={c?.nome ?? 'Senza categoria'} icona={c?.icona ?? 'ellipsis'} colore={c?.colore ?? null}
+        return { chiave: id || 'senza', righe: dentro, sempre: false, titolo: <TitoloCategoria key={id || 'senza'} nome={c?.nome ?? 'Senza categoria'} icona={c?.icona ?? 'ellipsis'} colore={c?.colore ?? null}
           destra={euro(dentro.reduce((t, x) => t + x.importo, 0))} /> };
       });
 
@@ -166,17 +186,11 @@ export function Panoramica() {
               </View>
             </View>
           )}
-          {gruppi.filter((g) => g.righe.length).map((g) => [g.titolo, ...g.righe.map((x) => <View key={x.chiave}>{x.vista(raggruppa === 'tipo')}</View>)])}
+          {gruppi.filter((g) => g.righe.length || g.sempre).map((g) => [g.titolo, ...g.righe.map((x) => <View key={x.chiave}>{x.vista(raggruppa === 'tipo')}</View>)])}
           <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingTop: d['spazio-icona'] }}>
             <Pulsante tipo="testo" etichetta="Aggiungi una spesa" icona="plus" onPress={() => setSpesa('nuova')} />
             <Pulsante tipo="testo" etichetta="Aggiungi una rata" icona="plus" onPress={() => setRata('nuova')} />
           </View>
-          {Number(r.voci.periodiche_mensilizzate) > 0 ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-              <View style={{ flex: 1 }}><Esito tono="informazione" testo={`Le altre spese annuali non escono questo mese: ogni mese ne metti da parte ${euro(r.voci.periodiche_mensilizzate)} e le trovi in Salvadanai.`} /></View>
-              <Pulsante tipo="testo" etichetta="Vai a Salvadanai" onPress={() => navigazione.navigate('salvadanai' as never)} />
-            </View>
-          ) : null}
           {nonAttive.length ? (
             <View>
               <Pulsante tipo="testo" etichetta={`${spente ? 'Nascondi' : 'Mostra'} ${nonAttive.length} ${nonAttive.length === 1 ? 'spesa non attiva' : 'spese non attive'}`} icona={spente ? 'chevron-up' : 'chevron-down'} onPress={() => setSpente(!spente)} />

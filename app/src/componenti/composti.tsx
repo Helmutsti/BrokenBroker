@@ -1,5 +1,5 @@
-import { type ReactNode, useState } from 'react';
-import { Modal, Pressable, ScrollView, View } from 'react-native';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Modal, Pressable, ScrollView, View } from 'react-native';
 import Svg, { Line, Polyline } from 'react-native-svg';
 import { euro, nomeMese, spostaMese } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
@@ -130,6 +130,30 @@ export function TitoloGruppo({ testo, destra }: { testo: string; destra?: string
       <Testo stile="etichetta-gruppo" colore="testo-secondario">{testo}</Testo>
       {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario">{destra}</Testo> : null}
     </View>
+  );
+}
+
+// Gruppo che si apre e si chiude: tutto il titolo è il pulsante, la freccia gira
+// (senza animazione se il sistema chiede di ridurre il movimento).
+export function TitoloGruppoApribile({ testo, destra, aperto, onCambia }: { testo: string; destra?: string; aperto: boolean; onCambia: (v: boolean) => void }) {
+  const { c } = useTema();
+  const giro = useRef(new Animated.Value(aperto ? 1 : 0)).current;
+  const [ridotto, setRidotto] = useState(false);
+  useEffect(() => { AccessibilityInfo.isReduceMotionEnabled().then(setRidotto).catch(() => undefined); }, []);
+  useEffect(() => {
+    if (ridotto) giro.setValue(aperto ? 1 : 0);
+    else Animated.timing(giro, { toValue: aperto ? 1 : 0, duration: d['durata-rapida'], useNativeDriver: false }).start();
+  }, [aperto, ridotto, giro]);
+  const rotazione = giro.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+  return (
+    <Pressable accessibilityRole="button" aria-expanded={aperto} accessibilityLabel={`${testo}: ${aperto ? 'chiudi' : 'apri'}`} onPress={() => onCambia(!aperto)}
+      style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'],
+        borderRadius: d['raggio-controllo-interno'], backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
+      <Testo stile="etichetta-gruppo" colore="testo-secondario">{testo}</Testo>
+      <Animated.View style={{ transform: [{ rotate: rotazione }] }}><Icona nome="chevron-down" misura={16} colore="icona-tenue" /></Animated.View>
+      <View style={{ flex: 1 }} />
+      {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario">{destra}</Testo> : null}
+    </Pressable>
   );
 }
 

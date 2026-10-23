@@ -235,7 +235,8 @@ rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
 });
 
 // Il salvadanaio delle spese annuali diviso per spesa: per ogni spesa annuale o
-// periodica ancora senza salvadanaio nasce un sotto-obiettivo che la paga (traguardo
+// periodica pagata dal salvadanaio stesso nasce un sotto-obiettivo che la paga (le
+// annuali senza salvadanaio restano spese da sole: decisione di Manuel) (traguardo
 // e scadenza vengono dalla spesa). I soldi già messi da parte vanno ai sotto-obiettivi
 // come se si fossero riempiti di un dodicesimo al mese, prima le scadenze più vicine.
 // Se manca, nasce la spesa mensile che riempie il salvadanaio (somma dei dodicesimi).
@@ -247,7 +248,7 @@ rotteObiettivi.post('/:id/annuali', async (req, res) => {
     if (!padre.mio) throw new ErroreApi(403, "Solo chi ha creato l'obiettivo può dividerlo");
     const da = oggi();
     const spese = (await speseDelMese(db, await periodoRichiesto(db, undefined)))
-      .filter((s) => s.attiva && s.mia && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1 && (!s.obiettivo_id || s.obiettivo_id === id));
+      .filter((s) => s.attiva && s.mia && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1 && s.obiettivo_id === id);
     const nuove: { figlio: string; quando: string; dovrebbe: number }[] = [];
     for (const s of spese) {
       const figlio = (await db.query<{ id: string }>(
