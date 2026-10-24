@@ -2,12 +2,13 @@ import { type ReactNode, useState } from 'react';
 import { View } from 'react-native';
 import { Esito, Pulsante } from '../componenti/base.tsx';
 import { Finestra } from '../componenti/composti.tsx';
+import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo } from '../tema/tema.tsx';
 
 // Finestra con modulo: errori in alto, Annulla e Salva in fondo, Elimina a sinistra.
-export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onElimina, etichettaSalva = 'Salva', etichettaElimina, children, larghezza }: {
+export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onElimina, etichettaSalva = 'Salva', etichettaElimina, children, larghezza, intestazioneDestra }: {
   titolo: string; icona?: string; aperta: boolean; onChiudi: () => void; onSalva: () => Promise<void>; onElimina?: () => Promise<void>;
-  etichettaSalva?: string; etichettaElimina?: string; children: ReactNode; larghezza?: number;
+  etichettaSalva?: string; etichettaElimina?: string; children: ReactNode; larghezza?: number; intestazioneDestra?: ReactNode;
 }) {
   const [errore, setErrore] = useState<string | null>(null);
   const [lavoro, setLavoro] = useState(false);
@@ -17,7 +18,7 @@ export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onEli
   };
   const chiudi = () => { setErrore(null); onChiudi(); };
   return (
-    <Finestra titolo={titolo} icona={icona} aperta={aperta} onChiudi={chiudi} larghezza={larghezza}
+    <Finestra titolo={titolo} icona={icona} aperta={aperta} onChiudi={chiudi} larghezza={larghezza} intestazioneDestra={intestazioneDestra}
       onElimina={onElimina ? esegui(onElimina) : undefined} etichettaElimina={etichettaElimina}
       azioni={<><Pulsante etichetta="Annulla" onPress={chiudi} /><Pulsante tipo="primario" etichetta={etichettaSalva} onPress={esegui(onSalva)} disattivato={lavoro} /></>}>
       {errore ? <Esito tono="errore" testo={errore} /> : null}
@@ -37,8 +38,9 @@ export function Voce({ etichetta, aiuto, children }: { etichetta: string; aiuto?
   );
 }
 
-export const Affiancati = ({ children }: { children: ReactNode }) => <View style={{ flexDirection: 'row', gap: d['spazio-colonne'] }}>{children}</View>;
-export const Meta = ({ children }: { children: ReactNode }) => <View style={{ flex: 1 }}>{children}</View>;
+// Su telefono i campi affiancati si mettono uno sotto l'altro, a tutta larghezza.
+export const Affiancati = ({ children }: { children: ReactNode }) => <View style={{ flexDirection: useCompatto() ? 'column' : 'row', gap: useCompatto() ? d['spazio-blocco'] : d['spazio-colonne'] }}>{children}</View>;
+export const Meta = ({ children }: { children: ReactNode }) => <View style={{ flex: useCompatto() ? undefined : 1, minWidth: 0 }}>{children}</View>;
 
 // Lancia un errore leggibile se il valore manca o non è valido.
 export function serve<T>(valore: T | null | undefined, messaggio: string): T {

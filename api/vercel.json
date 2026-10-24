@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "regions": ["fra1"],
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "{src/**,node_modules/**}",
+      "excludeFiles": "{node_modules/typescript/**,node_modules/@types/**,node_modules/@typescript/**}"
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+}

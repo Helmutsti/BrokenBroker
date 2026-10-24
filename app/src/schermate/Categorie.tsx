@@ -4,14 +4,15 @@ import { anelloFocus, Esito, Pulsante, SceltaSegmenti, type StatoPressione } fro
 import { Icona } from '../componenti/Icona.tsx';
 import { Check } from 'lucide-react-native';
 import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
-import { Campo, Tendina } from '../componenti/campi.tsx';
+import { Campo, TendinaGriglia } from '../componenti/campi.tsx';
 import { Intestazione, RigaCategoria, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Categoria } from '../dati/tipi.ts';
-import { euro, nomeMeseMinuscolo } from '../formato.ts';
+import { euro, nomeMeseMinuscolo, numero } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { FinestraModulo, serve, Voce } from './moduli.tsx';
+import { useCompatto } from '../tema/compatto.ts';
 
 // Icone della libreria adatte alle categorie (CMP-01).
 const ICONE = ['house', 'zap', 'trash-2', 'sofa', 'wrench', 'utensils', 'shopping-cart', 'coffee', 'car', 'fuel', 'square-parking', 'shield', 'file-text', 'bus', 'repeat', 'tv', 'music',
@@ -20,6 +21,7 @@ const ICONE = ['house', 'zap', 'trash-2', 'sofa', 'wrench', 'utensils', 'shoppin
 
 // SC-08 Categorie (decisione 8): albero con icona propria o presa dal padre.
 export function Categorie() {
+  const compatto = useCompatto();
   const rif = useRiferimenti();
   const spese = useDati<{ categoria_id: string; speso: string }[]>(`/categorie/spese?mese=${rif.mese}`).dati ?? [];
   const [tipo, setTipo] = useState<'uscita' | 'entrata'>('uscita');
@@ -29,6 +31,8 @@ export function Categorie() {
   const figli = (id: string | null) => tutte.filter((c) => c.padre_id === id && c.tipo === tipo).sort((a, b) => a.ordine - b.ordine || a.nome.localeCompare(b.nome));
   const spesoDiretto = new Map(spese.map((s) => [s.categoria_id, Number(s.speso)]));
   const speso = (id: string): number => (spesoDiretto.get(id) ?? 0) + tutte.filter((c) => c.padre_id === id).reduce((t, c) => t + speso(c.id), 0);
+  // Peso sullo stipendio netto: manca o zero, niente percentuali.
+  const stipendio = Number(rif.profilo?.stipendio_netto ?? 0);
   const radici = (t: 'uscita' | 'entrata') => tutte.filter((c) => !c.padre_id && c.tipo === t).length;
 
   const righe: React.JSX.Element[] = [];
@@ -38,7 +42,7 @@ export function Categorie() {
       const ramo = sotto.length ? (aperte.has(c.id) ? 'aperto' : 'chiuso') : 'foglia';
       const s = speso(c.id);
       righe.push(<RigaCategoria key={c.id} livello={Math.min(livello, 2)} ramo={ramo} nome={c.nome} sottocategorie={sotto.length ? `${sotto.length} sottocategorie` : undefined}
-        speso={s ? euro(s) : '—'} icona={rif.iconaCategoria(c.id)} ereditata={!c.icona} colore={c.colore}
+        speso={s ? euro(s) : '—'} percentuale={s && stipendio > 0 ? `${numero((s / stipendio) * 100, 1)}%` : '—'} icona={rif.iconaCategoria(c.id)} ereditata={!c.icona} colore={c.colore}
         onApriChiudi={() => { const n = new Set(aperte); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); setAperte(n); }} onModifica={() => setAperta(c)} />);
       if (ramo === 'aperto') visita(c.id, livello + 1);
     }
@@ -47,18 +51,19 @@ export function Categorie() {
 
   return (
     <>
-      <Intestazione titolo="Categorie" sottotitolo="Ogni categoria ha un'icona: la vedi accanto a ogni spesa, budget e movimento."
+      <Intestazione titolo="Categorie" sottotitolo="Ogni categoria ha un'icona: la vedi accanto a ogni spesa e budget."
         azioni={<Pulsante tipo="primario" etichetta="Nuova categoria" icona="plus" onPress={() => setAperta({ padre: null })} />} />
       <SceltaSegmenti etichetta="Uscite o entrate" valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'uscita', testo: `Uscite · ${radici('uscita')}` }, { valore: 'entrata', testo: `Entrate · ${radici('entrata')}` }]} />
       <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre. Il colore si sceglie con la matita, tra quelli della tavolozza." />
       <Scheda>
         <View role="tree" aria-label="Categorie">
-          <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
+          {compatto ? null : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120 }}>Colore</Testo>
-            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Speso a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Spese a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 80, textAlign: 'right' }}>% stipendio</Testo>
             <View style={{ width: 36 }} />
-          </View>
+          </View>}
           {righe}
         </View>
       </Scheda>
@@ -70,7 +75,7 @@ export function Categorie() {
 // Tavolozza fissa: un cerchio per colore più "nessuno". Il colore scelto ha l'anello e la spunta.
 function SceltaColore({ valore, onCambia }: { valore: string | null; onCambia: (v: string | null) => void }) {
   const { c } = useTema();
-  const lato = d['misura-tessera-media'];
+  const lato = useCompatto() ? 44 : d['misura-tessera-media'];
   const cerchio = (codice: string | null, nome: string) => {
     const scelto = (valore ?? null)?.toLowerCase() === codice?.toLowerCase() || (!valore && !codice);
     return (
@@ -110,19 +115,19 @@ function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { pad
   };
   const elimina = async () => {
     try { await cancella(`/categorie/${c!.id}${sposta ? `?sposta_su=${sposta}` : ''}`); }
-    catch (e) { if ((e as { stato?: number }).stato === 409) { setInUso(true); throw new Error('La categoria è in uso: scegli sotto dove spostare spese e movimenti, poi premi di nuovo Elimina.'); } throw e; }
+    catch (e) { if ((e as { stato?: number }).stato === 409) { setInUso(true); throw new Error('La categoria è in uso: scegli sotto dove spostare le spese, poi premi di nuovo Elimina.'); } throw e; }
   };
   const altre = opzioniCategorie(rif.categorie).filter((o) => o.valore !== c?.id);
   return (
     <FinestraModulo titolo={c ? c.nome : 'Nuova categoria'} icona={icona === 'padre' ? rif.iconaCategoria(padre === 'nessuna' ? null : padre) : icona} aperta={!!stato} onChiudi={onChiudi} onSalva={salva}
       onElimina={c ? elimina : undefined}>
       <Campo etichetta="Nome" valore={nome} onCambia={setNome} autoFocus={!c} />
-      <Tendina etichetta="Dentro" valore={padre} onCambia={setPadre} opzioni={[{ valore: 'nessuna', testo: 'Nessuna: categoria principale', rientro: 0 }, ...altre]} />
-      <Tendina etichetta="Icona" valore={icona} onCambia={setIcona} opzioni={[{ valore: 'padre', testo: 'Quella della categoria padre', icona: rif.iconaCategoria(padre === 'nessuna' ? null : padre) }, ...ICONE.map((i) => ({ valore: i, testo: i.replace(/-\d$/, '').replace(/-/g, ' '), icona: i }))]} />
+      <TendinaGriglia etichetta="Dentro" valore={padre} onCambia={setPadre} opzioni={[{ valore: 'nessuna', testo: 'Nessuna: categoria principale', rientro: 0 }, ...altre]} />
+      <TendinaGriglia soloIcone etichetta="Icona" valore={icona} onCambia={setIcona} opzioni={[{ valore: 'padre', testo: 'Quella della categoria padre', icona: rif.iconaCategoria(padre === 'nessuna' ? null : padre) }, ...ICONE.map((i) => ({ valore: i, testo: i.replace(/-\d$/, '').replace(/-/g, ' '), icona: i }))]} />
       <Voce etichetta="Colore" aiuto={colore ? nomeColoreCategoria(colore) ?? undefined : 'Nessun colore'}>
         <SceltaColore valore={colore} onCambia={setColore} />
       </Voce>
-      {inUso ? <Tendina etichetta="Sposta spese, movimenti e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} /> : null}
+      {inUso ? <TendinaGriglia etichetta="Sposta spese e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} /> : null}
     </FinestraModulo>
   );
 }

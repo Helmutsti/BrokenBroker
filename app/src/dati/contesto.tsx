@@ -4,7 +4,7 @@ import { useDati } from './api.ts';
 import type { Categoria, Conto, Profilo } from './tipi.ts';
 
 // Dati che servono a tutte le schermate: profilo, conti, categorie, mese scelto,
-// e le finestre che si aprono da ovunque (nuovo movimento).
+// e il mese scelto.
 
 type Riferimenti = {
   profilo: Profilo | null; conti: Conto[]; categorie: Categoria[];
@@ -13,7 +13,6 @@ type Riferimenti = {
   iconaCategoria: (id: string | null | undefined) => string;
   conto: (id: string | null | undefined) => Conto | undefined;
   mese: string; meseOggi: string; setMese: (m: string) => void;
-  nuovoMovimento: () => void;
 };
 
 const Contesto = createContext<Riferimenti | null>(null);
@@ -27,7 +26,7 @@ export function meseInCorso(inizio: number): string {
   return mm === 1 ? `${a - 1}-12` : `${a}-${String(mm - 1).padStart(2, '0')}`;
 }
 
-export function FornitoreRiferimenti({ children, nuovoMovimento }: { children: ReactNode; nuovoMovimento: () => void }) {
+export function FornitoreRiferimenti({ children }: { children: ReactNode }) {
   const profilo = useDati<Profilo>('/profilo').dati;
   const conti = useDati<Conto[]>('/conti').dati ?? [];
   const categorie = useDati<Categoria[]>('/categorie?formato=elenco').dati ?? [];
@@ -46,9 +45,9 @@ export function FornitoreRiferimenti({ children, nuovoMovimento }: { children: R
     return {
       profilo, conti, categorie, categoria, percorsoCategoria, iconaCategoria,
       conto: (id) => conti.find((c) => c.id === id),
-      mese: meseScelto ?? meseInCorso(profilo?.inizio_mese ?? 1), meseOggi: meseInCorso(profilo?.inizio_mese ?? 1), setMese, nuovoMovimento,
+      mese: meseScelto ?? meseInCorso(profilo?.inizio_mese ?? 1), meseOggi: meseInCorso(profilo?.inizio_mese ?? 1), setMese,
     };
-  }, [profilo, conti, categorie, meseScelto, nuovoMovimento]);
+  }, [profilo, conti, categorie, meseScelto]);
   return <Contesto.Provider value={valore}>{children}</Contesto.Provider>;
 }
 
@@ -70,6 +69,3 @@ export function opzioniCategorie(categorie: Categoria[], tipo?: 'uscita' | 'entr
   visita(null, 0);
   return out;
 }
-
-export const ICONA_CONTO: Record<string, string> = { corrente: 'landmark', carta: 'credit-card', risparmio: 'piggy-bank', investimenti: 'trending-up', contanti: 'banknote', digitale: 'smartphone' };
-export const NOME_TIPO_CONTO: Record<string, string> = { corrente: 'Conto corrente', carta: 'Carta', risparmio: 'Conto risparmio', investimenti: 'Investimenti', contanti: 'Contanti', digitale: 'Conto digitale' };

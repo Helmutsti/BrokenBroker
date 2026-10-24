@@ -2,7 +2,14 @@
 <html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BrokenBroker" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111315" media="(prefers-color-scheme: dark)" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>BrokenBroker</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,8 +18,15 @@
       html, body, #radice { height: 100%; margin: 0; }
       body { font-family: 'IBM Plex Sans', system-ui, sans-serif; }
       #radice { display: flex; }
+      @supports (height: 100dvh) { html, body, #radice { height: 100dvh; } }
       /* Niente contorno automatico del browser: l'anello di focus lo disegnano i componenti, solo da tastiera. */
       *:focus { outline: none; }
+      /* Telefono: nessuno scroll orizzontale della pagina, niente zoom automatico di iOS nei campi (16px). */
+      html { -webkit-text-size-adjust: 100%; }
+      @media (max-width: 719px) {
+        html, body { overflow-x: hidden; max-width: 100vw; }
+        input, textarea, select { font-size: 16px !important; }
+      }
     </style>
   </head>
   <body>

@@ -34,8 +34,7 @@ rotteRate.get('/', async (req, res) => {
     if (req.query.mese === undefined) return rate;
     const p = await periodoRichiesto(db, req.query.mese);
     const { rows } = await db.query<{ rata_id: string }>(
-      `select rata_id from spunte where rata_id = any($1) and data between $2 and $3
-       union select rata_id from movimenti where rata_id = any($1) and data between $2 and $3`, [rate.map((r) => r.id), p.dal, p.al]);
+      `select rata_id from spunte where rata_id = any($1) and data between $2 and $3`, [rate.map((r) => r.id), p.dal, p.al]);
     const pagate = new Set(rows.map((x) => x.rata_id));
     return rate.map((r) => ({ ...r, scadenza: scadenzaRata(r, p), pagata: pagate.has(r.id) }));
   }));
@@ -51,8 +50,7 @@ rotteRate.post('/:id/spunta', async (req, res) => {
     if (!r) throw nonTrovato('Rata');
     const scadenza = scadenzaRata(r, p);
     if (!scadenza) throw new ErroreApi(400, 'Questa rata non cade in questo mese');
-    const gia = await db.query(`select 1 from spunte where rata_id = $1 and data between $2 and $3
-                                union select 1 from movimenti where rata_id = $1 and data between $2 and $3`, [id, p.dal, p.al]);
+    const gia = await db.query('select 1 from spunte where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al]);
     if (gia.rowCount) throw new ErroreApi(409, 'Questa rata è già pagata in questo mese');
     const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : scadenza);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
@@ -65,9 +63,8 @@ rotteRate.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
-    const a = (await db.query('delete from spunte where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount ?? 0;
-    const b = (await db.query('delete from movimenti where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount ?? 0;
-    if (!a && !b) throw nonTrovato('Spunta');
+    const tolte = (await db.query('delete from spunte where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount ?? 0;
+    if (!tolte) throw nonTrovato('Spunta');
   });
   res.status(204).end();
 });

@@ -64,6 +64,13 @@ export function data(s: string | null | undefined, forma: 'lunga' | 'corta' | 'g
   return `${g} ${MESI[m]} ${a}`;
 }
 
+// Scadenza di una spesa senza mostrare l'anno: "15 marzo", oppure solo "marzo" se il giorno non è stato scelto.
+export function dataSpesa(s: string | null | undefined, senzaGiorno = false): string {
+  if (!s) return '—';
+  const m = MESI[Number(s.slice(5, 7)) - 1];
+  return senzaGiorno ? m : `${Number(s.slice(8, 10))} ${m}`;
+}
+
 // "2026-10" → "Ottobre 2026"
 export function nomeMese(mese: string, conAnno = true): string {
   const [a, m] = mese.split('-').map(Number);

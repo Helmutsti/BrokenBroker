@@ -10,6 +10,7 @@ import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, leggi
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { Caricamento, mesiFino } from './comuni.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
+import { useCompatto } from '../tema/compatto.ts';
 
 const quote = (q: string) => numero(q, Number.isInteger(Number(q)) ? 0 : 2);
 const prezzo = (p: string | null) => (p === null ? '—' : euro(Number(p)));
@@ -42,6 +43,7 @@ const prezziDel = (xs: Posizione[]) => { const d = xs.map((x) => x.prezzo_del).f
 // SC-11 Investimenti (proposta v2): il portafoglio al centro, come nelle app delle
 // banche; titoli divisi per portafoglio, oro e beni non quotati insieme a loro.
 export function Investimenti() {
+  const compatto = useCompatto();
   const port = useDati<Portafoglio>('/investimenti/portafoglio');
   const operazioni = useDati<Operazione[]>('/investimenti/operazioni').dati ?? [];
   const [periodo, setPeriodo] = useState<Periodo>('12');
@@ -93,23 +95,23 @@ export function Investimenti() {
       <Intestazione titolo="Investimenti" sottotitolo="Tutti i portafogli insieme: in alto andamento e composizione, sotto un riquadro per ogni portafoglio."
         azioni={nuovo} />
       <Scheda titolo="Tutti i portafogli" nota="Titoli, non quotati e oro insieme" icona="chart-line">
-        <View style={{ flexDirection: 'row', gap: d['spazio-gruppo'] }}>
-          <View style={{ flex: 1, gap: d['spazio-blocco'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
-              <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+        <View style={{ flexDirection: compatto ? 'column' : 'row', gap: d['spazio-gruppo'] }}>
+          <View style={{ flex: compatto ? undefined : 1, minWidth: 0, gap: d['spazio-blocco'] }}>
+            <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-end', gap: d['spazio-colonne'] }}>
+              <View style={{ flex: compatto ? undefined : 1, gap: d['spazio-testo'] }}>
                 <Testo stile="etichetta-gruppo" colore="testo-secondario">VALORE DI TUTTI I PORTAFOGLI OGGI</Testo>
                 <Testo stile="numero-grande">{euro(p.valore)}</Testo>
                 <Testo stile="corpo-forte" colore={guadagno >= 0 ? 'testo-ok' : 'testo-errore'}>{`${guadagnoTesto(guadagno, p.guadagno_percentuale)} da sempre`}</Testo>
                 <Testo colore="testo-secondario">{`Investiti ${euro(p.messo_dentro)}${ultimiPrezzi ? ` · prezzi del ${data(ultimiPrezzi)}` : ''}`}</Testo>
               </View>
-              <SceltaSegmenti etichetta="Periodo del grafico" valore={periodo} onCambia={setPeriodo}
+              <SceltaSegmenti etichetta="Periodo del grafico" larghezzaPiena={compatto} valore={periodo} onCambia={setPeriodo}
                 opzioni={[{ valore: '1', testo: '1 mese' }, { valore: '6', testo: '6 mesi' }, { valore: '12', testo: '1 anno' }, { valore: 'tutto', testo: 'Da sempre' }]} />
             </View>
             {andamento.length > 1 && totale > 0
               ? <GraficoLinea punti={andamento.map((x) => ({ etichetta: etichetta(x), valore: Number(x.valore), messo: Number(x.messo_dentro) }))} />
               : <Vuoto testo="Il grafico compare quando c'è almeno un investimento." />}
           </View>
-          <View style={{ width: 300, gap: d['spazio-elenco'] }}>
+          <View style={{ width: compatto ? undefined : 300, gap: d['spazio-elenco'] }}>
             <SceltaSegmenti etichetta="Composizione" larghezzaPiena valore={composizioneDi} onCambia={setComposizioneDi}
               opzioni={[{ valore: 'tipo', testo: 'Per tipo' }, { valore: 'area', testo: 'Per paese' }, { valore: 'settore', testo: 'Per settore' }]} />
             {voceComposizione.length === 0 ? <Testo colore="testo-secondario">{composizioneDi === 'tipo' ? 'Ancora niente.' : 'Nessun titolo quotato con la composizione inserita.'}</Testo> : null}
@@ -128,7 +130,7 @@ export function Investimenti() {
           <Scheda key={r.chiave} titolo={r.titolo} nota={prezziDel(r.posizioni) ?? undefined} icona={r.icona}
             azione={r.posizioni.length ? <Pulsante tipo="testo" etichetta="Aggiorna prezzi" icona="pencil" onPress={() => setPrezzi(r.posizioni)} /> : undefined}>
             <View style={{ gap: d['spazio-blocco'] }}>
-              <View style={{ flexDirection: 'row', gap: d['spazio-gruppo'] * 2, paddingHorizontal: d['margine-voce-h'] }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: compatto ? d['spazio-gruppo'] : d['spazio-gruppo'] * 2, rowGap: d['spazio-blocco'], paddingHorizontal: d['margine-voce-h'] }}>
                 {([['Valore', euro(valore), 'testo-primario'], [r.posizioni.length ? 'Investiti' : 'Costo', euro(costo), 'testo-primario'],
                   ['Guadagno', guadagnoTesto(g, costo > 0 ? Math.round((g / costo) * 1000) / 10 : null), g >= 0 ? 'testo-ok' : 'testo-errore']] as const).map(([l, v, col], i) => (
                   <View key={l} style={{ gap: d['spazio-testo'] }}><Testo stile="dettaglio-normale" colore="testo-secondario">{l}</Testo><Testo stile={i === 0 ? 'titolo-scheda' : 'corpo-forte'} colore={col}>{v}</Testo></View>
@@ -290,7 +292,7 @@ function FinestraInvestimento({ bene, aperta, posizioni, onChiudi }: { bene: Ben
     const b = bene;
     setScelta(b ? 'non_quotato' : 'quotato');
     setTitolo(null); setNuovo({ isin: '', nome: '', ticker: '' }); setQuantita(''); setPmc(''); setCommissioni('0'); setGiorno(dataInTesto(oggiIso()));
-    setConto(rif.conti.find((c) => c.tipo === 'investimenti' && !c.archiviato)?.id ?? null);
+    setConto(null);
     setNome(b?.nome ?? ''); setTipo(b?.tipo ?? 'fondo_pensione'); setCosto(importoInTesto(b?.costo)); setValore(importoInTesto(b?.valore));
     setValoreAl(dataInTesto(b?.valore_al ?? oggiIso())); setPortafoglio(b?.conto_id ?? 'nessuno'); setForma(b?.forma ?? 'lingotto');
     setPurezza(b?.purezza ? String(Number(b.purezza)) : '999.9'); setPeso(b?.peso_grammi ? String(Number(b.peso_grammi)).replace('.', ',') : ''); setDove(b?.dove ?? ''); setAcquisto(dataInTesto(b?.data_acquisto ?? null));
@@ -427,7 +429,7 @@ function FinestraPosizione({ posizione, primoAcquisto, onChiudi, onComposizione 
       {x ? (
         <>
           <Testo colore="testo-secondario">{[x.tipo.toUpperCase(), x.ticker, x.borsa, x.isin].filter(Boolean).join(' · ')}</Testo>
-          <View style={{ flexDirection: 'row', gap: d['spazio-gruppo'] }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-gruppo'] }}>
             {([['Prezzo oggi', `${prezzo(x.prezzo)}${x.prezzo_del ? ` · ${data(x.prezzo_del, 'corta')}` : ''}`, 'testo-primario'], ['Valore', euro(x.valore), 'testo-primario'],
               ['Guadagno', guadagnoTesto(g, x.guadagno_percentuale), g >= 0 ? 'testo-ok' : 'testo-errore']] as const).map(([l, v, col]) => (
               <View key={l} style={{ gap: d['spazio-testo'] }}><Testo stile="dettaglio-normale" colore="testo-secondario">{l}</Testo><Testo stile="corpo-forte" colore={col}>{v}</Testo></View>

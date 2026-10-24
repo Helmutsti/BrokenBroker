@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Modal, Pressable, ScrollView, View } from 'react-native';
 import Svg, { Line, Polyline } from 'react-native-svg';
 import { euro, nomeMese, spostaMese } from '../formato.ts';
+import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { nomeColoreCategoria, ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
 import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
@@ -11,9 +12,9 @@ import { Icona } from './Icona.tsx';
 // dal ruolo; i contenuti no.
 
 // ---- CMP-20 Barra laterale ----
-export type VoceMenu = { chiave: string; testo: string; icona: string };
-export function BarraLaterale({ voci, attiva, onNaviga, onAggiungi, profilo, onProfilo, onEsci }: {
-  voci: VoceMenu[]; attiva: string; onNaviga: (k: string) => void; onAggiungi: () => void; profilo: string; onProfilo: () => void; onEsci: () => void;
+export type VoceMenu = { chiave: string; testo: string; breve?: string; icona: string };
+export function BarraLaterale({ voci, attiva, onNaviga, profilo, onProfilo, onEsci }: {
+  voci: VoceMenu[]; attiva: string; onNaviga: (k: string) => void; profilo: string; onProfilo: () => void; onEsci: () => void;
 }) {
   const { c } = useTema();
   const voce = (v: VoceMenu | { chiave: string; testo: string; icona: string }, onPress: () => void) => {
@@ -30,7 +31,6 @@ export function BarraLaterale({ voci, attiva, onNaviga, onAggiungi, profilo, onP
   return (
     <View accessibilityRole="navigation" style={{ width: d['larghezza-barra-laterale'], padding: d['margine-barra-laterale'], gap: d['spazio-gruppo'], backgroundColor: c['sfondo-barra-laterale'], alignSelf: 'stretch' }}>
       <Testo stile="logo">BrokenBroker</Testo>
-      <Pulsante tipo="primario" etichetta="Aggiungi spesa" icona="plus" onPress={onAggiungi} larghezzaPiena compatto />
       <View style={{ gap: d['spazio-elenco'] }}>{voci.map((v) => voce(v, () => onNaviga(v.chiave)))}</View>
       <View style={{ flex: 1 }} />
       <View style={{ gap: d['spazio-elenco'] }}>
@@ -41,15 +41,51 @@ export function BarraLaterale({ voci, attiva, onNaviga, onAggiungi, profilo, onP
   );
 }
 
+// Telefono: barra di navigazione in basso (le sezioni) e testata in alto (logo, impostazioni, esci).
+// Rispetta l'area sicura di iPhone (barra Home) e i bersagli sono alti almeno 44.
+export function BarraInferiore({ voci, attiva, onNaviga }: { voci: VoceMenu[]; attiva: string; onNaviga: (k: string) => void }) {
+  const { c } = useTema();
+  return (
+    <View accessibilityRole="navigation" style={{ flexDirection: 'row', backgroundColor: c['sfondo-barra-laterale'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'],
+      paddingHorizontal: 4, paddingTop: 4, paddingBottom: 'env(safe-area-inset-bottom)' } as object}>
+      {voci.map((v) => {
+        const sel = v.chiave === attiva;
+        return (
+          <Pressable key={v.chiave} accessibilityRole="link" accessibilityLabel={v.testo} aria-current={sel ? 'page' : undefined} onPress={() => onNaviga(v.chiave)}
+            style={{ flex: 1, minWidth: 0, minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 4, borderRadius: d['raggio-controllo'], backgroundColor: sel ? c['sfondo-accento-tenue'] : 'transparent' }}>
+            <Icona nome={v.icona} misura={20} colore={sel ? 'icona-accento' : 'icona-predefinita'} />
+            <Testo stile="dettaglio-forte" colore={sel ? 'testo-accento' : 'testo-secondario'} numberOfLines={1} style={{ fontSize: 11, lineHeight: 14 }}>{v.breve ?? v.testo}</Testo>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+export function TestataCompatta({ profilo, impostazioniAttive, onProfilo, onEsci }: { profilo: string; impostazioniAttive: boolean; onProfilo: () => void; onEsci: () => void }) {
+  const { c } = useTema();
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingHorizontal: 16, paddingVertical: 6, paddingTop: 'max(6px, env(safe-area-inset-top))',
+      backgroundColor: c['sfondo-barra-laterale'], borderBottomWidth: d['misura-bordo'], borderBottomColor: c['bordo-separatore'] } as object}>
+      <Testo stile="logo" style={{ flex: 1, fontSize: 18 }} numberOfLines={1}>BrokenBroker</Testo>
+      <View style={{ borderRadius: d['raggio-controllo'], backgroundColor: impostazioniAttive ? c['sfondo-accento-tenue'] : 'transparent' }}>
+        <PulsanteIcona icona="sliders-horizontal" etichetta={profilo ? `Impostazioni di ${profilo}` : 'Impostazioni'} fantasma onPress={onProfilo} />
+      </View>
+      <PulsanteIcona icona="log-out" etichetta="Esci" fantasma onPress={onEsci} />
+    </View>
+  );
+}
+
 // ---- CMP-21 Intestazione di pagina ----
 export function Intestazione({ titolo, sottotitolo, azioni }: { titolo: string; sottotitolo?: string; azioni?: ReactNode }) {
+  const compatto = useCompatto();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>
-      <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-        <Testo stile="titolo-pagina" accessibilityRole="header" aria-level={1}>{titolo}</Testo>
+    <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-start', gap: d['spazio-blocco'] }}>
+      <View style={{ flex: compatto ? undefined : 1, minWidth: 0, gap: d['spazio-testo'] }}>
+        <Testo stile="titolo-pagina" accessibilityRole="header" aria-level={1} style={compatto ? { fontSize: 24, lineHeight: 30 } : undefined}>{titolo}</Testo>
         {sottotitolo ? <Testo colore="testo-secondario">{sottotitolo}</Testo> : null}
       </View>
-      {azioni ? <View style={{ flexDirection: 'row', gap: d['spazio-colonne'] }}>{azioni}</View> : null}
+      {azioni ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>{azioni}</View> : null}
     </View>
   );
 }
@@ -57,12 +93,13 @@ export function Intestazione({ titolo, sottotitolo, azioni }: { titolo: string; 
 // ---- CMP-22 Scheda ----
 export function Scheda({ titolo, nota, icona, children, azione, style }: { titolo?: string; nota?: string; icona?: string; children: ReactNode; azione?: ReactNode; style?: object }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   return (
-    <View role={titolo ? 'region' : undefined} aria-label={titolo} style={[{ padding: d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, style]}>
+    <View role={titolo ? 'region' : undefined} aria-label={titolo} style={[{ minWidth: 0, padding: compatto ? 12 : d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, style]}>
       {titolo ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: compatto ? 'wrap' : 'nowrap', gap: d['spazio-icona'] }}>
           {icona ? <Tessera icona={icona} misura="piccola" /> : null}
-          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1 }}>{titolo}</Testo>
+          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1, minWidth: compatto ? 120 : undefined }}>{titolo}</Testo>
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
           {azione}
         </View>
@@ -73,10 +110,37 @@ export function Scheda({ titolo, nota, icona, children, azione, style }: { titol
 }
 
 // ---- CMP-32 Finestra ----
-export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, onElimina, etichettaElimina = 'Elimina', larghezza }: {
+// Su telefono occupa tutto lo schermo: titolo in alto, campi che scorrono, Annulla/Salva sempre in fondo.
+export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, onElimina, etichettaElimina = 'Elimina', larghezza, intestazioneDestra }: {
   titolo: string; icona?: string; aperta: boolean; onChiudi: () => void; children: ReactNode; azioni?: ReactNode; onElimina?: () => void; etichettaElimina?: string; larghezza?: number;
+  intestazioneDestra?: ReactNode; // facoltativo: accanto al titolo, prima del pulsante Chiudi
 }) {
   const { c } = useTema();
+  const compatto = useCompatto();
+  const intestazione = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+      {icona ? <Tessera icona={icona} misura="media" /> : null}
+      <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1, fontSize: 20, lineHeight: 26 }}>{titolo}</Testo>
+      {intestazioneDestra}
+      <PulsanteIcona icona="x" etichetta="Chiudi" fantasma onPress={onChiudi} />
+    </View>
+  );
+  const piede = azioni || onElimina ? (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], paddingTop: d['spazio-blocco'] }}>
+      {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} onPress={onElimina} /> : null}
+      <View style={{ flex: 1 }} />
+      {azioni}
+    </View>
+  ) : null;
+  if (compatto) return (
+    <Modal transparent visible={aperta} onRequestClose={onChiudi} animationType="fade">
+      <View accessibilityRole="dialog" aria-modal aria-label={titolo} style={{ flex: 1, backgroundColor: c['sfondo-scheda'] }}>
+        <View style={{ padding: 16, paddingTop: 'max(12px, env(safe-area-inset-top))', borderBottomWidth: d['misura-bordo'], borderBottomColor: c['bordo-separatore'] } as object}>{intestazione}</View>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: d['spazio-gruppo'] }}>{children}</ScrollView>
+        {piede ? <View style={{ padding: 16, paddingTop: 0, paddingBottom: 'max(16px, env(safe-area-inset-bottom))', backgroundColor: c['sfondo-scheda'] } as object}>{piede}</View> : null}
+      </View>
+    </Modal>
+  );
   return (
     <Modal transparent visible={aperta} onRequestClose={onChiudi} animationType="fade">
       <View style={{ flex: 1, backgroundColor: c['sfondo-velo'], alignItems: 'center', justifyContent: 'center', padding: d['margine-pagina'] }}>
@@ -84,19 +148,9 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, on
           style={{ width: larghezza ?? d['larghezza-finestra'], maxWidth: '100%', maxHeight: '100%', backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-finestra'],
             boxShadow: `0 ${ombre.finestra.offsetY}px ${ombre.finestra.blur}px ${ombre.finestra.colore}` } as object}>
           <ScrollView contentContainerStyle={{ padding: d['margine-finestra'], gap: d['spazio-gruppo'] }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-              {icona ? <Tessera icona={icona} misura="media" /> : null}
-              <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1, fontSize: 20, lineHeight: 26 }}>{titolo}</Testo>
-              <PulsanteIcona icona="x" etichetta="Chiudi" fantasma onPress={onChiudi} />
-            </View>
+            {intestazione}
             {children}
-            {azioni || onElimina ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], paddingTop: d['spazio-blocco'] }}>
-                {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} onPress={onElimina} /> : null}
-                <View style={{ flex: 1 }} />
-                {azioni}
-              </View>
-            ) : null}
+            {piede}
           </ScrollView>
         </View>
       </View>
@@ -108,27 +162,34 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, on
 export type ToneNumero = 'normale' | 'ok' | 'attenzione' | 'errore';
 export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale' }: { etichetta: string; valore: string; nota?: string; icona: string; tono?: ToneNumero }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   const t: Tono = tono === 'normale' ? 'accento' : tono;
   const coloreValore: NomeColore = tono === 'normale' ? 'testo-primario' : `testo-${tono}`;
   return (
-    <View style={{ flex: 1, padding: d['margine-scheda'], gap: d['spazio-icona'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'],
+    <View style={{ flex: 1, minWidth: 0, ...(compatto ? { flexBasis: '45%', flexGrow: 1, padding: 12 } : { padding: d['margine-scheda'] }), gap: d['spazio-icona'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'],
       borderColor: c[tono === 'errore' ? 'bordo-errore' : 'bordo-scheda'], backgroundColor: c[tono === 'errore' ? 'sfondo-errore-tenue' : 'sfondo-scheda'] }}>
       <Tessera icona={icona} misura="piccola" tono={t} suColore={tono === 'errore'} />
       <View style={{ gap: d['spazio-testo'] }}>
         <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo>
-        <Testo stile="numero-grande" colore={coloreValore}>{valore}</Testo>
+        <Testo stile="numero-grande" colore={coloreValore} style={compatto ? { fontSize: 20, lineHeight: 26 } : undefined}>{valore}</Testo>
         {nota ? <Testo stile="dettaglio-normale" colore={tono === 'normale' ? 'testo-secondario' : coloreValore}>{nota}</Testo> : null}
       </View>
     </View>
   );
 }
 
+// Fila di numeri chiave: in riga sul computer, a due a due (a capo) sul telefono.
+export function RigaNumeri({ children }: { children: ReactNode }) {
+  const compatto = useCompatto();
+  return <View style={{ flexDirection: 'row', flexWrap: compatto ? 'wrap' : 'nowrap', alignItems: 'stretch', gap: compatto ? d['spazio-colonne'] : d['spazio-blocco'] }}>{children}</View>;
+}
+
 // ---- Gruppo di righe (titolo e totale) ----
 export function TitoloGruppo({ testo, destra }: { testo: string; destra?: string }) {
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>
-      <Testo stile="etichetta-gruppo" colore="testo-secondario">{testo}</Testo>
-      {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario">{destra}</Testo> : null}
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', columnGap: d['spazio-colonne'], rowGap: d['spazio-testo'], paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>
+      <Testo stile="etichetta-gruppo" colore="testo-secondario" style={{ flexShrink: 1 }}>{testo}</Testo>
+      {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ flexShrink: 1 }}>{destra}</Testo> : null}
     </View>
   );
 }
@@ -137,6 +198,7 @@ export function TitoloGruppo({ testo, destra }: { testo: string; destra?: string
 // (senza animazione se il sistema chiede di ridurre il movimento).
 export function TitoloGruppoApribile({ testo, destra, aperto, onCambia }: { testo: string; destra?: string; aperto: boolean; onCambia: (v: boolean) => void }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   const giro = useRef(new Animated.Value(aperto ? 1 : 0)).current;
   const [ridotto, setRidotto] = useState(false);
   useEffect(() => { AccessibilityInfo.isReduceMotionEnabled().then(setRidotto).catch(() => undefined); }, []);
@@ -147,12 +209,12 @@ export function TitoloGruppoApribile({ testo, destra, aperto, onCambia }: { test
   const rotazione = giro.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
   return (
     <Pressable accessibilityRole="button" aria-expanded={aperto} accessibilityLabel={`${testo}: ${aperto ? 'chiudi' : 'apri'}`} onPress={() => onCambia(!aperto)}
-      style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'],
+      style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingTop: d['margine-riga-v'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'],
         borderRadius: d['raggio-controllo-interno'], backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
       <Testo stile="etichetta-gruppo" colore="testo-secondario">{testo}</Testo>
       <Animated.View style={{ transform: [{ rotate: rotazione }] }}><Icona nome="chevron-down" misura={16} colore="icona-tenue" /></Animated.View>
       <View style={{ flex: 1 }} />
-      {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario">{destra}</Testo> : null}
+      {destra ? <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ flexShrink: 1 }}>{destra}</Testo> : null}
     </Pressable>
   );
 }
@@ -168,7 +230,7 @@ export function TitoloCategoria({ nome, icona, colore, destra }: { nome: string;
         <Icona nome={icona} misura={16} tinta={colore ?? undefined} />
       </View>
       <Testo stile="corpo-forte" style={{ flex: 1 }} numberOfLines={1}>{nome}</Testo>
-      {destra ? <Testo stile="corpo-forte">{destra}</Testo> : null}
+      {destra ? <Testo stile="corpo-forte" style={{ flexShrink: 1, textAlign: 'right' }}>{destra}</Testo> : null}
     </View>
   );
 }
@@ -176,7 +238,8 @@ export function TitoloCategoria({ nome, icona, colore, destra }: { nome: string;
 // Riga premibile con evidenza al passaggio del mouse.
 function RigaPremibile({ onPress, children, linea, etichetta, padding = 'margine-riga-v' }: { onPress?: () => void; children: ReactNode; linea?: boolean; etichetta?: string; padding?: 'margine-riga-v' | 'margine-voce-v' }) {
   const { c } = useTema();
-  const stile = (h?: boolean) => ({ flexDirection: 'row' as const, alignItems: 'center' as const, gap: d['spazio-colonne'], paddingVertical: d[padding], paddingHorizontal: d['margine-voce-h'],
+  const compatto = useCompatto();
+  const stile = (h?: boolean) => ({ flexDirection: 'row' as const, alignItems: 'center' as const, gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], minWidth: 0, minHeight: compatto ? 44 : undefined, paddingVertical: d[padding], paddingHorizontal: d['margine-voce-h'],
     borderBottomWidth: linea ? d['misura-bordo'] : 0, borderBottomColor: c['bordo-separatore'], backgroundColor: h ? c['sfondo-hover'] : 'transparent' });
   if (!onPress) return <View style={stile()}>{children}</View>;
   return <Pressable accessibilityRole="button" accessibilityLabel={etichetta} onPress={onPress} style={(s: StatoPressione) => [stile(s.hovered), anelloFocus(c, s.focused)]}>{children}</Pressable>;
@@ -192,27 +255,48 @@ export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatt
   dettaglio?: { etichetta: string; righe: { nome: string; importo: string }[]; nota?: string };
 }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   const [aperta, setAperta] = useState(false);
   const col: NomeColore = fatta ? 'testo-secondario' : 'testo-primario';
+  const apri = dettaglio ? (
+    <Pressable accessibilityRole="button" aria-expanded={aperta} accessibilityLabel={`${aperta ? 'Chiudi' : 'Apri'} ${dettaglio.etichetta}`} onPress={() => setAperta(!aperta)}
+      style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: d['spazio-testo'], minHeight: compatto ? 32 : undefined, paddingHorizontal: d['margine-etichetta-h'], paddingVertical: d['margine-etichetta-v'],
+        borderRadius: d['raggio-controllo-interno'], backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{dettaglio.etichetta}</Testo>
+      <Icona nome={aperta ? 'chevron-up' : 'chevron-down'} misura={16} colore="icona-tenue" />
+    </Pressable>
+  ) : null;
   return (
     <View style={{ gap: d['spazio-elenco'] }}>
+      {compatto ? (
+        // Telefono: spunta, nome e importo sulla prima riga; conto e dettaglio sotto il nome.
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] / 2 }}>
+          <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
+          <Pressable onPress={onApri} disabled={!onApri} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', gap: 2 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+              {icona ? <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} /> : null}
+              <Testo colore={col} numberOfLines={1} style={{ flexShrink: 1 }}>{nome}</Testo>
+            </View>
+            <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo>
+          </Pressable>
+          <View style={{ alignItems: 'flex-end', flexShrink: 0, maxWidth: '45%' }}>
+            <Testo stile="corpo-forte" colore={col}>{importo}</Testo>
+            {sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ textAlign: 'right' }}>{sottoImporto}</Testo> : null}
+          </View>
+        </View>
+      ) : (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
           <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
           {icona ? <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} /> : null}
           <Pressable onPress={onApri} disabled={!onApri} style={{ flexShrink: 1 }}><Testo colore={col} numberOfLines={1}>{nome}</Testo></Pressable>
-          {dettaglio ? (
-            <Pressable accessibilityRole="button" aria-expanded={aperta} accessibilityLabel={`${aperta ? 'Chiudi' : 'Apri'} ${dettaglio.etichetta}`} onPress={() => setAperta(!aperta)}
-              style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], paddingVertical: d['margine-etichetta-v'],
-                borderRadius: d['raggio-controllo-interno'], backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">{dettaglio.etichetta}</Testo>
-              <Icona nome={aperta ? 'chevron-up' : 'chevron-down'} misura={16} colore="icona-tenue" />
-            </Pressable>
-          ) : null}
+          {apri}
         </View>
         <Col w={140}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
         <Col w={110} destra><Testo stile="corpo-forte" colore={col}>{importo}</Testo>{sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottoImporto}</Testo> : null}</Col>
       </View>
+      )}
+      {compatto && apri ? <View style={{ paddingHorizontal: d['margine-voce-h'] }}>{apri}</View> : null}
       {dettaglio && aperta ? (
         <View style={{ gap: d['spazio-elenco'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'] }}>
           {dettaglio.righe.map((r) => (
@@ -233,6 +317,19 @@ export type StatoBudget = 'normale' | 'attenzione' | 'superato';
 export function VoceBudget({ nome, nota, conto, importo, icona, valore, stato, onApri }: { nome: string; nota: string; conto: string; importo: string; icona?: string | null; valore: number; stato: StatoBudget; onApri?: () => void }) {
   const tono: ToneAvanzamento = stato === 'normale' ? 'accento' : stato === 'attenzione' ? 'attenzione' : 'errore';
   const colNota: NomeColore = stato === 'normale' ? 'testo-secondario' : stato === 'attenzione' ? 'testo-attenzione' : 'testo-errore';
+  const compatto = useCompatto();
+  if (compatto) return (
+    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44, paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>
+      <Anello valore={valore} tono={tono} />
+      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+        <Testo numberOfLines={1}>{nome}</Testo>
+        <Barra valore={valore} tono={tono} />
+        <Testo stile="dettaglio-normale" colore={colNota}>{nota}</Testo>
+        <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo>
+      </View>
+      <Testo stile="corpo-forte" colore={stato === 'normale' ? 'testo-primario' : colNota}>{importo}</Testo>
+    </Pressable>
+  );
   return (
     <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
@@ -256,6 +353,24 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
 }) {
   const st = tipo === 'intestazione' ? 'dettaglio-forte' : 'corpo-normale';
   const col: NomeColore = tipo === 'voce' ? 'testo-primario' : 'testo-secondario';
+  if (useCompatto()) {
+    // Telefono: niente intestazione di colonne; nome con categoria, conto e quando sotto, importi a destra.
+    if (tipo === 'intestazione') return null;
+    const sotto = [categoria, conto, quando].filter(Boolean).join(' · ');
+    return (
+      <RigaPremibile onPress={onApri} linea etichetta={nome}>
+        {tipo === 'voce' && icona ? <Tessera icona={icona} misura="piccola" /> : null}
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Testo stile={tipo === 'voce' ? 'corpo-forte' : st} colore={col} numberOfLines={1}>{nome}</Testo>
+          {sotto ? <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={2}>{sotto}</Testo> : null}
+        </View>
+        <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
+          <Testo stile={tipo === 'voce' ? 'corpo-forte' : st} colore={col}>{quota}</Testo>
+          {totale && totale !== quota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{totale}</Testo> : null}
+        </View>
+      </RigaPremibile>
+    );
+  }
   return (
     <RigaPremibile onPress={onApri} linea etichetta={nome}>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
@@ -271,38 +386,20 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
   );
 }
 
-// ---- CMP-27 Riga movimento ----
-export function RigaMovimento({ tipo, esercente, categoria, conto, importo, icona, etichetta, onApri }: {
-  tipo: 'uscita' | 'entrata' | 'trasferimento'; esercente: string; categoria: string; conto: string; importo: string; icona: string; etichetta?: { testo: string; icona: string }; onApri?: () => void;
-}) {
-  return (
-    <RigaPremibile onPress={onApri} linea etichetta={esercente}>
-      <Tessera icona={tipo === 'trasferimento' ? 'arrow-left-right' : icona} misura="media" tono={tipo === 'trasferimento' ? 'neutro' : tipo === 'entrata' ? 'ok' : 'accento'} />
-      <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-        <Testo stile="corpo-forte" numberOfLines={1}>{esercente}</Testo>
-        <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{categoria}</Testo>
-      </View>
-      <Col w={170}>{etichetta ? <Etichetta testo={etichetta.testo} icona={etichetta.icona} /> : null}</Col>
-      <Col w={170}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
-      <Col w={110} destra><Testo stile="corpo-forte" colore={tipo === 'entrata' ? 'testo-ok' : 'testo-primario'}>{importo}</Testo></Col>
-    </RigaPremibile>
-  );
-}
-
 // ---- CMP-28 Scheda conto ----
-export function SchedaConto({ nome, tipo, saldo, nota, condiviso, icona, onApri }: { nome: string; tipo: string; saldo: string; nota: string; condiviso: boolean; icona: string; onApri: () => void }) {
+export function SchedaConto({ nome, nota, condiviso, icona, onApri }: { nome: string; nota?: string; condiviso: boolean; icona: string; onApri: () => void }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${nome}, saldo ${saldo}`} onPress={onApri}
-      style={(s: StatoPressione) => [{ width: 352, padding: d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c[s.hovered ? 'sfondo-hover' : 'sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, anelloFocus(c, s.focused)]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={nome} onPress={onApri}
+      style={(s: StatoPressione) => [{ width: compatto ? '100%' : 352, minHeight: 44, padding: compatto ? 12 : d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c[s.hovered ? 'sfondo-hover' : 'sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, anelloFocus(c, s.focused)]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
         <Tessera icona={icona} misura="grande" />
-        <View style={{ flex: 1, gap: d['spazio-testo'] }}><Testo stile="titolo-scheda">{nome}</Testo><Testo stile="dettaglio-normale" colore="testo-secondario">{tipo}</Testo></View>
+        <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+          <Testo stile="titolo-scheda">{nome}</Testo>
+          {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
+        </View>
         {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
-      </View>
-      <Testo stile="numero-grande">{saldo}</Testo>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-        <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ flex: 1 }}>{nota}</Testo>
         <Icona nome="chevron-right" misura={16} colore="icona-tenue" />
       </View>
     </Pressable>
@@ -315,16 +412,17 @@ export function RigaAvanzamento({ nome, importo, percentuale, valore, stato = 'i
   nome: string; importo: string; percentuale?: string; valore: number; stato?: StatoAvanzamento; icona: string; compatta?: boolean; onApri?: () => void;
 }) {
   const tono: ToneAvanzamento = stato === 'completo' ? 'ok' : stato === 'attenzione' ? 'attenzione' : 'accento';
+  const stretto = useCompatto();
   const colPct: NomeColore = stato === 'completo' ? 'testo-ok' : stato === 'attenzione' ? 'testo-attenzione' : 'testo-secondario';
   const testa = (
-    <View style={{ flex: compatta ? undefined : 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+    <View style={{ flex: compatta || stretto ? undefined : 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
       <Icona nome={icona} misura={20} /><Testo numberOfLines={1} style={{ flex: 1 }}>{nome}</Testo>
     </View>
   );
-  if (compatta) return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ gap: d['spazio-testo'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
+  if (compatta || stretto) return (
+    <Pressable onPress={onApri} disabled={!onApri} style={{ gap: d['spazio-testo'], minHeight: stretto ? 44 : undefined, paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-        <View style={{ flex: 1 }}>{testa}</View>
+        <View style={{ flex: 1, minWidth: 0 }}>{testa}</View>
         <Testo stile="corpo-forte">{importo}</Testo>
         {percentuale ? <Testo stile="corpo-forte" colore={colPct}>{percentuale}</Testo> : null}
       </View>
@@ -350,7 +448,7 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
         <Tessera icona={icona} misura="grande" tono={tono} />
         <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: d['spazio-icona'] }}>
             <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2}>{nome}</Testo>
             {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
           </View>
@@ -361,33 +459,38 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
         </View>
       </View>
       <Barra valore={avanzamento} />
-      <View style={{ flexDirection: 'row', gap: d['spazio-icona'] }}>{azioni}</View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-icona'] }}>{azioni}</View>
     </View>
   );
 }
 
 // ---- CMP-31 Riga categoria ----
-export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, icona, ereditata, colore, onApriChiudi, onModifica }: {
-  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; speso: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void;
+export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica }: {
+  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   return (
     <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], borderRadius: d['raggio-controllo'] }}>
-      {livello > 0 ? <View style={{ width: livello === 1 ? d['misura-rientro-albero'] : d['misura-rientro-albero-doppio'] }} /> : null}
-      <View style={{ width: d['misura-icona-media'], alignItems: 'center' }}>
-        {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: compatto ? 0 : d['margine-voce-h'], borderRadius: d['raggio-controllo'] }}>
+      {livello > 0 ? <View style={{ width: (livello === 1 ? d['misura-rientro-albero'] : d['misura-rientro-albero-doppio']) / (compatto ? 2 : 1) }} /> : null}
+      <View style={{ width: compatto ? 28 : d['misura-icona-media'], alignItems: 'center' }}>
+        {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi} hitSlop={compatto ? 10 : 0}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
       </View>
       <Tessera icona={icona} misura="media" tono={ereditata ? 'neutro' : 'accento'} coloreIcona={ereditata ? 'icona-tenue' : undefined} />
-      <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
+        {compatto && percentuale !== undefined ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`${percentuale} dello stipendio`}</Testo> : null}
       </View>
+      {compatto ? null : (
       <View style={{ width: 120, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
         <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: colore ?? c['bordo-scheda'] }} />
         <Testo stile="dettaglio-normale" colore={colore ? 'testo-secondario' : 'testo-terziario'}>{nomeColoreCategoria(colore) ?? 'nessuno'}</Testo>
       </View>
-      <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
+      )}
+      {compatto ? <View style={{ alignItems: 'flex-end', flexShrink: 0 }}><Testo stile="corpo-forte">{speso}</Testo></View> : <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>}
+      {!compatto && percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
       <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />
     </View>
   );
@@ -395,22 +498,22 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, icon
 
 // ---- CMP-35 Riga rata ----
 export function RigaRata({ nome, fine, rata, compatta, onApri, icona = 'credit-card' }: { nome: string; fine: string; rata: string; compatta?: boolean; onApri?: () => void; icona?: string }) {
+  if (useCompatto()) return (
+    <RigaPremibile onPress={onApri} linea etichetta={nome}>
+      <Icona nome={icona} misura={20} />
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Testo stile="corpo-forte" numberOfLines={1}>{nome}</Testo>
+        {fine ? <Testo stile="dettaglio-normale" colore="testo-secondario">{fine}</Testo> : null}
+      </View>
+      <Testo stile="corpo-forte" style={{ flexShrink: 0 }}>{rata}</Testo>
+    </RigaPremibile>
+  );
   return (
     <RigaPremibile onPress={onApri} linea etichetta={nome}>
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}><Icona nome={icona} misura={20} /><Testo stile="corpo-forte" numberOfLines={1} style={{ flex: 1 }}>{nome}</Testo></View>
       {compatta ? <Testo colore="testo-secondario">{fine}</Testo> : <Col w={220}><Testo colore="testo-secondario">{fine}</Testo></Col>}
       {compatta ? <Testo stile="corpo-forte">{rata}</Testo> : <Col w={140} destra><Testo stile="corpo-forte">{rata}</Testo></Col>}
     </RigaPremibile>
-  );
-}
-
-// ---- CMP-36 Riga controllo ----
-export function RigaControllo({ testo, rispettata }: { testo: string; rispettata: boolean }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-      <Icona nome={rispettata ? 'circle-check' : 'circle-x'} misura={16} colore={rispettata ? 'icona-ok' : 'icona-errore'} />
-      <Testo style={{ flex: 1 }}>{testo}</Testo>
-    </View>
   );
 }
 
@@ -423,7 +526,7 @@ export function SelettorePeriodo({ mese, meseOggi, onCambia }: { mese: string; m
       <Pulsante etichetta="Oggi" compatto onPress={() => onCambia(meseOggi)} disattivato={mese === meseOggi} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], borderWidth: d['misura-bordo'], borderColor: c['bordo-controllo'], borderRadius: d['raggio-controllo'] }}>
         <PulsanteIcona icona="chevron-left" etichetta="Mese precedente" fantasma lato={ALTEZZA_CONTROLLO - 2 * d['misura-bordo']} onPress={() => onCambia(spostaMese(mese, -1))} />
-        <Testo stile="corpo-forte" style={{ minWidth: 110, textAlign: 'center' }}>{nomeMese(mese)}</Testo>
+        <Testo stile="corpo-forte" style={{ minWidth: 110, textAlign: 'center' }} numberOfLines={1}>{nomeMese(mese)}</Testo>
         <PulsanteIcona icona="chevron-right" etichetta="Mese successivo" fantasma lato={ALTEZZA_CONTROLLO - 2 * d['misura-bordo']} onPress={() => onCambia(spostaMese(mese, 1))} />
       </View>
     </View>
@@ -495,6 +598,21 @@ export function GraficoLinea({ punti, altezza = 200 }: { punti: { etichetta: str
 export function RigaPosizione({ titolo, codice, quote, prezzoMedio, prezzoOggi, valore, guadagno, positivo, peso, onApri }: {
   titolo: string; codice: string; quote: string; prezzoMedio: string; prezzoOggi: string; valore: string; guadagno: string; positivo: boolean; peso: string; onApri?: () => void;
 }) {
+  if (useCompatto()) return (
+    <RigaPremibile onPress={onApri} linea etichetta={titolo}>
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+        <Testo stile="corpo-forte" numberOfLines={2}>{titolo}</Testo>
+        <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{`${codice} · ${quote} × ${prezzoOggi} · peso ${peso}`}</Testo>
+      </View>
+      <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
+        <Testo stile="corpo-forte">{valore}</Testo>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'] }}>
+          <Icona nome={positivo ? 'arrow-up-right' : 'arrow-down-left'} misura={16} colore={positivo ? 'icona-ok' : 'icona-errore'} />
+          <Testo stile="dettaglio-forte" colore={positivo ? 'testo-ok' : 'testo-errore'}>{guadagno}</Testo>
+        </View>
+      </View>
+    </RigaPremibile>
+  );
   return (
     <RigaPremibile onPress={onApri} linea etichetta={titolo}>
       <View style={{ flex: 1, gap: d['spazio-testo'] }}><Testo stile="corpo-forte">{titolo}</Testo><Testo stile="dettaglio-normale" colore="testo-secondario">{codice}</Testo></View>
@@ -513,6 +631,7 @@ export function RigaPosizione({ titolo, codice, quote, prezzoMedio, prezzoOggi, 
 
 // Intestazione delle colonne della riga posizione.
 export function IntestazionePosizioni() {
+  if (useCompatto()) return null;
   const t = (s: string, w?: number) => (w ? <Col w={w} destra><Testo stile="dettaglio-forte" colore="testo-secondario">{s}</Testo></Col> : <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1 }}>{s}</Testo>);
   return <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingBottom: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>{t('Investimento')}{t('Quantità', 90)}{t('Prezzo medio', 90)}{t('Prezzo oggi', 90)}{t('Valore', 110)}{t('Guadagno', 170)}{t('Peso', 56)}</View>;
 }
@@ -522,6 +641,20 @@ export function IntestazionePosizioni() {
 export function RigaScadenzaAnnuale({ nome, quando, importo, dodicesimo, icona, copertura, onApri }: {
   nome: string; quando: string; importo: string; dodicesimo?: string; icona: string; copertura?: { testo: string; tono: Tono }; onApri?: () => void;
 }) {
+  if (useCompatto()) return (
+    <RigaPremibile onPress={onApri} linea etichetta={nome}>
+      <Tessera icona={icona} misura="piccola" />
+      <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+        <Testo stile="corpo-forte" numberOfLines={1}>{nome}</Testo>
+        <Testo stile="dettaglio-normale" colore="testo-secondario">{quando}</Testo>
+        {copertura ? <Etichetta testo={copertura.testo} tono={copertura.tono} /> : null}
+      </View>
+      <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
+        <Testo stile="corpo-forte">{importo}</Testo>
+        {dodicesimo ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`1/12: ${dodicesimo}`}</Testo> : null}
+      </View>
+    </RigaPremibile>
+  );
   return (
     <RigaPremibile onPress={onApri} linea etichetta={nome}>
       <Tessera icona={icona} misura="piccola" />
@@ -541,10 +674,11 @@ export function RigaScadenzaAnnuale({ nome, quando, importo, dodicesimo, icona, 
 export function CalendarioAnnuali({ mesi, altezza = 80 }: { mesi: { etichetta: string; importo: number; attuale?: boolean; attenzione?: boolean }[]; altezza?: number }) {
   const { c } = useTema();
   const massimo = Math.max(1, ...mesi.map((m) => m.importo));
-  return (
+  const compatto = useCompatto();
+  const contenuto = (
     <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-testo'] }}>
       {mesi.map((m) => (
-        <View key={m.etichetta} style={{ flex: 1, alignItems: 'center', gap: d['spazio-testo'] }}>
+        <View key={m.etichetta} style={{ flex: 1, minWidth: compatto ? 48 : undefined, alignItems: 'center', gap: d['spazio-testo'] }}>
           <Testo stile="dettaglio-forte" colore={m.importo ? 'testo-primario' : 'testo-terziario'}>{m.importo ? euro(m.importo, { decimali: 0 }) : '–'}</Testo>
           <View style={{ width: 32, height: Math.max(4, Math.round((m.importo / massimo) * altezza)), borderTopLeftRadius: d['raggio-controllo-interno'], borderTopRightRadius: d['raggio-controllo-interno'],
             backgroundColor: c[!m.importo ? 'avanzamento-traccia' : m.attenzione ? 'avanzamento-attenzione' : 'avanzamento-accento'] }} />
@@ -553,6 +687,8 @@ export function CalendarioAnnuali({ mesi, altezza = 80 }: { mesi: { etichetta: s
       ))}
     </View>
   );
+  // Telefono: i 12 mesi scorrono in orizzontale dentro la scheda (la pagina non si sposta).
+  return compatto ? <ScrollView horizontal showsHorizontalScrollIndicator={false}>{contenuto}</ScrollView> : contenuto;
 }
 
 // La cifra di un salvadanaio, grande e premibile: apre la finestra per cambiarla.
@@ -560,7 +696,7 @@ export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string
   const { c } = useTema();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={etichetta} onPress={onPress}
-      style={(s: StatoPressione) => [{ paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
+      style={(s: StatoPressione) => [{ paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], minHeight: 44, justifyContent: 'center', borderRadius: d['raggio-controllo'],
         backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
       <Testo stile="numero-grande">{cifra}</Testo>
     </Pressable>
@@ -578,6 +714,29 @@ export function RigaObiettivo({ nome, scadenza, messo, cifra, avanzamento, tonoB
     <View style={{ width: 120, alignItems: 'flex-end', gap: d['spazio-testo'] }}>
       <Testo stile="dettaglio-normale" colore="testo-secondario">{etichetta}</Testo><Testo stile="corpo-forte">{valore}</Testo>
     </View>
+  );
+  if (useCompatto()) return (
+    // Telefono: nome e stato sopra, barra al centro, i numeri in fila sotto, la cifra da cambiare in fondo.
+    <Pressable accessibilityRole="button" accessibilityLabel={nome} onPress={onApri} style={{ gap: d['spazio-icona'], paddingVertical: d['margine-riga-v'], paddingHorizontal: d['margine-voce-h'] }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+        <Tessera icona={icona} misura="media" />
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: d['spazio-icona'] }}>
+            <Testo stile="corpo-forte" style={{ flexShrink: 1 }}>{nome}</Testo>
+            {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
+          </View>
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{scadenza}</Testo>
+        </View>
+        <CifraModificabile cifra={cifra} etichetta={`Cambia la cifra di ${nome}: ${cifra}`} onPress={onCifra} />
+      </View>
+      <Barra valore={avanzamento} tono={tonoBarra} />
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{messo}</Testo>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: d['spazio-icona'] }}>
+        <View style={{ gap: 2 }}><Testo stile="dettaglio-normale" colore="testo-secondario">Mancano</Testo><Testo stile="corpo-forte">{mancano}</Testo></View>
+        <View style={{ gap: 2 }}><Testo stile="dettaglio-normale" colore="testo-secondario">Da versare al mese</Testo><Testo stile="corpo-forte">{alMese}</Testo></View>
+        <Etichetta testo={stato.testo} tono={stato.tono} />
+      </View>
+    </Pressable>
   );
   return (
     <RigaPremibile onPress={onApri} etichetta={nome}>
@@ -610,6 +769,28 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe:
   const num = (testo: string, w: number, stile: 'dettaglio-forte' | 'corpo-normale' | 'corpo-forte', colore: NomeColore) => (
     <View style={{ width: w, alignItems: 'flex-end' }}><Testo stile={stile} colore={colore}>{testo}</Testo></View>
   );
+  if (useCompatto()) return (
+    <View style={{ borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-controllo'], overflow: 'hidden' }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], backgroundColor: c['sfondo-tenue'] }}>
+        <Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo>
+        <Testo stile="dettaglio-forte" colore="testo-secondario">Valore e guadagno</Testo>
+      </View>
+      {righe.map((r) => (
+        <Pressable key={r.chiave} accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
+          style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'],
+            borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], backgroundColor: c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Testo stile="corpo-forte" numberOfLines={2}>{r.nome}</Testo>
+            <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{`${r.dettaglio} · ${r.prezzo}`}</Testo>
+          </View>
+          <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
+            <Testo stile="corpo-forte">{r.valore}</Testo>
+            <Testo stile="dettaglio-forte" colore={r.positivo ? 'testo-ok' : 'testo-errore'}>{r.guadagno}</Testo>
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  );
   return (
     <View style={{ borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-controllo'], overflow: 'hidden' }}>
       <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], backgroundColor: c['sfondo-tenue'] }}>
@@ -635,6 +816,7 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe:
 
 // ---- CMP-39 Scheda esposizione ----
 export function SchedaEsposizione({ titolo, voci }: { titolo: string; voci: { voce: string; peso: number }[] }) {
+  const compatto = useCompatto();
   return (
     <Scheda titolo={titolo} style={{ flex: 1 }}>
       <View style={{ gap: d['spazio-elenco'] }}>
@@ -642,7 +824,7 @@ export function SchedaEsposizione({ titolo, voci }: { titolo: string; voci: { vo
         {voci.map((v) => (
           <View key={v.voce} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
             <Testo style={{ flex: 1 }} numberOfLines={1}>{v.voce}</Testo>
-            <Barra valore={v.peso} larghezza={140} />
+            <Barra valore={v.peso} larghezza={compatto ? 72 : 140} />
             <Col w={48} destra><Testo stile="corpo-forte">{`${String(v.peso).replace('.', ',')}%`}</Testo></Col>
           </View>
         ))}
@@ -653,6 +835,13 @@ export function SchedaEsposizione({ titolo, voci }: { titolo: string; voci: { vo
 
 // ---- CMP-40 Riga operazione ----
 export function RigaOperazione({ acquisto, titolo, dettaglio, quote, totale, onApri }: { acquisto: boolean; titolo: string; dettaglio: string; quote: string; totale: string; onApri?: () => void }) {
+  if (useCompatto()) return (
+    <RigaPremibile onPress={onApri} linea etichetta={titolo}>
+      <Tessera icona={acquisto ? 'arrow-down-left' : 'arrow-up-right'} misura="media" tono={acquisto ? 'accento' : 'neutro'} />
+      <View style={{ flex: 1, minWidth: 0, gap: 2 }}><Testo stile="corpo-forte" numberOfLines={2}>{titolo}</Testo><Testo stile="dettaglio-normale" colore="testo-secondario">{`${dettaglio} · ${quote}`}</Testo></View>
+      <Testo stile="corpo-forte" style={{ flexShrink: 0 }}>{totale}</Testo>
+    </RigaPremibile>
+  );
   return (
     <RigaPremibile onPress={onApri} linea etichetta={titolo}>
       <Tessera icona={acquisto ? 'arrow-down-left' : 'arrow-up-right'} misura="media" tono={acquisto ? 'accento' : 'neutro'} />

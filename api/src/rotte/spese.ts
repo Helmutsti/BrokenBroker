@@ -1,10 +1,11 @@
 import { Router } from 'express';
+import { bloccoSpesa, erroreSpesaBloccata, vietaCampi, vietaPromemoria } from '../collegamenti.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodoRichiesto } from '../periodo.ts';
+import { creaSalvadanaioDaSpesa } from './obiettivi.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
-import { dividiVersamento } from './obiettivi.ts';
 
 export const rotteSpese = Router();
 
@@ -37,6 +38,21 @@ rotteSpese.get('/:id', async (req, res) => {
   res.json(spesa);
 });
 
+function obiettivoNull(c: Record<string, unknown>): null | undefined {
+  if (!('obiettivo_id' in c) || c.obiettivo_id === undefined) return undefined;
+  if (c.obiettivo_id !== null) throw new ErroreApi(400, 'Il salvadanaio di una spesa non si sceglie: usa "nuovo_salvadanaio" per crearne uno nuovo, oppure obiettivo_id = null per scollegarla');
+  return null;
+}
+
+// { padre_id?: uuid | null, contenitore?: nome } (non entrambi): dove mettere il salvadanaio nuovo della spesa.
+function leggiNuovoSalvadanaio(c: Record<string, unknown>): { padre_id?: string | null; contenitore?: string } | undefined {
+  if (!('nuovo_salvadanaio' in c) || c.nuovo_salvadanaio === undefined || c.nuovo_salvadanaio === null) return undefined;
+  const n = v.corpo(c.nuovo_salvadanaio);
+  if (n.padre_id !== undefined && n.padre_id !== null && n.contenitore !== undefined) throw new ErroreApi(400, 'Indica un salvadanaio esistente (padre_id) oppure un contenitore nuovo (contenitore), non entrambi');
+  const contenitore = n.contenitore === undefined ? undefined : v.testo(n, 'contenitore', true, 120);
+  return { padre_id: n.padre_id === undefined ? undefined : v.annullabile(n, 'padre_id', () => v.id(n, 'padre_id')), contenitore };
+}
+
 function leggi(c: Record<string, unknown>, nuova: boolean) {
   const importo = v.importo(c, 'importo', nuova);
   if (importo !== undefined && Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
@@ -45,12 +61,15 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     importo,
     ogni_mesi: v.annullabile(c, 'ogni_mesi', () => v.intero(c, 'ogni_mesi', 1, 120)),
     prossima_scadenza: v.annullabile(c, 'prossima_scadenza', () => v.data(c, 'prossima_scadenza')),
+    senza_giorno: v.booleano(c, 'senza_giorno'),
     conto_id: v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')),
     categoria_id: v.annullabile(c, 'categoria_id', () => v.id(c, 'categoria_id')),
     tipo: v.scelta(c, 'tipo', TIPI),
     attiva: v.booleano(c, 'attiva'),
     note: v.annullabile(c, 'note', () => v.testo(c, 'note', false, 500)),
-    obiettivo_id: v.annullabile(c, 'obiettivo_id', () => v.id(c, 'obiettivo_id')),
+    // Il collegamento a un salvadanaio non si sceglie più (decisione 39): si crea un salvadanaio nuovo con
+    // `nuovo_salvadanaio`, oppure si scollega con null.
+    obiettivo_id: obiettivoNull(c),
     alimenta_obiettivo_id: v.annullabile(c, 'alimenta_obiettivo_id', () => v.id(c, 'alimenta_obiettivo_id')),
   };
 }
@@ -58,14 +77,18 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
 rotteSpese.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const campi = leggi(c, true);
+  const nuovo = leggiNuovoSalvadanaio(c);
   // ogni_mesi assente = ogni mese; null esplicito = una volta sola.
   if (!('ogni_mesi' in c)) campi.ogni_mesi = 1;
+  if (campi.senza_giorno && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa senza giorno ha bisogno almeno del mese');
   if (campi.ogni_mesi === null && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa una tantum ha bisogno della data');
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
+    if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
       `insert into spese_previste (proprietario_id, ${voci.map(([k]) => k).join(', ')})
        values (fp_me(), ${voci.map((_, i) => `$${i + 1}`).join(', ')}) returning id`, voci.map(([, x]) => x));
+    if (nuovo) await creaSalvadanaioDaSpesa(db, rows[0].id, nuovo);
     const p = await periodoRichiesto(db, undefined);
     return (await speseDelMese(db, p, rows[0].id))[0];
   });
@@ -74,10 +97,23 @@ rotteSpese.post('/', async (req, res) => {
 
 rotteSpese.patch('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
-  const set = v.setParziale(leggi(v.corpo(req.body), false), 2);
+  const c = v.corpo(req.body);
+  const campi = leggi(c, false);
+  const nuovo = leggiNuovoSalvadanaio(c);
+  const set = nuovo && Object.values(campi).every((x) => x === undefined) ? null : v.setParziale(campi, 2);
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
-    const { rowCount } = await db.query(`update spese_previste set ${set.sql} where id = $1`, [id, ...set.valori]);
-    if (!rowCount) return undefined;
+    const blocco = await bloccoSpesa(db, id);
+    vietaCampi(blocco, nuovo ? [...Object.keys(c), 'obiettivo_id'] : Object.keys(c), erroreSpesaBloccata);
+    if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
+    if (campi.obiettivo_id === null) {
+      const g = (await db.query<{ nome: string }>('select o.nome from spese_previste s join obiettivi o on o.id = s.obiettivo_id where s.id = $1 and o.da_spesa', [id])).rows[0];
+      if (g) throw new ErroreApi(409, `Il salvadanaio «${g.nome}» è stato creato da questa spesa: non si scollega.`);
+    }
+    if (set) {
+      const { rowCount } = await db.query(`update spese_previste set ${set.sql} where id = $1`, [id, ...set.valori]);
+      if (!rowCount) return undefined;
+    } else if (!(await db.query('select 1 from spese_previste where id = $1', [id])).rowCount) return undefined;
+    if (nuovo) await creaSalvadanaioDaSpesa(db, id, nuovo);
     const p = await periodoRichiesto(db, undefined);
     return (await speseDelMese(db, p, id))[0];
   });
@@ -88,6 +124,8 @@ rotteSpese.patch('/:id', async (req, res) => {
 rotteSpese.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
+    const blocco = await bloccoSpesa(db, id);
+    if (blocco) throw erroreSpesaBloccata(blocco);
     if ((await db.query('delete from spese_previste where id = $1', [id])).rowCount) return;
     const visibile = (await db.query('select 1 from spese_previste where id = $1', [id])).rowCount;
     throw visibile ? new ErroreApi(403, 'Solo chi ha creato la spesa può cancellarla') : nonTrovato('Spesa prevista');
@@ -95,8 +133,7 @@ rotteSpese.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// La spunta "uscito" è solo un segno nel mese, come nell'Excel: niente movimento
-// sul conto. Una spesa pagata da un salvadanaio, spuntata, preleva da lì.
+// La spunta è solo un segno nel mese, come nell'Excel. Per una spesa annuale vuol dire "quota del mese messa da parte" e non preleva nulla (il prelievo dal salvadanaio, quando la spesa esce davvero, lo scrive l'utente). Un'altra spesa pagata da un salvadanaio, spuntata, preleva da lì; il promemoria di un salvadanaio, spuntato, non muove soldi.
 rotteSpese.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
@@ -104,46 +141,31 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     const p = await periodoRichiesto(db, c.mese);
     const [s] = await speseDelMese(db, p, id);
     if (!s) throw nonTrovato('Spesa prevista');
-    if (s.tipo === 'budget') throw new ErroreApi(400, 'Un budget si riempie con i movimenti, non si spunta');
-    if (!s.nel_mese) throw new ErroreApi(400, 'Questa spesa non cade in questo mese');
+    // Le annuali contano ogni mese come quota: si spuntano anche fuori dal mese della scadenza.
+    const annuale = s.attiva && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1;
+    if (!s.nel_mese && !annuale) throw new ErroreApi(400, 'Questa spesa non cade in questo mese');
     if (s.uscita) throw new ErroreApi(409, 'Questa spesa è già uscita in questo mese');
-    // Di base oggi se siamo nel mese, altrimenti il giorno della scadenza.
-    const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : s.scadenza ?? p.dal);
+    // Di base oggi se siamo nel mese, altrimenti il giorno della scadenza (una annuale fuori dal mese della scadenza: l'inizio del mese).
+    const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : (s.nel_mese ? s.scadenza : null) ?? p.dal);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
     const spunta = (await db.query<{ id: string; data: string }>(
       'insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
-    if (s.obiettivo_id) {
+    if (s.obiettivo_id && !annuale) {
       await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, spunta_id) values ($1, fp_me(), $2, $3, $4)',
         [s.obiettivo_id, data, `-${s.mia_quota}`, spunta.id]);
-    }
-    // "Mettici da parte": la cifra entra nel salvadanaio, divisa tra i sotto-obiettivi.
-    if (s.alimenta_obiettivo_id) {
-      for (const { obiettivo_id, importo } of await dividiVersamento(db, s.alimenta_obiettivo_id, Number(s.mia_quota))) {
-        await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, spunta_id) values ($1, fp_me(), $2, $3, $4)',
-          [obiettivo_id, data, importo, spunta.id]);
-      }
     }
     return spunta;
   });
   res.status(201).json(risultato);
 });
 
-// Toglie la spunta del mese (e il prelievo dal salvadanaio). Toglie anche le
-// spunte fatte prima con un movimento collegato.
+// Toglie la spunta del mese (e il prelievo dal salvadanaio).
 rotteSpese.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
     const spunte = (await db.query('delete from spunte where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount ?? 0;
-    const { rows } = await db.query<{ id: string }>(
-      'select id from movimenti where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al]);
-    if (!rows.length && !spunte) throw nonTrovato('Spunta');
-    if (rows.length) {
-      const ids = rows.map((r) => r.id);
-      await db.query('delete from versamenti where movimento_id = any($1)', [ids]);
-      const { rowCount } = await db.query('delete from movimenti where id = any($1)', [ids]);
-      if (rowCount !== ids.length) throw new ErroreApi(403, "Può togliere la spunta chi l'ha messa o il proprietario del conto");
-    }
+    if (!spunte) throw nonTrovato('Spunta');
   });
   res.status(204).end();
 });

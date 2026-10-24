@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, type PressableStateCallbackType, type StyleProp, View, type ViewStyle } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { type NomeColore, stiliTesto } from '../tema/token.ts';
 import { Icona, type Misura } from './Icona.tsx';
@@ -50,6 +51,7 @@ export function Pulsante({ etichetta, icona, tipo = 'secondario', onPress, disat
   etichetta: string; icona?: string; tipo?: TipoPulsante; onPress?: () => void; disattivato?: boolean; larghezzaPiena?: boolean; etichettaAccessibile?: string; compatto?: boolean;
 }) {
   const { c } = useTema();
+  const compattoSchermo = useCompatto();
   const testo: NomeColore = tipo === 'primario' ? 'testo-su-accento' : tipo === 'pericolo' ? 'testo-errore' : tipo === 'testo' ? 'testo-accento' : 'testo-primario';
   const ic: NomeColore = tipo === 'primario' ? 'icona-su-accento' : tipo === 'pericolo' ? 'icona-errore' : tipo === 'testo' ? 'icona-accento' : 'icona-predefinita';
   return (
@@ -58,7 +60,7 @@ export function Pulsante({ etichetta, icona, tipo = 'secondario', onPress, disat
         flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: d['spazio-icona'],
         paddingVertical: dentroIlBordo(d['margine-pulsante-v']),
         paddingHorizontal: dentroIlBordo(tipo === 'testo' ? d['margine-etichetta-h'] : compatto ? d['margine-voce-h'] : d['margine-pulsante-h']),
-        borderRadius: d['raggio-controllo'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start', opacity: disattivato ? d['opacita-disattivato'] : 1,
+        minHeight: compattoSchermo ? 44 : undefined, borderRadius: d['raggio-controllo'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start', opacity: disattivato ? d['opacita-disattivato'] : 1,
         backgroundColor: tipo === 'primario' ? c[s.hovered ? 'sfondo-accento-hover' : 'sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent',
         borderWidth: d['misura-bordo'], borderColor: tipo === 'secondario' ? c['bordo-controllo'] : 'transparent',
       }, anelloFocus(c, s.focused)]}>
@@ -70,8 +72,9 @@ export function Pulsante({ etichetta, icona, tipo = 'secondario', onPress, disat
 
 // ---- CMP-04 Pulsante solo icona ----
 // Quadrato alto come gli altri controlli; "lato" più piccolo quando sta dentro un altro contorno.
-export function PulsanteIcona({ icona, etichetta, onPress, fantasma, disattivato, lato = ALTEZZA_CONTROLLO }: { icona: string; etichetta: string; onPress?: () => void; fantasma?: boolean; disattivato?: boolean; lato?: number }) {
+export function PulsanteIcona({ icona, etichetta, onPress, fantasma, disattivato, lato: latoBase = ALTEZZA_CONTROLLO }: { icona: string; etichetta: string; onPress?: () => void; fantasma?: boolean; disattivato?: boolean; lato?: number }) {
   const { c } = useTema();
+  const lato = useCompatto() ? Math.max(latoBase, 44) : latoBase;
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={etichetta} onPress={onPress} disabled={disattivato}
       style={(s: StatoPressione) => [{
@@ -103,9 +106,10 @@ export function Etichetta({ testo, icona, tono = 'neutro' }: { testo: string; ic
 // ---- CMP-11 Criterio ----
 export function Criterio({ testo, scelto, onPress }: { testo: string; scelto: boolean; onPress: () => void }) {
   const { c } = useTema();
+  const alto = useCompatto();
   return (
     <Pressable accessibilityRole="checkbox" aria-checked={scelto} onPress={onPress}
-      style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], paddingVertical: d['margine-etichetta-v'], paddingHorizontal: d['margine-etichetta-h'] + 4,
+      style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], minHeight: alto ? 44 : undefined, paddingVertical: d['margine-etichetta-v'], paddingHorizontal: d['margine-etichetta-h'] + 4,
         borderRadius: d['raggio-pillola'], borderWidth: d['misura-bordo'], borderColor: c[scelto ? 'bordo-focus' : 'bordo-controllo'],
         backgroundColor: scelto ? c['sfondo-accento-tenue'] : s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
       {scelto ? <Icona nome="circle-check" misura={16} colore="icona-accento" /> : null}
@@ -177,9 +181,10 @@ export function Separatore() {
 // ---- CMP-09 Spunta ----
 export function Spunta({ fatta, onPress, etichetta, disattivato }: { fatta: boolean; onPress?: () => void; etichetta: string; disattivato?: boolean }) {
   const { c } = useTema();
+  const bersaglio = useCompatto() ? 44 : d['misura-bersaglio'];
   return (
     <Pressable accessibilityRole="checkbox" aria-checked={fatta} aria-disabled={disattivato} accessibilityLabel={etichetta} onPress={onPress} disabled={disattivato}
-      style={(s: StatoPressione) => [{ width: d['misura-bersaglio'], height: d['misura-bersaglio'], alignItems: 'center', justifyContent: 'center', opacity: disattivato ? d['opacita-disattivato'] : 1 }, anelloFocus(c, s.focused)]}>
+      style={(s: StatoPressione) => [{ width: bersaglio, height: bersaglio, alignItems: 'center', justifyContent: 'center', opacity: disattivato ? d['opacita-disattivato'] : 1 }, anelloFocus(c, s.focused)]}>
       {(s: StatoPressione) => (
         <View style={{ width: d['misura-spunta'], height: d['misura-spunta'], borderRadius: d['raggio-controllo-interno'], alignItems: 'center', justifyContent: 'center',
           backgroundColor: fatta ? c[s.hovered ? 'sfondo-accento-hover' : 'sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent',
@@ -192,11 +197,11 @@ export function Spunta({ fatta, onPress, etichetta, disattivato }: { fatta: bool
 }
 
 // ---- CMP-08 Interruttore ----
-export function Interruttore({ acceso, onCambia, etichetta }: { acceso: boolean; onCambia: (v: boolean) => void; etichetta: string }) {
+export function Interruttore({ acceso, onCambia, etichetta, disattivato }: { acceso: boolean; onCambia: (v: boolean) => void; etichetta: string; disattivato?: boolean }) {
   const { c } = useTema();
   return (
-    <Pressable accessibilityRole="switch" aria-checked={acceso} accessibilityLabel={etichetta} onPress={() => onCambia(!acceso)}
-      style={(s: StatoPressione) => [{ width: d['misura-interruttore-larghezza'], height: d['misura-interruttore-altezza'], borderRadius: d['raggio-pillola'], padding: d['misura-pomello-margine'],
+    <Pressable accessibilityRole="switch" aria-checked={acceso} hitSlop={{ top: 12, bottom: 12, left: 4, right: 4 }} accessibilityLabel={etichetta} disabled={disattivato} onPress={() => onCambia(!acceso)}
+      style={(s: StatoPressione) => [{ opacity: disattivato ? d['opacita-disattivato'] : 1, width: d['misura-interruttore-larghezza'], height: d['misura-interruttore-altezza'], borderRadius: d['raggio-pillola'], padding: d['misura-pomello-margine'],
         backgroundColor: c[acceso ? 'sfondo-accento' : 'sfondo-controllo-spento'], alignItems: acceso ? 'flex-end' : 'flex-start' }, anelloFocus(c, s.focused)]}>
       <View style={{ width: d['misura-pomello'], height: d['misura-pomello'], borderRadius: d['raggio-pillola'], backgroundColor: c['sfondo-pomello'] }} />
     </Pressable>
@@ -208,9 +213,10 @@ export function SceltaSegmenti<T extends string>({ opzioni, valore, onCambia, et
   opzioni: { valore: T; testo: string }[]; valore: T; onCambia: (v: T) => void; etichetta: string; larghezzaPiena?: boolean;
 }) {
   const { c } = useTema();
+  const alto = useCompatto();
   return (
     // Alta come campi, tendine e pulsanti: le opzioni riempiono l'altezza e il testo sta al centro.
-    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', height: ALTEZZA_CONTROLLO, padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
+    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', height: alto ? 44 : ALTEZZA_CONTROLLO, padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
       {opzioni.map((o) => {
         const scelta = o.valore === valore;
         return (

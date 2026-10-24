@@ -3,6 +3,8 @@ import type { PoolClient } from 'pg';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { periodoRichiesto } from '../periodo.ts';
+import { leggiRate, scadenzaRata } from '../rate.ts';
+import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
 
 export const rotteCategorie = Router();
@@ -46,15 +48,21 @@ rotteCategorie.get('/', async (req, res) => {
   res.json(req.query.formato === 'elenco' ? righe : albero(righe));
 });
 
-// Speso nel mese (?mese=AAAA-MM) per ogni categoria, senza le sottocategorie:
-// la somma sui rami la fa chi legge l'albero.
+// Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie: le spese
+// previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no.
+// I budget contano per intero, perché sono una stima e non si conosce la cifra esatta.
+// I promemoria dei salvadanai non sono spese. La somma sui rami la fa chi legge l'albero.
 rotteCategorie.get('/spese', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
-    return (await db.query(
-      `select categoria_id, (-sum(importo))::text as speso from movimenti
-        where categoria_id is not null and importo < 0 and trasferimento_id is null and data between $1 and $2
-        group by categoria_id`, [p.dal, p.al])).rows;
+    const per = new Map<string, number>();
+    for (const s of await speseDelMese(db, p)) {
+      if (s.categoria_id && s.attiva && s.nel_mese && !s.alimenta_obiettivo_id) per.set(s.categoria_id, (per.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
+    }
+    for (const r of await leggiRate(db)) {
+      if (r.categoria_id && r.attiva && scadenzaRata(r, p)) per.set(r.categoria_id, (per.get(r.categoria_id) ?? 0) + Number(r.importo_rata));
+    }
+    return [...per].map(([categoria_id, speso]) => ({ categoria_id, speso: speso.toFixed(2) }));
   });
   res.json(righe);
 });
@@ -100,7 +108,7 @@ rotteCategorie.patch('/:id', async (req, res) => {
   res.json(categoria);
 });
 
-// Cancellare una categoria in uso richiede ?sposta_su=<id>: movimenti, spese,
+// Cancellare una categoria in uso richiede ?sposta_su=<id>: spese,
 // rate e sottocategorie passano a quella categoria.
 rotteCategorie.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
@@ -115,13 +123,12 @@ rotteCategorie.delete('/:id', async (req, res) => {
       if (!ok.rowCount) throw nonTrovato('Categoria di destinazione');
       await controllaPadre(db, id, destinazione);
       await db.query('update categorie set padre_id = $2 where padre_id = $1', [id, destinazione]);
-      for (const tabella of ['movimenti', 'spese_previste', 'rate']) {
+      for (const tabella of ['spese_previste', 'rate']) {
         await db.query(`update ${tabella} set categoria_id = $2 where categoria_id = $1`, [id, destinazione]);
       }
     } else {
       const { rows } = await db.query<{ in_uso: boolean }>(
         `select exists (select 1 from categorie where padre_id = $1)
-             or exists (select 1 from movimenti where categoria_id = $1)
              or exists (select 1 from spese_previste where categoria_id = $1)
              or exists (select 1 from rate where categoria_id = $1) as in_uso`, [id]);
       if (rows[0].in_uso) throw new ErroreApi(409, 'La categoria è in uso: indica dove spostare le voci con ?sposta_su=<id>');

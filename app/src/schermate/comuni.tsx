@@ -1,8 +1,8 @@
 import { ActivityIndicator, View } from 'react-native';
 import { Esito } from '../componenti/base.tsx';
 import type { Tono } from '../componenti/base.tsx';
-import type { Obiettivo, Rata, Spesa } from '../dati/tipi.ts';
-import { data, euro, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
+import type { ElencoSpese, Obiettivo, Profilo, Rata, Spesa } from '../dati/tipi.ts';
+import { dataSpesa, euro, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { d, useTema } from '../tema/tema.tsx';
 
 // Pezzi condivisi tra le schermate.
@@ -37,6 +37,10 @@ export function prossimaScadenza(prima: string | null, ogni: number | null, da =
   return aggiungiMesi(prima, k * ogni);
 }
 
+// Prossima uscita di una spesa: se il giorno non è scelto vale tutto il mese, quindi il mese in corso conta ancora.
+export const proxSpesa = (s: Pick<Spesa, 'prossima_scadenza' | 'ogni_mesi' | 'senza_giorno'>, da = oggiIso()) =>
+  prossimaScadenza(s.prossima_scadenza, s.ogni_mesi, s.senza_giorno ? `${da.slice(0, 7)}-01` : da);
+
 // La scadenza della rata dentro un periodo, se c'è.
 export function scadenzaRataNel(r: Rata, dal: string, al: string): string | null {
   if (r.chiusa) return null;
@@ -48,14 +52,14 @@ export function scadenzaRataNel(r: Rata, dal: string, al: string): string | null
   return null;
 }
 
-// "Il 5 · ogni mese", "Novembre · ogni 6 mesi", "Una volta · 20 novembre 2026", "Tutto il mese".
+// "Il 5 · ogni mese", "15 novembre · ogni 6 mesi", "Marzo · ogni anno" (senza giorno), "Una volta · 20 novembre", "Tutto il mese".
 export function quando(s: Spesa): string {
   if (s.tipo === 'budget') return 'Tutto il mese';
-  if (s.ogni_mesi === null) return `Una volta · ${data(s.prossima_scadenza)}`;
+  if (s.ogni_mesi === null) return `Una volta · ${dataSpesa(s.prossima_scadenza, s.senza_giorno)}`;
   const giorno = s.prossima_scadenza ? Number(s.prossima_scadenza.slice(8, 10)) : null;
   if (s.ogni_mesi === 1) return giorno ? `Il ${giorno} · ogni mese` : 'Ogni mese';
-  const prossima = prossimaScadenza(s.prossima_scadenza, s.ogni_mesi);
-  const mese = prossima ? nomeMeseMinuscolo(prossima.slice(0, 7)) : '';
+  const prossima = proxSpesa(s);
+  const mese = prossima ? dataSpesa(prossima, s.senza_giorno) : '';
   const nome = mese.charAt(0).toUpperCase() + mese.slice(1);
   return `${nome} · ${s.ogni_mesi === 12 ? 'ogni anno' : s.ogni_mesi === 24 ? 'ogni 2 anni' : `ogni ${s.ogni_mesi} mesi`}`;
 }
@@ -71,6 +75,28 @@ export const tuttiGliObiettivi = (xs: Obiettivo[]): Obiettivo[] => xs.flatMap((o
 // spese "mettici da parte", che riempiono un salvadanaio invece di uscire.
 export const eAnnuale = (s: Spesa) => s.attiva && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1;
 
+// Cifra del mese: la quota mensile per le annuali, la mia quota per le altre voci.
+export const importoDelMese = (s: Spesa) => Number(eAnnuale(s) ? s.quota_mensile : s.mia_quota);
+
+// Le voci del mese divise per tipo. Il contenitore delle annuali non ha più un promemoria suo: se ne restano di vecchi, non si contano (la quota è già nelle annuali).
+// Annuali non ordinate; "delConto" sono tutte le voci che escono dal conto (le annuali con la quota del mese).
+export function vociDelMese(el: ElencoSpese, profilo: Profilo, perUscita?: (a: Spesa, b: Spesa) => number) {
+  const delMese = el.spese.filter((s) => s.attiva && s.nel_mese && !eAnnuale(s) && !s.obiettivo_id
+    && !(profilo.obiettivo_annuali && s.alimenta_obiettivo_id === profilo.obiettivo_annuali));
+  if (perUscita) delMese.sort(perUscita);
+  const fisse = delMese.filter((s) => s.tipo === 'fissa');
+  const budget = delMese.filter((s) => s.tipo === 'budget');
+  const investimenti = delMese.filter((s) => s.tipo === 'investimento' && !s.alimenta_obiettivo_id);
+  // "Mettici da parte": spuntate, i soldi vanno nel salvadanaio.
+  const salvadanai = delMese.filter((s) => s.alimenta_obiettivo_id);
+  const annuali = el.spese.filter(eAnnuale);
+  return { fisse, budget, investimenti, salvadanai, annuali, delConto: [...fisse, ...budget, ...investimenti, ...salvadanai, ...annuali] };
+}
+
+// Le rate che cadono nel periodo, in ordine di data.
+export const rateDelMese = (rate: Rata[], dal: string, al: string) =>
+  rate.map((x) => ({ r: x, quando: x.scadenza ?? scadenzaRataNel(x, dal, al) })).filter((x) => x.quando).sort((a, b) => a.quando!.localeCompare(b.quando!));
+
 export type ScadenzaAnnuale = { s: Spesa; quando: string; copertura: { testo: string; tono: Tono } };
 
 // Prossime uscite annuali in ordine di data. Quelle pagate da un obiettivo sono
@@ -79,7 +105,7 @@ export type ScadenzaAnnuale = { s: Spesa; quando: string; copertura: { testo: st
 export function prossimeAnnuali(spese: Spesa[], obiettivi: Obiettivo[], entroMesi = 3, da = oggiIso()) {
   const saldi = new Map(tuttiGliObiettivi(obiettivi).map((o) => [o.id, Number(o.saldo)]));
   const limite = aggiungiMesi(da, entroMesi);
-  const voci = spese.filter(eAnnuale).map((s) => ({ s, quando: prossimaScadenza(s.prossima_scadenza, s.ogni_mesi, da) }))
+  const voci = spese.filter(eAnnuale).map((s) => ({ s, quando: proxSpesa(s, da) }))
     .filter((x): x is { s: Spesa; quando: string } => !!x.quando).sort((a, b) => a.quando.localeCompare(b.quando));
   const usato = new Map<string, number>();
   let serve = 0, mancano = 0;
@@ -104,7 +130,7 @@ export function calendarioAnnuali(spese: Spesa[], da = oggiIso()) {
   const mesi = Array.from({ length: 12 }, (_, i) => ({ mese: aggiungiMesi(inizio, i).slice(0, 7), importo: 0 }));
   const fine = aggiungiMesi(inizio, 12);
   for (const s of spese.filter(eAnnuale)) {
-    let q = prossimaScadenza(s.prossima_scadenza, s.ogni_mesi, inizio);
+    let q = proxSpesa(s, inizio);
     while (q && q < fine) {
       const m = mesi.find((x) => x.mese === q!.slice(0, 7));
       if (m) m.importo += Number(s.mia_quota);
@@ -129,7 +155,7 @@ export const fraMesi = (scadenza: string) => {
 // diviso i mesi rimasti) o all'anno (diviso gli anni rimasti, almeno uno). Per un
 // obiettivo con sotto-obiettivi è la somma di quanto serve a ciascuno; senza
 // scadenza non c'è proposta.
-export function proposta(o: Obiettivo, ogni: 1 | 12): number | null {
+export function proposta(o: Obiettivo, ogni: number): number | null {
   if (o.figli.length) {
     const parti = o.figli.map((f) => proposta(f, ogni)).filter((x): x is number => x !== null);
     return parti.length ? parti.reduce((t, x) => t + x, 0) : null;
@@ -137,7 +163,7 @@ export function proposta(o: Obiettivo, ogni: 1 | 12): number | null {
   const { mancano } = ritmoObiettivo(o);
   if (mancano === null || !o.scadenza || o.scadenza < oggiIso()) return null;
   const mesi = mesiFino(o.scadenza);
-  return ogni === 1 ? mancano / mesi : mancano / Math.max(1, Math.ceil(mesi / 12));
+  return ogni === 1 ? mancano / mesi : mancano / Math.max(1, Math.ceil(mesi / ogni));
 }
 
 // Come si divide una cifra che entra in un salvadanaio con sotto-obiettivi: come fa l'API,

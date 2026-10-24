@@ -5,15 +5,11 @@ import * as v from '../valida.ts';
 
 export const rotteConti = Router();
 
-export const TIPI_CONTO = ['corrente', 'carta', 'risparmio', 'investimenti', 'contanti', 'digitale'] as const;
-
-// Il saldo attuale è il saldo di partenza più i movimenti da quella data in poi.
+// I conti sono un elenco di nomi con un'icona: dicono da dove si paga, non quanti soldi ci sono.
 const SELEZIONE = `
-  select c.id, c.proprietario_id, c.nome, c.tipo, c.saldo_iniziale, c.data_saldo_iniziale, c.archiviato,
+  select c.id, c.proprietario_id, c.nome, c.icona, c.archiviato,
          c.proprietario_id = fp_me() as mio,
-         exists (select 1 from condivisioni s where s.conto_id = c.id) as condiviso,
-         (c.saldo_iniziale + coalesce((select sum(m.importo) from movimenti m
-                                        where m.conto_id = c.id and m.data >= c.data_saldo_iniziale), 0))::text as saldo
+         exists (select 1 from condivisioni s where s.conto_id = c.id) as condiviso
     from conti c`;
 
 rotteConti.get('/', async (req, res) => {
@@ -33,16 +29,10 @@ rotteConti.get('/:id', async (req, res) => {
 
 rotteConti.post('/', async (req, res) => {
   const c = v.corpo(req.body);
-  const valori = [
-    v.testo(c, 'nome', true, 80),
-    v.scelta(c, 'tipo', TIPI_CONTO, true),
-    v.importo(c, 'saldo_iniziale') ?? '0',
-    v.data(c, 'data_saldo_iniziale') ?? null,
-  ];
+  const valori = [v.testo(c, 'nome', true, 80), v.testo(c, 'icona', false, 60) ?? 'landmark'];
   const conto = await conUtente(res.locals.utenteId, async (db) => {
     const { rows } = await db.query<{ id: string }>(
-      `insert into conti (proprietario_id, nome, tipo, saldo_iniziale, data_saldo_iniziale)
-       values (fp_me(), $1, $2, $3, coalesce($4::date, current_date)) returning id`, valori);
+      'insert into conti (proprietario_id, nome, icona) values (fp_me(), $1, $2) returning id', valori);
     return (await db.query(`${SELEZIONE} where c.id = $1`, [rows[0].id])).rows[0];
   });
   res.status(201).json(conto);
@@ -53,9 +43,7 @@ rotteConti.patch('/:id', async (req, res) => {
   const c = v.corpo(req.body);
   const set = v.setParziale({
     nome: v.testo(c, 'nome', false, 80),
-    tipo: v.scelta(c, 'tipo', TIPI_CONTO),
-    saldo_iniziale: v.importo(c, 'saldo_iniziale'),
-    data_saldo_iniziale: v.data(c, 'data_saldo_iniziale'),
+    icona: v.testo(c, 'icona', false, 60),
     archiviato: v.booleano(c, 'archiviato'),
   }, 2);
   const conto = await conUtente(res.locals.utenteId, async (db) => {
@@ -67,7 +55,7 @@ rotteConti.patch('/:id', async (req, res) => {
   res.json(conto);
 });
 
-// Solo il proprietario può cancellare (decisione 16); i movimenti del conto spariscono con lui.
+// Solo il proprietario può cancellare (decisione 16).
 rotteConti.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {

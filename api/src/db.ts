@@ -6,7 +6,12 @@ import { FUSO_ORARIO } from './periodo.ts';
 // non subiscono conversioni di fuso orario.
 pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v);
 
-export const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+// Su Vercel ogni istanza della funzione tiene poche connessioni (Neon le raggruppa con il suo pooler).
+export const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: Number(process.env.DB_POOL_MAX ?? (process.env.VERCEL ? 3 : 10)),
+  idleTimeoutMillis: 10_000,
+});
 // current_date nel database segue lo stesso fuso orario dell'API (vedi periodo.ts).
 pool.on('connect', (c) => { c.query(`set timezone to ${pg.escapeLiteral(FUSO_ORARIO)}`).catch(() => {}); });
 

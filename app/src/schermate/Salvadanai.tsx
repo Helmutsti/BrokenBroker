@@ -1,13 +1,11 @@
-import { useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Pulsante } from '../componenti/base.tsx';
-import { Intestazione, NumeroChiave } from '../componenti/composti.tsx';
-import { crea, useDati } from '../dati/api.ts';
+import { Intestazione, NumeroChiave, RigaNumeri, Scheda } from '../componenti/composti.tsx';
+import { useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { ElencoSpese, Obiettivo, Spesa } from '../dati/tipi.ts';
 import { euro, oggiIso } from '../formato.ts';
-import { d } from '../tema/tema.tsx';
-import { aggiungiMesi, Caricamento, eAnnuale, prossimaScadenza, tuttiGliObiettivi } from './comuni.tsx';
+import { d, Testo } from '../tema/tema.tsx';
+import { aggiungiMesi, Caricamento, eAnnuale, proxSpesa, tuttiGliObiettivi } from './comuni.tsx';
 import { Obiettivi } from './Obiettivi.tsx';
 
 // Mesi interi passati da `da` ad `a` (il giorno conta: dal 5 al 4 del mese dopo è 0).
@@ -19,12 +17,12 @@ const mesiPassati = (da: string, a: string) => {
 type RigaAnnuale = { s: Spesa; quando: string; ogni: number; passati: number; costa: number; dovrebbe: number; ce: number; figlio: Obiettivo | null };
 
 // Le spese annuali si riempiono di un dodicesimo al mese fino alla scadenza: per
-// ognuna quanto dovrebbe esserci oggi. Una spesa con il suo sotto-obiettivo ha i
-// soldi di quel sotto-obiettivo; per le altre i soldi liberi del salvadanaio vanno
+// ognuna quanto dovrebbe esserci oggi. Una spesa con il suo sotto-salvadanaio ha i
+// soldi di quel sotto-salvadanaio; per le altre i soldi liberi del salvadanaio vanno
 // prima alle scadenze più vicine (decisione di Manuel, proposta v5).
 function riempimento(spese: Spesa[], liberi: number, figli: Obiettivo[], oggi = oggiIso()) {
   const righe: RigaAnnuale[] = spese.filter(eAnnuale).map((s) => {
-    const quando = prossimaScadenza(s.prossima_scadenza, s.ogni_mesi, oggi)!;
+    const quando = proxSpesa(s, oggi)!;
     const ogni = s.ogni_mesi!, costa = Number(s.mia_quota);
     const passati = Math.max(0, Math.min(ogni, mesiPassati(aggiungiMesi(quando, -ogni), oggi)));
     const figlio = figli.find((f) => f.paga_spesa?.id === s.id) ?? null;
@@ -43,7 +41,6 @@ export function Salvadanai() {
   const rif = useRiferimenti();
   const ob = useDati<Obiettivo[]>('/obiettivi');
   const sp = useDati<ElencoSpese>(`/spese-previste?mese=${rif.mese}`);
-  const [errore, setErrore] = useState<string | null>(null);
   const profilo = rif.profilo;
   if (!ob.dati || !sp.dati || !profilo) return <Caricamento errore={ob.errore ?? sp.errore} />;
   const tutti = tuttiGliObiettivi(ob.dati);
@@ -54,14 +51,9 @@ export function Salvadanai() {
   const dentro = new Set(salvadanaio ? tuttiGliObiettivi([salvadanaio]).map((o) => o.id) : []);
   const pagate = attive.filter((s) => s.obiettivo_id && dentro.has(s.obiettivo_id));
   const saldo = Number(salvadanaio?.saldo ?? 0);
-  // I soldi liberi sono quelli del salvadanaio fuori dai sotto-obiettivi delle spese.
+  // I soldi liberi sono quelli del salvadanaio fuori dai sotto-salvadanai delle spese.
   const figliSpese = salvadanaio?.figli.filter((f) => f.paga_spesa) ?? [];
   const r = riempimento(pagate, saldo - figliSpese.reduce((t, f) => t + Number(f.saldo), 0), figliSpese);
-  const senzaSotto = r.righe.filter((x) => !x.figlio).length;
-  const dividi = async () => {
-    setErrore(null);
-    try { await crea(`/obiettivi/${salvadanaio!.id}/annuali`); } catch (e) { setErrore((e as Error).message); }
-  };
   const nei = ob.dati.reduce((t, o) => t + Number(o.saldo), 0);
   // Quanto entra ogni mese dalle voci "mettici da parte" in Spese (quelle annuali contano un dodicesimo).
   const alimentati = tutti.filter((o) => o.alimentato_da);
@@ -69,22 +61,17 @@ export function Salvadanai() {
 
   return (
     <>
-      <Intestazione titolo="Salvadanai" sottotitolo="Quello che metti da parte: spese annuali, emergenze e obiettivi." />
-      <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}>
+      <Intestazione titolo="Salvadanai" sottotitolo="Quello che metti da parte: spese annuali, emergenze e progetti." />
+      <RigaNumeri>
         <NumeroChiave etichetta="Nei salvadanai" valore={euro(nei)} icona="piggy-bank" nota={`In ${ob.dati.length} ${ob.dati.length === 1 ? 'salvadanaio' : 'salvadanai'}`} />
         <NumeroChiave etichetta="Ogni mese in Spese" valore={euro(alMese)} icona="calendar-check"
           nota={alimentati.length ? `Da ${alimentati.length} ${alimentati.length === 1 ? 'salvadanaio' : 'salvadanai'}` : 'Nessun salvadanaio è ancora una voce di Spese'} />
-        <NumeroChiave etichetta="Spese annuali" valore={r.indietro > 0.005 ? `Indietro di ${euro(r.indietro)}` : 'In pari'} icona="calendar-clock" tono={r.indietro > 0.005 ? 'attenzione' : 'normale'}
-          nota={`Oggi dovrebbero esserci ${euro(r.dovrebbe)}, ce ne sono ${euro(saldo)}`} />
-      </View>
-      {errore ? <Esito tono="errore" testo={errore} /> : null}
-      {salvadanaio && senzaSotto ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-          <View style={{ flex: 1 }}><Esito tono="informazione" testo={`In ${salvadanaio.nome} ${senzaSotto === 1 ? 'una spesa annuale non ha' : `${senzaSotto} spese annuali non hanno`} ancora il suo sotto-obiettivo: dividendo il salvadanaio, ogni spesa ha i suoi soldi e la sua data.`} /></View>
-          <Pulsante etichetta="Dividi per spesa" icona="layers" onPress={dividi} />
-        </View>
-      ) : null}
-      {/* Anche le spese annuali sono un salvadanaio come gli altri (richiesta di Manuel): si gestiscono da Spese. */}
+        {salvadanaio ? (
+          <NumeroChiave etichetta="Spese annuali" valore={r.indietro > 0.005 ? `Indietro di ${euro(r.indietro)}` : 'In pari'} icona="calendar-clock" tono={r.indietro > 0.005 ? 'attenzione' : 'normale'}
+            nota={`Oggi dovrebbero esserci ${euro(r.dovrebbe)}, ce ne sono ${euro(saldo)}`} />
+        ) : null}
+      </RigaNumeri>
+      {/* Il salvadanaio delle spese annuali è un salvadanaio come gli altri; si accende in Impostazioni e si riempie da Spese. */}
       <Obiettivi />
     </>
   );

@@ -1,35 +1,33 @@
 import { createNavigatorFactory, NavigationContainer, TabRouter, useNavigationBuilder } from '@react-navigation/native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, View } from 'react-native';
-import { BarraLaterale, type VoceMenu } from './componenti/composti.tsx';
+import { BarraInferiore, BarraLaterale, TestataCompatta, type VoceMenu } from './componenti/composti.tsx';
 import { allaScadenza, crea, leggi } from './dati/api.ts';
 import { FornitoreRiferimenti, useRiferimenti } from './dati/contesto.tsx';
 import { cancellaToken, leggiToken } from './dati/sessione';
 import type { Profilo } from './dati/tipi.ts';
-import { FinestraMovimento } from './schermate/FinestraMovimento.tsx';
 import { Accesso } from './schermate/Accesso.tsx';
 import { Analisi } from './schermate/Analisi.tsx';
 import { Categorie } from './schermate/Categorie.tsx';
 import { Conti } from './schermate/Conti.tsx';
 import { Impostazioni } from './schermate/Impostazioni.tsx';
 import { Investimenti } from './schermate/Investimenti.tsx';
-import { Movimenti } from './schermate/Movimenti.tsx';
 import { Panoramica } from './schermate/Panoramica.tsx';
 import { Salvadanai } from './schermate/Salvadanai.tsx';
+import { useCompatto } from './tema/compatto.ts';
 import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
 // Sezioni della barra laterale (flussi.md): l'ordine è quello delle bozze approvate.
-// Proposta v5: le sezioni dei 3 fogli dell'Excel (Spese, Salvadanai, Investimenti) più
-// Categorie. Conti, Movimenti e Analisi restano raggiungibili da Impostazioni.
+// Le sezioni dei 3 fogli dell'Excel (Spese, Salvadanai, Investimenti) più Categorie, Conti
+// e Analisi. I movimenti non esistono più (decisione del 2026-10-24).
 // La sezione delle spese del mese si chiama "Spese" (richiesta di Manuel, prima "Mese").
-const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element; nascosta?: boolean })[] = [
+const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
   { chiave: 'mese', testo: 'Spese', icona: 'calendar-check', percorso: '', schermata: Panoramica },
-  { chiave: 'salvadanai', testo: 'Salvadanai', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
-  { chiave: 'investimenti', testo: 'Investimenti', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
+  { chiave: 'salvadanai', testo: 'Salvadanai', breve: 'Salvad.', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
+  { chiave: 'investimenti', testo: 'Investimenti', breve: 'Invest.', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
   { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
-  { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti, nascosta: true },
-  { chiave: 'movimenti', testo: 'Movimenti', icona: 'arrow-left-right', percorso: 'movimenti', schermata: Movimenti, nascosta: true },
-  { chiave: 'analisi', testo: 'Analisi', icona: 'chart-pie', percorso: 'analisi', schermata: Analisi, nascosta: true },
+  { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti },
+  { chiave: 'analisi', testo: 'Analisi', icona: 'chart-pie', percorso: 'analisi', schermata: Analisi },
 ];
 
 // Navigatore con la barra laterale a sinistra e la schermata a destra.
@@ -38,12 +36,24 @@ function NavigatoreLaterale(props: { children: React.ReactNode; initialRouteName
   const { c } = useTema();
   const rif = useRiferimenti();
   const attiva = state.routes[state.index];
+  const compatto = useCompatto();
+  if (compatto) return (
+    <NavigationContent>
+      <View style={{ flex: 1, minWidth: 0, backgroundColor: c['sfondo-pagina'] }}>
+        <TestataCompatta profilo={rif.profilo?.nome ?? ''} impostazioniAttive={attiva.name === 'impostazioni'} onProfilo={() => navigation.navigate('impostazioni')} onEsci={props.onEsci} />
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: d['spazio-blocco'], width: '100%' }}>
+          {descriptors[attiva.key].render()}
+        </ScrollView>
+        <BarraInferiore voci={SEZIONI} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)} />
+      </View>
+    </NavigationContent>
+  );
   return (
     <NavigationContent>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: c['sfondo-pagina'] }}>
-        <BarraLaterale voci={SEZIONI.filter((s) => !s.nascosta)} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)} onAggiungi={rif.nuovoMovimento}
+        <BarraLaterale voci={SEZIONI} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)}
           profilo={rif.profilo?.nome ?? ''} onProfilo={() => navigation.navigate('impostazioni')} onEsci={props.onEsci} />
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: d['margine-pagina'], gap: d['spazio-gruppo'], maxWidth: 1184, width: '100%' }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: d['margine-pagina'], gap: d['spazio-gruppo'], width: '100%' }}>
           {descriptors[attiva.key].render()}
         </ScrollView>
       </View>
@@ -61,17 +71,14 @@ const linking = {
 } as never;
 
 function Dentro({ onEsci }: { onEsci: () => void }) {
-  const [movimento, setMovimento] = useState(false);
-  const apri = useCallback(() => setMovimento(true), []);
   return (
-    <FornitoreRiferimenti nuovoMovimento={apri}>
+    <FornitoreRiferimenti>
       <NavigationContainer linking={linking} documentTitle={{ formatter: (o, r) => `${o?.title ?? SEZIONI.find((s) => s.chiave === r?.name)?.testo ?? 'Impostazioni'} · BrokenBroker` }}>
         <Laterale.Navigator onEsci={onEsci}>
           {SEZIONI.map((s) => <Laterale.Screen key={s.chiave} name={s.chiave} component={s.schermata} options={{ title: s.testo }} />)}
           <Laterale.Screen name="impostazioni" component={Impostazioni} options={{ title: 'Impostazioni' }} />
         </Laterale.Navigator>
       </NavigationContainer>
-      <FinestraMovimento aperta={movimento} onChiudi={() => setMovimento(false)} />
     </FornitoreRiferimenti>
   );
 }
