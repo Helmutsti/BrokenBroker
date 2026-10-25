@@ -1,7 +1,7 @@
 import { createNavigatorFactory, NavigationContainer, TabRouter, useNavigationBuilder } from '@react-navigation/native';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, View } from 'react-native';
-import { BarraInferiore, BarraLaterale, TestataCompatta, type VoceMenu } from './componenti/composti.tsx';
+import { BarraInferiore, BarraLaterale, ConfermaFinestra, TestataCompatta, type VoceMenu } from './componenti/composti.tsx';
 import { allaScadenza, crea, leggi } from './dati/api.ts';
 import { FornitoreRiferimenti, useRiferimenti } from './dati/contesto.tsx';
 import { cancellaToken, leggiToken } from './dati/sessione';
@@ -30,6 +30,13 @@ const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Elemen
   { chiave: 'analisi', testo: 'Analisi', icona: 'chart-pie', percorso: 'analisi', schermata: Analisi },
 ];
 
+// Barra in basso del telefono (richiesta di Manuel): 4 sezioni e «Altro», che apre le altre.
+const IN_BARRA = ['mese', 'salvadanai', 'investimenti', 'conti'];
+const ALTRE: VoceMenu[] = [
+  ...SEZIONI.filter((s) => !IN_BARRA.includes(s.chiave)),
+  { chiave: 'impostazioni', testo: 'Impostazioni', icona: 'sliders-horizontal' },
+];
+
 // Navigatore con la barra laterale a sinistra e la schermata a destra.
 function NavigatoreLaterale(props: { children: React.ReactNode; initialRouteName?: string; onEsci: () => void }) {
   const { state, navigation, descriptors, NavigationContent } = useNavigationBuilder(TabRouter, { children: props.children, initialRouteName: props.initialRouteName });
@@ -37,14 +44,18 @@ function NavigatoreLaterale(props: { children: React.ReactNode; initialRouteName
   const rif = useRiferimenti();
   const attiva = state.routes[state.index];
   const compatto = useCompatto();
+  // Esci chiede sempre conferma, dalla testata del telefono come dalla barra laterale.
+  const [chiediEsci, setChiediEsci] = useState(false);
+  const conferma = <ConfermaFinestra aperta={chiediEsci} titolo="Vuoi uscire?" testo="Per rientrare dovrai accedere di nuovo." etichettaConferma="Esci" onAnnulla={() => setChiediEsci(false)} onConferma={() => { setChiediEsci(false); props.onEsci(); }} />;
   if (compatto) return (
     <NavigationContent>
       <View style={{ flex: 1, minWidth: 0, backgroundColor: c['sfondo-pagina'] }}>
-        <TestataCompatta profilo={rif.profilo?.nome ?? ''} impostazioniAttive={attiva.name === 'impostazioni'} onProfilo={() => navigation.navigate('impostazioni')} onEsci={props.onEsci} />
+        <TestataCompatta profilo={rif.profilo?.nome ?? ''} impostazioniAttive={attiva.name === 'impostazioni'} onProfilo={() => navigation.navigate('impostazioni')} onEsci={() => setChiediEsci(true)} />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: d['spazio-blocco'], width: '100%' }}>
           {descriptors[attiva.key].render()}
         </ScrollView>
-        <BarraInferiore voci={SEZIONI} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)} />
+        <BarraInferiore voci={SEZIONI.filter((s) => IN_BARRA.includes(s.chiave))} altre={ALTRE} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)} />
+        {conferma}
       </View>
     </NavigationContent>
   );
@@ -52,10 +63,11 @@ function NavigatoreLaterale(props: { children: React.ReactNode; initialRouteName
     <NavigationContent>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: c['sfondo-pagina'] }}>
         <BarraLaterale voci={SEZIONI} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)}
-          profilo={rif.profilo?.nome ?? ''} onProfilo={() => navigation.navigate('impostazioni')} onEsci={props.onEsci} />
+          profilo={rif.profilo?.nome ?? ''} onProfilo={() => navigation.navigate('impostazioni')} onEsci={() => setChiediEsci(true)} />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: d['margine-pagina'], gap: d['spazio-gruppo'], width: '100%' }}>
           {descriptors[attiva.key].render()}
         </ScrollView>
+        {conferma}
       </View>
     </NavigationContent>
   );

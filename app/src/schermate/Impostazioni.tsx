@@ -1,13 +1,13 @@
 ﻿import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Avatar, Esito, Pulsante } from '../componenti/base.tsx';
+import { Avatar, Esito, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo } from '../componenti/campi.tsx';
 import { Intestazione, Scheda, Vuoto } from '../componenti/composti.tsx';
 import { cancella, modifica, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Condivisione, Persona } from '../dati/tipi.ts';
 import { euro, importoInTesto, leggiImporto, nomeMeseMinuscolo } from '../formato.ts';
-import { d, Testo } from '../tema/tema.tsx';
+import { d, Testo, useTema } from '../tema/tema.tsx';
 import { Affiancati, Meta } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
@@ -26,6 +26,7 @@ function useSalva() {
 // SC-09 Impostazioni.
 export function Impostazioni() {
   const compatto = useCompatto();
+  const { scelta, scegli } = useTema();
   const rif = useRiferimenti();
   const p = rif.profilo;
   const persone = useDati<Persona[]>('/persone').dati ?? [];
@@ -59,6 +60,11 @@ export function Impostazioni() {
             <Campo etichetta="Email" valore={p.email} onCambia={() => {}} iconaPrima="mail" disattivato aiuto="L'email serve per accedere e non si cambia da qui" />
             {profilo.esito ? <Esito tono={profilo.esito.ok ? 'ok' : 'errore'} testo={profilo.esito.testo} /> : null}
             <Pulsante etichetta="Salva il profilo" onPress={profilo.salva(() => modifica('/profilo', { nome: nome.trim() }))} />
+          </Scheda>
+          <Scheda titolo="Aspetto" nota="Si salva su questo dispositivo" icona="eye">
+            <SceltaSegmenti etichetta="Tema" larghezzaPiena valore={scelta} onCambia={scegli}
+              opzioni={[{ valore: 'sistema', testo: 'Come il telefono' }, { valore: 'scuro', testo: 'Sempre scuro' }, { valore: 'chiaro', testo: 'Sempre chiaro' }]} />
+            <Testo stile="dettaglio-normale" colore="testo-secondario">{scelta === 'sistema' ? 'Il tema cambia insieme a quello del telefono.' : scelta === 'scuro' ? 'Sfondi scuri e testi chiari, anche se il telefono è in tema chiaro.' : 'Sfondi chiari, anche se il telefono è in tema scuro.'}</Testo>
           </Scheda>
           <Scheda titolo="Stipendio e mese" nota="Servono per calcolare quanto resta davvero" icona="banknote">
             <Affiancati>

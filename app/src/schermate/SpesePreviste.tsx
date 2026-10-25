@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante, SceltaSegmenti, Tessera } from '../componenti/base.tsx';
+import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
 import { CalendarioAnnuali, Intestazione, NumeroChiave, RigaNumeri, RigaSpesa, Scheda, TitoloGruppo, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, leggi, modifica, sostituisci, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Condivisione, ElencoSpese, Obiettivo, Persona, Spesa, TipoSpesa } from '../dati/tipi.ts';
 import { euro, importoInTesto, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
-import { d, Testo, useTema } from '../tema/tema.tsx';
+import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento, calendarioAnnuali, eAnnuale, proxSpesa, prossimeAnnuali, quando, segnoQuota } from './comuni.tsx';
-import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
+import { Affiancati, FinestraModulo, Meta, Riquadro, serve, Voce } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
 type Filtro = 'tutte' | 'mese' | 'periodiche' | 'spente';
@@ -177,7 +177,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     setNote(s?.note ?? ''); setAttiva(s?.attiva ?? true);
   }, [aperta, spesa]);
 
-  // Salvadanai dove si può mettere quello nuovo: tuoi, non nascosti e non nati da una spesa.
+  // Salvadanai dove si può mettere quello nuovo: tuoi e non nati da una spesa (anche i nascosti, decisione 39).
   const opzioniPadri = useMemo(() => {
     const out: { valore: string; testo: string; rientro?: number }[] = [];
     const visita = (xs: Obiettivo[], l: number) => xs.forEach((o) => {
@@ -255,7 +255,6 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
 
   const valoreQuota = leggiImporto(importo);
   const quotaTesto = divisione === 'io' ? 'Solo tua.' : `La tua quota: ${valoreQuota ? euro((Number(valoreQuota) * (divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : '—'}. L’altra persona la vede e la può modificare; solo tu puoi eliminarla.`;
-  const { c } = useTema();
   const compatto = useCompatto();
   const nomeM = meseScad ? nomeMeseMinuscolo(`2000-${meseScad.padStart(2, '0')}`) : '';
   const poi = frequenza === 'anno' ? ', ogni anno' : frequenza === 'biennale' ? ', ogni due anni' : frequenza === 'n' ? `, poi ogni ${ogniN || 'N'} mesi` : '';
@@ -265,7 +264,11 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
       : nomeM ? `Esce a ${nomeM}, senza un giorno preciso${poi}.`
         : giornoMese ? 'Scegli anche il mese.' : 'Scegli almeno il mese; il giorno è facoltativo. L’anno lo sceglie l’app.';
   const bloccoScadenza = fisso('prossima_scadenza');
+  // Solo le spese che escono ogni 2+ mesi (annuali, biennali, ogni N mesi) compaiono nella lista del mese anche con un salvadanaio:
+  // le mensili, i budget e le "una volta sola" collegate a un salvadanaio ne sono escluse (vociDelMese in comuni.tsx).
+  const escludeDallaLista = tipo === 'budget' || frequenza === 'mese' || frequenza === 'una' || (frequenza === 'n' && !(Number(ogniN) > 1));
   const periodicaForm = eAnnualeForm;
+  const avvisoLista = <Esito tono="attenzione" testo="Con un salvadanaio questa spesa non compare nella lista del mese: la versi da Salvadanai." />;
   const aiutoSalvadanaio = generato ? 'Il salvadanaio nasce da questa spesa: se la elimini resta, ma torna libero.'
     : spesa?.obiettivo_id ? 'Un salvadanaio si collega a una spesa solo creandolo nuovo da qui.'
       : salv === 'crea'
@@ -274,6 +277,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   return (
     <FinestraModulo titolo={spesa ? 'Modifica spesa prevista' : 'Nuova spesa prevista'} icona={spesa?.icona ?? 'calendar-check'} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
       onElimina={spesa?.mia && !bloc ? () => cancella(`/spese-previste/${spesa.id}`).then(() => undefined) : undefined}
+      confermaElimina={spesa ? { nome: `«${spesa.nome}»`, dettaglio: [generato ? `Il salvadanaio «${collegato!.nome}» resta, ma torna libero.` : null, spesa.condivisa ? 'Sparisce anche per l’altra persona.' : null].filter(Boolean).join(' ') || 'Sparisce dalla lista del mese.' } : undefined}
       intestazioneDestra={(
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'] }}>
           <Testo stile="dettaglio-forte" colore="testo-secondario">{attiva ? 'Attiva' : 'Non attiva'}</Testo>
@@ -284,74 +288,72 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
       {bloc ? (
         <Testo stile="dettaglio-normale" colore="testo-secondario">{`Nasce dal salvadanaio «${bloc.nome}»: per cambiarla apri il salvadanaio, in Salvadanai.`}</Testo>
       ) : null}
-      <Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} disattivato={fisso('nome')} />
-      <Voce etichetta="Che spesa è" aiuto={tipo === 'budget' ? 'Una cifra da tenere da parte per le spese del mese di questa categoria: si spunta quando l’hai usata.' : tipo === 'investimento' ? 'Soldi che metti da parte o investi ogni volta, es. il piano di accumulo.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
-        <SceltaSegmenti etichetta="Che spesa è" larghezzaPiena valore={tipo} onCambia={fisso('tipo') ? () => {} : setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'budget', testo: 'Budget del mese' }, { valore: 'investimento', testo: 'Investimento' }]} />
-      </Voce>
-      {tipo !== 'budget' ? (
-        <Voce etichetta="Ogni quanto esce">
-          <SceltaSegmenti etichetta="Ogni quanto esce" larghezzaPiena valore={frequenza} onCambia={fisso('ogni_mesi') ? () => {} : setFrequenza} opzioni={[{ valore: 'mese', testo: 'Ogni mese' }, { valore: 'anno', testo: 'Ogni anno' }, { valore: 'biennale', testo: 'Ogni 2 anni' }, { valore: 'n', testo: 'Ogni N mesi' }, { valore: 'una', testo: 'Una volta sola' }]} />
+      <Riquadro titolo="Che spesa è" nota="Come si chiama, di che tipo è e quanto costa.">
+        <Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} disattivato={fisso('nome')} />
+        <Voce etichetta="Tipo" aiuto={tipo === 'budget' ? 'Una cifra da tenere da parte per le spese del mese di questa categoria: si spunta quando l’hai usata.' : tipo === 'investimento' ? 'Soldi che metti da parte o investi ogni volta, es. il piano di accumulo.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
+          <SceltaSegmenti etichetta="Tipo di spesa" larghezzaPiena valore={tipo} onCambia={fisso('tipo') ? () => {} : setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'budget', testo: 'Budget del mese' }, { valore: 'investimento', testo: 'Investimento' }]} />
         </Voce>
-      ) : null}
-      {tipo === 'budget' ? null : (
-        <View style={{ gap: d['spazio-testo'] }}>
-          {frequenza === 'n' ? <Campo etichetta="Ogni quanti mesi" valore={ogniN} onCambia={setOgniN} inputMode="numeric" segnaposto="Es. 6" disattivato={fisso('ogni_mesi')} /> : null}
-          <View style={{ flexDirection: 'row', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], marginTop: frequenza === 'n' ? d['spazio-blocco'] : 0 }}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <TendinaGriglia etichetta="Giorno (facoltativo)" valore={giornoMese} opzioni={OPZIONI_GIORNO} onCambia={setGiornoMese} disattivato={bloccoScadenza} />
-            </View>
-            {frequenza !== 'mese' ? (
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Tendina etichetta={frequenza === 'una' ? 'Mese in cui esce' : 'Mese'} valore={meseScad} opzioni={OPZIONI_MESE} onCambia={setMeseScad} disattivato={bloccoScadenza} />
-              </View>
-            ) : null}
-          </View>
-          <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoScadenza}</Testo>
-        </View>
-      )}
-      <Campo etichetta={tipo === 'budget' ? 'Tetto del mese' : 'Importo totale'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" disattivato={fisso('importo')} />
-      <Affiancati>
-        <Meta><Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} /></Meta>
-        <Meta><Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" /></Meta>
-      </Affiancati>
-      {bloc || (spesa && !spesa.mia) ? null : (
-        <View style={{ gap: d['spazio-blocco'] }}>
-          {generato ? (
-            <Testo stile="dettaglio-normale" colore="testo-secondario">{`Salvadanaio: «${collegato!.nome}». Per aprirlo vai in Salvadanai; nome, cifra e scadenza si cambiano da questa spesa.`}</Testo>
-          ) : spesa?.obiettivo_id ? (
-            <>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">{scollega ? 'La spesa verrà scollegata quando salvi.' : `Collegata a «${collegato?.nome ?? 'un salvadanaio'}» (vecchio collegamento).`}</Testo>
-              <Pulsante etichetta={scollega ? 'Annulla' : 'Scollega'} onPress={() => setScollega(!scollega)} />
-            </>
-          ) : (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-                <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-                  <Testo stile="corpo-forte" accessibilityRole="header">Salvadanaio</Testo>
-                  <Testo stile="dettaglio-normale" colore="testo-secondario">Metti da parte i soldi per questa spesa</Testo>
+        <Campo etichetta={tipo === 'budget' ? 'Tetto del mese' : 'Importo totale'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" disattivato={fisso('importo')} />
+      </Riquadro>
+      <Riquadro titolo="Quando esce" nota={tipo === 'budget' ? 'Un budget vale per tutto il mese: non serve una data.' : 'Ogni quanto si ripete e in quale giorno o mese esce.'}>
+        {tipo === 'budget' ? null : (
+          <>
+            <Voce etichetta="Ogni quanto esce">
+              <SceltaSegmenti etichetta="Ogni quanto esce" larghezzaPiena valore={frequenza} onCambia={fisso('ogni_mesi') ? () => {} : setFrequenza} opzioni={[{ valore: 'mese', testo: 'Ogni mese' }, { valore: 'anno', testo: 'Ogni anno' }, { valore: 'biennale', testo: 'Ogni 2 anni' }, { valore: 'n', testo: 'Ogni N mesi' }, { valore: 'una', testo: 'Una volta sola' }]} />
+            </Voce>
+            <View style={{ gap: d['spazio-testo'] }}>
+              <View style={{ gap: d['spazio-blocco'] }}>
+                {frequenza === 'n' ? <Campo etichetta="Ogni quanti mesi" valore={ogniN} onCambia={setOgniN} inputMode="numeric" segnaposto="Es. 6" disattivato={fisso('ogni_mesi')} /> : null}
+                <View style={{ flexDirection: 'row', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'] }}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <TendinaGriglia etichetta="Giorno (facoltativo)" valore={giornoMese} opzioni={OPZIONI_GIORNO} onCambia={setGiornoMese} disattivato={bloccoScadenza} />
+                  </View>
+                  {frequenza !== 'mese' ? (
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Tendina etichetta={frequenza === 'una' ? 'Mese in cui esce' : 'Mese'} valore={meseScad} opzioni={OPZIONI_MESE} onCambia={setMeseScad} disattivato={bloccoScadenza} />
+                    </View>
+                  ) : null}
                 </View>
-                <Interruttore acceso={salv === 'crea'} onCambia={(x) => setSalv(x ? 'crea' : 'nessuno')} etichetta="Salvadanaio per questa spesa" />
               </View>
-              {salv === 'crea' ? (
-                <>
-                  <Tendina etichetta="Dove lo metto" valore={doveEff === 'sotto' ? padreEff : doveEff} iconaPrima="piggy-bank"
-                    onCambia={(x) => { if (x === 'solo' || x === 'contenitore') setDove(x); else { setDove('sotto'); setPadre(x); } }}
-                    opzioni={[{ valore: 'solo', testo: 'Da solo' }, ...opzioniPadri.map((o) => ({ ...o, testo: `Dentro «${o.testo}»` })), { valore: 'contenitore', testo: '+ Nuovo contenitore…' }]} />
-                  {doveEff === 'contenitore' ? <Campo etichetta="Nome del contenitore" valore={contenitore} onCambia={setContenitore} segnaposto="Es. Viaggi" /> : null}
-                </>
-              ) : null}
+              <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoScadenza}</Testo>
+            </View>
+          </>
+        )}
+      </Riquadro>
+      <Riquadro titolo="Da dove esce" nota="Il conto da cui paghi e la categoria in cui la conti.">
+        <Affiancati>
+          <Meta><Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} /></Meta>
+          <Meta><Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" /></Meta>
+        </Affiancati>
+      </Riquadro>
+      {bloc || (spesa && !spesa.mia) ? null : generato ? (
+        <Riquadro titolo="Salvadanaio" nota="Metti da parte i soldi per questa spesa.">
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{`Salvadanaio: «${collegato!.nome}». Per aprirlo vai in Salvadanai; nome, cifra e scadenza si cambiano da questa spesa.`}</Testo>
+          {aiutoSalvadanaio ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoSalvadanaio}</Testo> : null}
+          {escludeDallaLista ? avvisoLista : null}
+        </Riquadro>
+      ) : spesa?.obiettivo_id ? (
+        <Riquadro titolo="Salvadanaio" nota="Metti da parte i soldi per questa spesa.">
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{scollega ? 'La spesa verrà scollegata quando salvi.' : `Collegata a «${collegato?.nome ?? 'un salvadanaio'}» (vecchio collegamento).`}</Testo>
+          <Pulsante etichetta={scollega ? 'Annulla' : 'Scollega'} onPress={() => setScollega(!scollega)} />
+          {aiutoSalvadanaio ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoSalvadanaio}</Testo> : null}
+          {escludeDallaLista && !scollega ? avvisoLista : null}
+        </Riquadro>
+      ) : (
+        <Riquadro titolo="Salvadanaio" nota="Metti da parte i soldi per questa spesa." interruttore={<Interruttore acceso={salv === 'crea'} onCambia={(x) => setSalv(x ? 'crea' : 'nessuno')} etichetta="Salvadanaio per questa spesa" />}>
+          {salv === 'crea' ? (
+            <>
+              {escludeDallaLista ? avvisoLista : null}
+              <Tendina etichetta="Dove lo metto" valore={doveEff === 'sotto' ? padreEff : doveEff} iconaPrima="piggy-bank"
+                onCambia={(x) => { if (x === 'solo' || x === 'contenitore') setDove(x); else { setDove('sotto'); setPadre(x); } }}
+                opzioni={[{ valore: 'solo', testo: 'Da solo' }, ...opzioniPadri.map((o) => ({ ...o, testo: `Dentro «${o.testo}»` })), { valore: 'contenitore', testo: '+ Nuovo contenitore…' }]} />
+              {doveEff === 'contenitore' ? <Campo etichetta="Nome del contenitore" valore={contenitore} onCambia={setContenitore} segnaposto="Es. Viaggi" /> : null}
+              {aiutoSalvadanaio ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoSalvadanaio}</Testo> : null}
             </>
-          )}
-          <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoSalvadanaio}</Testo>
-        </View>
+          ) : null}
+        </Riquadro>
       )}
-      <Campo etichetta="Note (facoltative)" valore={note} onCambia={setNote} />
-      <View style={{ gap: d['spazio-blocco'], padding: d['spazio-blocco'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-scheda'], backgroundColor: c['sfondo-tenue'] }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-          <Tessera icona="users" misura="piccola" />
-          <Testo stile="corpo-forte" accessibilityRole="header" style={{ flex: 1 }}>Con chi la dividi</Testo>
-        </View>
-        <Testo stile="dettaglio-normale" colore="testo-secondario">Solo se la spesa è in due: indica con chi la dividi e in che percentuale</Testo>
+      <Riquadro titolo="Con chi la dividi" nota="Solo se la spesa è in due: indica con chi la dividi e in che percentuale. In fondo, una nota se ti serve.">
         {!spesa || spesa.mia ? (
           <>
             <Voce etichetta="Con chi la dividi" aiuto={quotaTesto}>
@@ -361,7 +363,8 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
             {divisione === 'altra' ? <Campo etichetta="La tua quota in %" valore={miaQuota} onCambia={setMiaQuota} inputMode="decimal" /> : null}
           </>
         ) : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condivisa con te: la tua quota è ${spesa.mia_percentuale}%. Può cambiarla solo chi l'ha creata.`}</Testo>}
-      </View>
+        <Campo etichetta="Note (facoltative)" valore={note} onCambia={setNote} />
+      </Riquadro>
     </FinestraModulo>
   );
 }

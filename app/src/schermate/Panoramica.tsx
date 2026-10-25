@@ -1,9 +1,10 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Pressable, View } from 'react-native';
+import { Icona } from '../componenti/Icona.tsx';
 import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
-import { Intestazione, NumeroChiave, RigaRata, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
+import { Foglio, Intestazione, NumeroChiave, RigaRata, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { ControlloRate, ElencoSpese, Obiettivo, Proiezione, Rata, RiepilogoMese, Spesa } from '../dati/tipi.ts';
@@ -12,7 +13,7 @@ import { d, Testo, useTema } from '../tema/tema.tsx';
 import { ombre } from '../tema/token.ts';
 import { Caricamento, divisioneTraSotto, importoDelMese, proxSpesa, quando, rateDelMese, tuttiGliObiettivi, vociDelMese } from './comuni.tsx';
 import { DaGirareAiConti } from './DaGirare.tsx';
-import { Affiancati, FinestraModulo, Meta, serve } from './moduli.tsx';
+import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
@@ -35,6 +36,7 @@ export function Panoramica() {
   const [spente, setSpente] = useState(false);
   const [raggruppa, setRaggruppa] = useState<'tipo' | 'categoria'>('tipo');
   const [ordina, setOrdina] = useState<'scadenza' | 'nome'>('scadenza');
+  const [vista, setVista] = useState(false);
   const tuttiObiettivi = tuttiGliObiettivi(useDati<Obiettivo[]>('/obiettivi').dati ?? []);
 
   // I quattro numeri del mese: quando escono dallo schermo scorrendo, si ripresentano piccoli in alto a destra.
@@ -153,6 +155,18 @@ export function Panoramica() {
           destra={alMeseEAnno(dentro.reduce((t, x) => t + x.importo, 0))} /> };
       });
 
+  // Le due scelte di come si vedono le voci: in riga sul computer, nel foglio «Vista» sul telefono.
+  const scelteVista = (
+    <>
+      <Voce etichetta="Raggruppa">
+        <SceltaSegmenti etichetta="Raggruppa" larghezzaPiena={compatto} valore={raggruppa} onCambia={setRaggruppa} opzioni={[{ valore: 'tipo', testo: 'Per tipo' }, { valore: 'categoria', testo: 'Per categoria' }]} />
+      </Voce>
+      <Voce etichetta="Ordina">
+        <SceltaSegmenti etichetta="Ordina" larghezzaPiena={compatto} valore={ordina} onCambia={setOrdina} opzioni={[{ valore: 'scadenza', testo: 'Per scadenza' }, { valore: 'nome', testo: 'Per nome' }]} />
+      </Voce>
+    </>
+  );
+
   // Per tipo: le mensili a sinistra, rate e annuali a destra. Per categoria: a turno nelle due colonne.
   const visibili = gruppi.filter((g) => g.righe.length || g.sempre);
   const SINISTRA: string[] = ['fisse', 'budget', 'investimenti', 'salvadanai'];
@@ -182,35 +196,48 @@ export function Panoramica() {
       </View>
       {fuori ? createPortal(
         <View accessibilityRole="summary" style={{ position: 'fixed', top: compatto ? 0 : 12, right: compatto ? 0 : 16, ...(compatto ? { left: 0 } : {}), zIndex: 50, flexDirection: 'row', justifyContent: compatto ? 'space-between' : 'flex-start', gap: compatto ? 4 : d['spazio-colonne'], paddingVertical: compatto ? 6 : 8, paddingHorizontal: compatto ? 12 : 14, ...(compatto ? { paddingTop: 'max(6px, env(safe-area-inset-top))' } : {}),
-          // Colori invertiti (fondo scuro, testo chiaro; l'opposto nel tema scuro) per staccarsi dalla pagina mentre si scorre.
-          backgroundColor: c['testo-primario'], borderRadius: compatto ? 0 : d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['testo-primario'],
+          // Fondo come le schede, bordo di 2 px in testo-terziario e testi come i numeri chiave (etichette secondarie, valori primari):
+          // si stacca dalla pagina mentre si scorre, in tutti e due i temi, senza mai un blocco bianco.
+          backgroundColor: c['sfondo-scheda'], borderRadius: compatto ? 0 : d['raggio-scheda'], borderWidth: 2, borderColor: c['testo-terziario'],
           boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as never}>
-          {([['Usciti', euro(usciti), 'sfondo-pagina'], ['Sul conto', saldo === null ? '—' : euro(saldo), 'sfondo-pagina'], ['Devono uscire', euro(devonoUscire), 'sfondo-pagina'],
-            ['Avanzo', avanzo === null ? '—' : euro(avanzo, { segno: true }), avanzo !== null && avanzo < 0 ? 'sfondo-errore-tenue' : 'sfondo-pagina']] as const).map(([et, val, col]) => (
+          {([['Usciti', euro(usciti), 'testo-primario'], ['Sul conto', saldo === null ? '—' : euro(saldo), 'testo-primario'], ['Devono uscire', euro(devonoUscire), 'testo-primario'],
+            ['Avanzo', avanzo === null ? '—' : euro(avanzo, { segno: true }), avanzo !== null && avanzo < 0 ? 'testo-errore' : 'testo-primario']] as const).map(([et, val, col]) => (
             <View key={et} style={{ minWidth: 0, flexShrink: 1 }}>
-              <Testo stile="dettaglio-normale" colore="sfondo-tenue" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire').replace('Sul conto', 'Conto') : et}</Testo>
-              <Testo stile="corpo-forte" colore={col as never} numberOfLines={1} style={compatto ? { fontSize: 13, lineHeight: 18 } : undefined}>{val}</Testo>
+              <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire').replace('Sul conto', 'Conto') : et}</Testo>
+              <Testo stile="corpo-forte" colore={col} numberOfLines={1} style={compatto ? { fontSize: 13, lineHeight: 18 } : undefined}>{val}</Testo>
             </View>
           ))}
         </View>, document.body) : null}
       {errore ? <Esito tono="errore" testo={errore} /> : null}
-      {/* Barra degli strumenti: non è contenuto, quindi non sta in un box. Prima i pulsanti per aggiungere, poi come si vedono le voci. */}
-      <View style={{ flexDirection: compatto ? 'column' : 'row', flexWrap: 'wrap', alignItems: compatto ? 'stretch' : 'flex-end', justifyContent: 'space-between', gap: d['spazio-blocco'] }}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
-          <Pulsante tipo="primario" etichetta="Aggiungi una spesa" icona="plus" larghezzaPiena={compatto} onPress={() => setSpesa('nuova')} />
-          <Pulsante tipo="secondario" etichetta="Aggiungi una rata" icona="plus" larghezzaPiena={compatto} onPress={() => setRata('nuova')} />
-        </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-gruppo'] }}>
-          <View style={{ gap: d['spazio-testo'], ...(compatto ? { alignSelf: 'stretch', width: '100%' } : {}) }}>
-            <Testo stile="dettaglio-forte" colore="testo-secondario">Raggruppa</Testo>
-            <SceltaSegmenti etichetta="Raggruppa" larghezzaPiena={compatto} valore={raggruppa} onCambia={setRaggruppa} opzioni={[{ valore: 'tipo', testo: 'Per tipo' }, { valore: 'categoria', testo: 'Per categoria' }]} />
-          </View>
-          <View style={{ gap: d['spazio-testo'], ...(compatto ? { alignSelf: 'stretch', width: '100%' } : {}) }}>
-            <Testo stile="dettaglio-forte" colore="testo-secondario">Ordina</Testo>
-            <SceltaSegmenti etichetta="Ordina" larghezzaPiena={compatto} valore={ordina} onCambia={setOrdina} opzioni={[{ valore: 'scadenza', testo: 'Per scadenza' }, { valore: 'nome', testo: 'Per nome' }]} />
+      {/* Barra degli strumenti: non è contenuto, quindi non sta in un box. Prima i pulsanti per aggiungere, poi come si vedono le voci.
+          Su telefono le due scelte (Raggruppa, Ordina) stanno dietro un solo pulsante «Vista». */}
+      {compatto ? (
+        <View style={{ gap: d['spazio-colonne'] }}>
+          <Pulsante tipo="primario" etichetta="Aggiungi una spesa" icona="plus" larghezzaPiena onPress={() => setSpesa('nuova')} />
+          <View style={{ flexDirection: 'row', gap: d['spazio-colonne'] }}>
+            <View style={{ flex: 1, minWidth: 0 }}><Pulsante tipo="secondario" etichetta="Aggiungi una rata" icona="plus" larghezzaPiena onPress={() => setRata('nuova')} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}><Pulsante tipo="secondario" etichetta="Vista" icona="sliders-horizontal" larghezzaPiena onPress={() => setVista(true)} /></View>
           </View>
         </View>
-      </View>
+      ) : (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', justifyContent: 'space-between', gap: d['spazio-blocco'] }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
+            <Pulsante tipo="primario" etichetta="Aggiungi una spesa" icona="plus" onPress={() => setSpesa('nuova')} />
+            <Pulsante tipo="secondario" etichetta="Aggiungi una rata" icona="plus" onPress={() => setRata('nuova')} />
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-gruppo'] }}>{scelteVista}</View>
+        </View>
+      )}
+      <Foglio aperto={vista} titolo="Vista" onChiudi={() => setVista(false)}>
+        {scelteVista}
+        <Pulsante tipo="primario" etichetta="Fatto" larghezzaPiena onPress={() => setVista(false)} />
+      </Foglio>
+      {compatto && !spesa && !rata && !sulConto && !vista ? createPortal(
+        <Pressable accessibilityRole="button" accessibilityLabel="Aggiungi una spesa" onPress={() => setSpesa('nuova')}
+          style={{ position: 'fixed', right: 16, bottom: 'calc(env(safe-area-inset-bottom) + 77px)', zIndex: 40, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: c['sfondo-accento'], boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as never}>
+          <Icona nome="plus" misura={24} colore="icona-su-accento" />
+        </Pressable>, document.body) : null}
       {!righe.length ? <Vuoto testo="Nessuna spesa in questo mese. Aggiungi affitto, bollette e abbonamenti." /> : null}
       {/* Un box per tipo di spesa, in due colonne: le mensili a sinistra, rate e annuali a destra. */}
       <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-start', gap: d['spazio-blocco'] }}>
@@ -295,7 +322,8 @@ function FinestraRata({ rata, aperta, onChiudi }: { rata: Rata | null; aperta: b
   const ultima = (() => { const d0 = leggiData(prima), n = Number(numero); if (!d0 || !Number.isInteger(n) || n < 1) return null; const [a, m] = d0.split('-').map(Number); const t = a * 12 + m - 1 + n - 1; return `${['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giugno', 'luglio', 'agosto', 'settembre', 'ottobre', 'novembre', 'dicembre'][t % 12]} ${Math.floor(t / 12)}`; })();
   return (
     <FinestraModulo titolo={rata ? rata.oggetto : 'Nuova rata'} icona="credit-card" aperta={aperta} onChiudi={onChiudi} onSalva={salva}
-      onElimina={rata ? () => cancella(`/rate/${rata.id}`).then(() => undefined) : undefined}>
+      onElimina={rata ? () => cancella(`/rate/${rata.id}`).then(() => undefined) : undefined}
+      confermaElimina={rata ? { nome: `«${rata.oggetto}»`, dettaglio: 'La rata sparisce dal mese e dall’elenco delle rate, comprese quelle già pagate.' } : undefined}>
       <Affiancati>
         <Meta><Campo etichetta="Cosa paghi a rate" valore={oggetto} onCambia={setOggetto} segnaposto="Es. Pinguino" autoFocus={!rata} /></Meta>
         <Meta><Campo etichetta="Finanziaria (facoltativa)" valore={finanziaria} onCambia={setFinanziaria} segnaposto="Es. Cofidis" /></Meta>

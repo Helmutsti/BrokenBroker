@@ -216,13 +216,13 @@ export function SceltaSegmenti<T extends string>({ opzioni, valore, onCambia, et
   const { c } = useTema();
   const alto = useCompatto();
   return (
-    // Alta come campi, tendine e pulsanti: le opzioni riempiono l'altezza e il testo sta al centro.
-    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', height: alto ? 44 : ALTEZZA_CONTROLLO, padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
+    // Alta come campi, tendine e pulsanti: le opzioni riempiono l'altezza e il testo sta al centro; se non stanno in una riga vanno a capo.
+    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', flexWrap: 'wrap', minHeight: alto ? 44 : ALTEZZA_CONTROLLO, padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
       {opzioni.map((o) => {
         const scelta = o.valore === valore;
         return (
           <Pressable key={o.valore} accessibilityRole="radio" aria-checked={scelta} onPress={() => onCambia(o.valore)}
-            style={(s: StatoPressione) => [{ flexGrow: larghezzaPiena ? 1 : 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: dentroIlBordo(d['margine-voce-h']),
+            style={(s: StatoPressione) => [{ flexGrow: larghezzaPiena ? 1 : 0, minHeight: (alto ? 44 : ALTEZZA_CONTROLLO) - 2 * d['margine-gruppo-controlli'], alignItems: 'center', justifyContent: 'center', paddingHorizontal: dentroIlBordo(d['margine-voce-h']),
               borderRadius: d['raggio-controllo-interno'], backgroundColor: scelta ? c['sfondo-scheda'] : s.hovered ? c['sfondo-hover'] : 'transparent',
               borderWidth: d['misura-bordo'], borderColor: scelta ? c['bordo-controllo'] : 'transparent' }, anelloFocus(c, s.focused)]}>
             <Testo stile={scelta ? 'dettaglio-forte' : 'dettaglio-normale'} colore={scelta ? 'testo-accento' : 'testo-secondario'}>{o.testo}</Testo>

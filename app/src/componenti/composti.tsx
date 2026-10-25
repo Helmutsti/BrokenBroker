@@ -41,24 +41,85 @@ export function BarraLaterale({ voci, attiva, onNaviga, profilo, onProfilo, onEs
   );
 }
 
-// Telefono: barra di navigazione in basso (le sezioni) e testata in alto (logo, impostazioni, esci).
-// Rispetta l'area sicura di iPhone (barra Home) e i bersagli sono alti almeno 44.
-export function BarraInferiore({ voci, attiva, onNaviga }: { voci: VoceMenu[]; attiva: string; onNaviga: (k: string) => void }) {
+// Telefono: barra di navigazione in basso (le sezioni principali, più «Altro» con le altre) e testata in alto
+// (logo, impostazioni, esci). Rispetta l'area sicura di iPhone (barra Home) e i bersagli sono alti almeno 44.
+export function BarraInferiore({ voci, altre, attiva, onNaviga }: { voci: VoceMenu[]; altre: VoceMenu[]; attiva: string; onNaviga: (k: string) => void }) {
+  const { c } = useTema();
+  const [altro, setAltro] = useState(false);
+  // «Altro» risulta attivo quando è aperta una delle sezioni che contiene.
+  const altroAttivo = altre.some((v) => v.chiave === attiva);
+  const voce = (chiave: string, testo: string, icona: string, sel: boolean, onPress: () => void) => (
+    <Pressable key={chiave} accessibilityRole={chiave === 'altro' ? 'button' : 'link'} accessibilityLabel={testo} aria-current={sel ? 'page' : undefined} aria-expanded={chiave === 'altro' ? altro : undefined} onPress={onPress}
+      style={{ flex: 1, minWidth: 0, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 4, borderRadius: d['raggio-controllo'], backgroundColor: sel ? c['sfondo-accento-tenue'] : 'transparent' }}>
+      <Icona nome={icona} misura={20} colore={sel ? 'icona-accento' : 'icona-predefinita'} />
+      <Testo stile="dettaglio-forte" colore={sel ? 'testo-accento' : 'testo-secondario'} numberOfLines={1} style={{ fontSize: 13, lineHeight: 16 }}>{testo}</Testo>
+    </Pressable>
+  );
+  return (
+    <>
+      <View accessibilityRole="navigation" style={{ flexDirection: 'row', backgroundColor: c['sfondo-barra-laterale'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'],
+        paddingHorizontal: 4, paddingTop: 4, paddingBottom: 'env(safe-area-inset-bottom)' } as object}>
+        {voci.map((v) => voce(v.chiave, v.breve ?? v.testo, v.icona, v.chiave === attiva, () => onNaviga(v.chiave)))}
+        {voce('altro', 'Altro', 'ellipsis', altroAttivo, () => setAltro(true))}
+      </View>
+      <Foglio aperto={altro} titolo="Altro" onChiudi={() => setAltro(false)}>
+        {altre.map((v) => {
+          const sel = v.chiave === attiva;
+          return (
+            <Pressable key={v.chiave} accessibilityRole="link" aria-current={sel ? 'page' : undefined} onPress={() => { setAltro(false); onNaviga(v.chiave); }}
+              style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], minHeight: 48, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], borderRadius: d['raggio-controllo'],
+                backgroundColor: sel ? c['sfondo-accento-tenue'] : s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
+              <Icona nome={v.icona} misura={20} colore={sel ? 'icona-accento' : 'icona-predefinita'} />
+              <Testo colore={sel ? 'testo-accento' : 'testo-primario'} stile={sel ? 'corpo-forte' : 'corpo-normale'}>{v.testo}</Testo>
+            </Pressable>
+          );
+        })}
+      </Foglio>
+    </>
+  );
+}
+
+// Foglio che sale dal basso (telefono): per menu e scelte brevi. Si chiude toccando fuori o con «Chiudi».
+export function Foglio({ aperto, titolo, onChiudi, children }: { aperto: boolean; titolo: string; onChiudi: () => void; children: ReactNode }) {
   const { c } = useTema();
   return (
-    <View accessibilityRole="navigation" style={{ flexDirection: 'row', backgroundColor: c['sfondo-barra-laterale'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'],
-      paddingHorizontal: 4, paddingTop: 4, paddingBottom: 'env(safe-area-inset-bottom)' } as object}>
-      {voci.map((v) => {
-        const sel = v.chiave === attiva;
-        return (
-          <Pressable key={v.chiave} accessibilityRole="link" accessibilityLabel={v.testo} aria-current={sel ? 'page' : undefined} onPress={() => onNaviga(v.chiave)}
-            style={{ flex: 1, minWidth: 0, minHeight: 52, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 4, borderRadius: d['raggio-controllo'], backgroundColor: sel ? c['sfondo-accento-tenue'] : 'transparent' }}>
-            <Icona nome={v.icona} misura={20} colore={sel ? 'icona-accento' : 'icona-predefinita'} />
-            <Testo stile="dettaglio-forte" colore={sel ? 'testo-accento' : 'testo-secondario'} numberOfLines={1} style={{ fontSize: 11, lineHeight: 14 }}>{v.breve ?? v.testo}</Testo>
-          </Pressable>
-        );
-      })}
-    </View>
+    <Modal transparent visible={aperto} onRequestClose={onChiudi} animationType="fade">
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: c['sfondo-velo'] }}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Chiudi" onPress={onChiudi} style={{ flex: 1 }} />
+        <View accessibilityRole="dialog" aria-modal aria-label={titolo}
+          style={{ padding: d['spazio-blocco'], paddingBottom: 'max(16px, env(safe-area-inset-bottom))', gap: d['spazio-colonne'], backgroundColor: c['sfondo-scheda'], borderTopLeftRadius: d['raggio-finestra'], borderTopRightRadius: d['raggio-finestra'],
+            borderTopWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] } as object}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+            <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1 }}>{titolo}</Testo>
+            <PulsanteIcona icona="x" etichetta="Chiudi" fantasma onPress={onChiudi} />
+          </View>
+          {children}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Finestra piccola di conferma («Vuoi uscire?», «Eliminare …?»): titolo, una riga che spiega, Annulla e il pulsante di conferma.
+export function ConfermaFinestra({ aperta, titolo, testo, etichettaConferma, tono = 'primario', onConferma, onAnnulla, lavoro }: {
+  aperta: boolean; titolo: string; testo?: string; etichettaConferma: string; tono?: 'primario' | 'pericolo'; onConferma: () => void; onAnnulla: () => void; lavoro?: boolean;
+}) {
+  const { c } = useTema();
+  return (
+    <Modal transparent visible={aperta} onRequestClose={onAnnulla} animationType="fade">
+      <View style={{ flex: 1, backgroundColor: c['sfondo-velo'], alignItems: 'center', justifyContent: 'center', padding: d['spazio-blocco'] }}>
+        <View accessibilityRole="alert" aria-modal aria-label={titolo}
+          style={{ width: 400, maxWidth: '100%', padding: d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-finestra'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'],
+            boxShadow: `0 ${ombre.finestra.offsetY}px ${ombre.finestra.blur}px ${ombre.finestra.colore}` } as object}>
+          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2}>{titolo}</Testo>
+          {testo ? <Testo colore="testo-secondario">{testo}</Testo> : null}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
+            <Pulsante etichetta="Annulla" onPress={onAnnulla} />
+            <Pulsante tipo={tono} etichetta={etichettaConferma} onPress={onConferma} disattivato={lavoro} />
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -69,7 +130,7 @@ export function TestataCompatta({ profilo, impostazioniAttive, onProfilo, onEsci
       backgroundColor: c['sfondo-barra-laterale'], borderBottomWidth: d['misura-bordo'], borderBottomColor: c['bordo-separatore'] } as object}>
       <Testo stile="logo" style={{ flex: 1, fontSize: 18 }} numberOfLines={1}>BrokenBroker</Testo>
       <View style={{ borderRadius: d['raggio-controllo'], backgroundColor: impostazioniAttive ? c['sfondo-accento-tenue'] : 'transparent' }}>
-        <PulsanteIcona icona="sliders-horizontal" etichetta={profilo ? `Impostazioni di ${profilo}` : 'Impostazioni'} fantasma onPress={onProfilo} />
+        <PulsanteIcona icona="sliders-horizontal" etichetta="Impostazioni" fantasma onPress={onProfilo} />
       </View>
       <PulsanteIcona icona="log-out" etichetta="Esci" fantasma onPress={onEsci} />
     </View>

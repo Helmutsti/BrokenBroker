@@ -333,7 +333,8 @@ function FinestraInvestimento({ bene, aperta, posizioni, onChiudi }: { bene: Ben
 
   return (
     <FinestraModulo titolo={bene ? `Modifica ${bene.nome}` : 'Aggiungi investimento'} icona="trending-up" aperta={aperta} onChiudi={onChiudi} onSalva={salva}
-      onElimina={bene ? () => cancella(`/investimenti/beni/${bene.id}`).then(() => undefined) : undefined}>
+      onElimina={bene ? () => cancella(`/investimenti/beni/${bene.id}`).then(() => undefined) : undefined}
+      confermaElimina={bene ? { nome: `«${bene.nome}»`, dettaglio: 'L’investimento esce dal patrimonio.' } : undefined}>
       {!bene ? (
         <Voce etichetta="Che cosa aggiungi?" aiuto={scelta === 'quotato'
           ? 'Un ETF, un\'azione, un\'obbligazione o una crypto che ha un prezzo su un mercato: inserisci quantità e prezzo medio di carico.'
@@ -425,7 +426,8 @@ function FinestraPosizione({ posizione, primoAcquisto, onChiudi, onComposizione 
   const elimina = () => cancella(`/investimenti/posizioni?titolo_id=${x!.id}${x!.conto_id ? `&conto_id=${x!.conto_id}` : ''}`).then(() => undefined);
   const g = Number(x?.guadagno ?? 0);
   return (
-    <FinestraModulo titolo={x?.nome ?? ''} icona="globe" aperta={!!x} onChiudi={onChiudi} onSalva={salva} onElimina={elimina} etichettaElimina="Elimina dal portafoglio">
+    <FinestraModulo titolo={x?.nome ?? ''} icona="globe" aperta={!!x} onChiudi={onChiudi} onSalva={salva} onElimina={elimina} etichettaElimina="Elimina dal portafoglio"
+      confermaElimina={{ nome: `«${x?.nome ?? 'questo titolo'}» dal portafoglio`, dettaglio: x ? `Spariscono le ${quote(x.quote)} quote${x.conto_id ? ` di questo conto` : ''} e il prezzo medio di carico.` : undefined }}>
       {x ? (
         <>
           <Testo colore="testo-secondario">{[x.tipo.toUpperCase(), x.ticker, x.borsa, x.isin].filter(Boolean).join(' · ')}</Testo>

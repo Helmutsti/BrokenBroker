@@ -247,11 +247,22 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
       {corpo}
     </View>
   );
+  // Cosa sparisce con il salvadanaio: i sotto-salvadanai, i soldi versati e i promemoria di versamento in Spese.
+  const dettaglioElimina = (x: Obiettivo) => {
+    const dentro = tuttiGliObiettivi(x.figli);
+    const promemoria = [x, ...dentro].filter((y) => y.alimentato_da).length;
+    return [
+      dentro.length ? `Spariscono anche ${dentro.length} ${dentro.length === 1 ? 'sotto-salvadanaio' : 'sotto-salvadanai'}.` : null,
+      promemoria ? `${promemoria === 1 ? 'Sparisce' : 'Spariscono'} anche ${promemoria} promemoria di versamento in Spese.` : null,
+      'Spariscono anche i versamenti segnati.',
+    ].filter(Boolean).join(' ');
+  };
   const ogniTesto = ogni === '1' ? 'Quanto al mese' : ogni === '12' ? "Quanto all'anno" : `Quanto ogni ${ogni} mesi`;
 
   return (
     <FinestraModulo titolo={o ? 'Modifica salvadanaio' : 'Nuovo salvadanaio'} icona={icona} aperta={!!stato} onChiudi={onChiudi} onSalva={salva}
-      onElimina={o?.mio && !bloc ? () => cancella(`/obiettivi/${o.id}`).then(() => undefined) : undefined} etichettaElimina={o?.figli.length ? 'Elimina con i sotto-salvadanai' : 'Elimina'}>
+      onElimina={o?.mio && !bloc ? () => cancella(`/obiettivi/${o.id}`).then(() => undefined) : undefined} etichettaElimina={o?.figli.length ? 'Elimina con i sotto-salvadanai' : 'Elimina'}
+      confermaElimina={o ? { nome: `«${o.nome}»`, dettaglio: dettaglioElimina(o) } : undefined}>
       {bloc ? (
         <View style={{ gap: d['spazio-testo'], alignItems: 'flex-start' }}>
           <Testo stile="dettaglio-normale" colore="testo-secondario">{`Nasce dalla spesa «${bloc.nome}»: per cambiarlo apri la spesa.`}</Testo>
@@ -354,7 +365,8 @@ function FinestraTraguardo({ stato, onChiudi }: { stato: { obiettivo: Obiettivo;
   };
   return (
     <FinestraModulo titolo={t ? 'Modifica traguardo di copertura' : 'Nuovo traguardo di copertura'} icona="shield" aperta={!!stato} onChiudi={onChiudi} onSalva={salva}
-      onElimina={t ? () => cancella(`/obiettivi/traguardi/${t.id}`).then(() => undefined) : undefined}>
+      onElimina={t ? () => cancella(`/obiettivi/traguardi/${t.id}`).then(() => undefined) : undefined}
+      confermaElimina={t ? { nome: `il traguardo «${t.nome}»`, dettaglio: 'I soldi del salvadanaio non cambiano.' } : undefined}>
       <Testo colore="testo-secondario">{`Un importo senza soldi propri: mostra se "${stato?.obiettivo.nome ?? ''}" basta a coprirlo per intero.`}</Testo>
       <Campo etichetta="Cosa deve coprire" valore={nome} onCambia={setNome} segnaposto="Es. Riparazione auto" autoFocus />
       <Campo etichetta="Importo" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" />

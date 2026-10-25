@@ -8,7 +8,7 @@ import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
 import { Intestazione, RigaCategoria, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
-import type { Categoria } from '../dati/tipi.ts';
+import type { Categoria, ElencoSpese, Rata } from '../dati/tipi.ts';
 import { euro, nomeMeseMinuscolo, numero } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { FinestraModulo, serve, Voce } from './moduli.tsx';
@@ -54,7 +54,7 @@ export function Categorie() {
       <Intestazione titolo="Categorie" sottotitolo="Ogni categoria ha un'icona: la vedi accanto a ogni spesa e budget."
         azioni={<Pulsante tipo="primario" etichetta="Nuova categoria" icona="plus" onPress={() => setAperta({ padre: null })} />} />
       <SceltaSegmenti etichetta="Uscite o entrate" valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'uscita', testo: `Uscite · ${radici('uscita')}` }, { valore: 'entrata', testo: `Entrate · ${radici('entrata')}` }]} />
-      <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre. L’icona ha il colore della categoria, che si sceglie con la matita." />
+      <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre (se la categoria non ha un colore). Se la categoria ha un colore, l’icona lo mantiene, anche quando è presa dal padre. Il colore si sceglie con la matita." />
       <Scheda>
         <View role="tree" aria-label="Categorie">
           {compatto ? null : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
@@ -104,6 +104,14 @@ function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { pad
   const [colore, setColore] = useState<string | null>(null);
   const [sposta, setSposta] = useState<string | null>(null);
   const [inUso, setInUso] = useState(false);
+  // Cosa usa la categoria: spese, rate e sottocategorie. Se c'è qualcosa, alla cancellazione vanno spostate altrove.
+  const spese = useDati<ElencoSpese>(c ? '/spese-previste' : null).dati;
+  const rate = useDati<Rata[]>(c ? '/rate' : null).dati;
+  const nSpese = c ? (spese?.spese.filter((s) => s.categoria_id === c.id).length ?? 0) : 0;
+  const nRate = c ? (rate?.filter((x) => x.categoria_id === c.id).length ?? 0) : 0;
+  const nSotto = c ? rif.categorie.filter((x) => x.padre_id === c.id).length : 0;
+  const coinvolte = nSpese + nRate + nSotto;
+  const elenco = [nSpese ? `${nSpese} ${nSpese === 1 ? 'spesa' : 'spese'}` : null, nRate ? `${nRate} ${nRate === 1 ? 'rata' : 'rate'}` : null, nSotto ? `${nSotto} ${nSotto === 1 ? 'sottocategoria' : 'sottocategorie'}` : null].filter(Boolean).join(', ');
   useEffect(() => {
     if (!stato) return;
     setNome(c?.nome ?? ''); setPadre(c?.padre_id ?? ('padre' in stato ? stato.padre : null) ?? 'nessuna'); setIcona(c?.icona ?? 'padre'); setColore(c?.colore ?? null); setSposta(null); setInUso(false);
@@ -114,19 +122,29 @@ function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { pad
   };
   const elimina = async () => {
     try { await cancella(`/categorie/${c!.id}${sposta ? `?sposta_su=${sposta}` : ''}`); }
-    catch (e) { if ((e as { stato?: number }).stato === 409) { setInUso(true); throw new Error('La categoria è in uso: scegli sotto dove spostare le spese, poi premi di nuovo Elimina.'); } throw e; }
+    catch (e) { if ((e as { stato?: number }).stato === 409) { setInUso(true); throw new Error('La categoria è in uso: scegli dove spostare le voci nel campo «Sposta spese e sottocategorie su», poi premi di nuovo Elimina.'); } throw e; }
   };
   const altre = opzioniCategorie(rif.categorie).filter((o) => o.valore !== c?.id);
   return (
     <FinestraModulo titolo={c ? c.nome : 'Nuova categoria'} icona={icona === 'padre' ? rif.iconaCategoria(padre === 'nessuna' ? null : padre) : icona} aperta={!!stato} onChiudi={onChiudi} onSalva={salva}
-      onElimina={c ? elimina : undefined}>
+      onElimina={c ? elimina : undefined}
+      confermaElimina={c ? { nome: `«${c.nome}»`,
+        dettaglio: coinvolte || inUso ? `${elenco ? `${elenco} ${coinvolte === 1 ? 'passa' : 'passano'}` : 'Le voci collegate passano'} a «${rif.categoria(sposta)?.nome ?? ''}».` : 'Nessuna spesa o rata la usa.',
+        controlla: () => ((coinvolte || inUso) && !sposta ? 'Scegli prima dove spostare le voci, nel campo «Sposta spese e sottocategorie su».' : null) } : undefined}>
       <Campo etichetta="Nome" valore={nome} onCambia={setNome} autoFocus={!c} />
       <Tendina etichetta="Dentro" valore={padre} onCambia={setPadre} opzioni={[{ valore: 'nessuna', testo: 'Nessuna: categoria principale', rientro: 0 }, ...altre]} />
       <TendinaGriglia soloIcone etichetta="Icona" valore={icona} onCambia={setIcona} opzioni={[{ valore: 'padre', testo: 'Quella della categoria padre', icona: rif.iconaCategoria(padre === 'nessuna' ? null : padre) }, ...ICONE.map((i) => ({ valore: i, testo: i.replace(/-\d$/, '').replace(/-/g, ' '), icona: i }))]} />
       <Voce etichetta="Colore" aiuto={colore ? nomeColoreCategoria(colore) ?? undefined : 'Nessun colore'}>
         <SceltaColore valore={colore} onCambia={setColore} />
       </Voce>
-      {inUso ? <Tendina etichetta="Sposta spese e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} /> : null}
+      {c && (coinvolte || inUso) ? (
+        <View style={{ gap: d['spazio-testo'] }}>
+          <Tendina etichetta="Sposta spese e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} />
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{coinvolte
+            ? `Se elimini «${c.nome}»: ${elenco} ${coinvolte === 1 ? 'passa' : 'passano'} alla categoria che scegli qui.`
+            : 'La categoria è in uso: scegli dove spostare le voci.'}</Testo>
+        </View>
+      ) : null}
     </FinestraModulo>
   );
 }
