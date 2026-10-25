@@ -1,6 +1,6 @@
 ﻿import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante, SceltaSegmenti, type Tono } from '../componenti/base.tsx';
+import { Esito, Interruttore, Pulsante, PulsanteIcona, SceltaSegmenti, type Tono } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
 import { CifraModificabile, RigaAvanzamento, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, leggi, modifica, sostituisci, useDati } from '../dati/api.ts';
@@ -14,7 +14,7 @@ import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
 // SC-04 Obiettivi (decisione 20): obiettivi annidabili con sotto-salvadanai
-// (ceste con soldi propri) e traguardi di copertura (quanto copre il padre).
+// (salvadanai con soldi propri) e traguardi di copertura (quanto copre il padre).
 
 const tuttiGliObiettivi = (xs: Obiettivo[]): Obiettivo[] => xs.flatMap((o) => [o, ...tuttiGliObiettivi(o.figli)]);
 // L'icona scelta dall'utente; se non l'ha scelta, una di base.
@@ -50,7 +50,6 @@ export function Obiettivi({ escludi }: { escludi?: string | null }) {
   const apriVersa = (o: Obiettivo | null, quota: string | null = null) => { setQuotaVersa(quota); setVersa(o); };
   const [traguardo, setTraguardo] = useState<{ obiettivo: Obiettivo; traguardo: Traguardo | null } | null>(null);
   const [aperti, setAperti] = useState<Set<string>>(new Set());
-  const [mostraNascosti, setMostraNascosti] = useState(false);
   const { c } = useTema();
   const rif = useRiferimenti();
   // Errore delle azioni sulle annuali (aggiungi tutte, dividi per spesa).
@@ -72,8 +71,13 @@ export function Obiettivi({ escludi }: { escludi?: string | null }) {
     <View style={{ gap: d['spazio-testo'] }}>
       {figli.map((f) => (
         <View key={f.id} style={{ gap: d['spazio-testo'] }}>
-          <RigaAvanzamento nome={f.paga_spesa ? `${f.nome} · esce a ${nomeMese(f.paga_spesa.prossima.slice(0, 7)).toLowerCase()} · ${euro(Number(f.paga_spesa.importo) / f.paga_spesa.ogni_mesi)} al mese` : f.nome} importo={valore(f)} valore={f.percentuale ?? 0} percentuale={f.percentuale !== null && f.percentuale >= 100 ? '100% ✓' : percento(f.percentuale)}
-            stato={statoDi(f.percentuale)} icona={iconaDi(f)} compatta={livello > 0} onApri={() => apriVersa(f)} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <RigaAvanzamento nome={f.paga_spesa ? `${f.nome} · esce a ${nomeMese(f.paga_spesa.prossima.slice(0, 7)).toLowerCase()} · ${euro(Number(f.paga_spesa.importo) / f.paga_spesa.ogni_mesi)} al mese` : f.nome} importo={valore(f)} valore={f.percentuale ?? 0} percentuale={f.percentuale !== null && f.percentuale >= 100 ? '100% ✓' : percento(f.percentuale)}
+                stato={statoDi(f.percentuale)} icona={iconaDi(f)} compatta={livello > 0} onApri={() => apriVersa(f)} />
+            </View>
+            <PulsanteIcona icona="pencil" etichetta={`Modifica ${f.nome}`} fantasma onPress={() => setModifica({ obiettivo: f })} />
+          </View>
           {f.figli.length ? (
             <View style={{ gap: d['spazio-testo'], paddingLeft: d['margine-voce-h'], borderLeftWidth: d['misura-bordo-forte'], borderLeftColor: c['bordo-separatore'] }}>
               {albero(f.figli, livello + 1)}
@@ -137,16 +141,13 @@ export function Obiettivi({ escludi }: { escludi?: string | null }) {
   };
 
   // In ordine di scadenza, poi quelli senza scadenza per nome.
-  const nascosti = dati.filter((o) => o.nascosto);
-  const visibili = mostraNascosti ? dati : dati.filter((o) => !o.nascosto);
-  const ordinati = [...visibili].sort((a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it'));
+  const ordinati = [...dati].sort((a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it'));
   return (
     <>
       {erroreAnnuali ? <Esito tono="errore" testo={erroreAnnuali} /> : null}
       {ordinati.map(scheda)}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
         <Pulsante tipo="testo" etichetta="Nuovo salvadanaio" icona="plus" onPress={() => setModifica({ obiettivo: null })} />
-        {nascosti.length ? <Pulsante tipo="testo" icona={mostraNascosti ? 'eye-off' : 'eye'} etichetta={mostraNascosti ? 'Nascondi quelli nascosti' : `Mostra i nascosti (${nascosti.length})`} onPress={() => setMostraNascosti(!mostraNascosti)} /> : null}
       </View>
       <FinestraObiettivo stato={modifica_} obiettivi={dati} onChiudi={() => setModifica(null)} onTraguardo={(o) => { setModifica(null); setTraguardo({ obiettivo: o, traguardo: null }); }}
         onSotto={(o) => setModifica({ obiettivo: null, padre: o.id })}
@@ -171,7 +172,6 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
   const [nome, setNome] = useState('');
   const [padre, setPadre] = useState('nessuno');
   const [icona, setIcona] = useState('target');
-  const [nascosto, setNascosto] = useState(false);
   const [traguardo, setTraguardo] = useState('');
   const [scadenza, setScadenza] = useState('');
   const [creaSpesa, setCreaSpesa] = useState(false);
@@ -182,16 +182,13 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
   const [ogni, setOgni] = useState<'1' | '3' | '6' | '12'>('1');
   const [quota, setQuota] = useState('');
   const [conto, setConto] = useState<string | null>(null);
-  // Le opzioni meno usate stanno in una sezione chiusa, aperta se il salvadanaio ne ha già una attiva.
-  const [altre, setAltre] = useState(false);
   useEffect(() => {
     if (!stato) return;
-    setIcona(o ? iconaDi(o) : 'target'); setNascosto(o?.nascosto ?? false);
+    setIcona(o ? iconaDi(o) : 'target');
     setNome(o?.nome ?? ''); setPadre(o?.padre_id ?? stato.padre ?? 'nessuno'); setTraguardo(importoInTesto(o?.traguardo));
     setScadenza(o?.paga_spesa?.senza_giorno ? '' : dataInTesto(o?.scadenza)); setCreaSpesa(o?.crea_spesa ?? false); setCondiviso(o?.condiviso ?? false); setEmail('');
     const a = o?.alimentato_da;
     setDaParte(!!a); setOgni(a && [3, 6, 12].includes(a.ogni_mesi ?? 1) ? (String(a.ogni_mesi) as '3' | '6' | '12') : '1'); setQuota(importoInTesto(a?.importo)); setConto(a?.conto_id ?? null);
-    setAltre(!!o && (o.nascosto || o.condiviso || o.crea_spesa || !!o.padre_id || !!a?.conto_id));
   }, [stato]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // La proposta segue quello che è scritto nella finestra (traguardo e scadenza).
@@ -214,8 +211,8 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
   }, [o, obiettivi]);
 
   const salva = async () => {
-    if (o && bloc) { // solo icona e nascosto: il resto si cambia dalla spesa
-      await modifica<Obiettivo>(`/obiettivi/${o.id}`, { icona, nascosto });
+    if (o && bloc) { // solo l'icona: il resto si cambia dalla spesa
+      await modifica<Obiettivo>(`/obiettivi/${o.id}`, { icona });
       return;
     }
     // Se il salvadanaio paga una spesa, traguardo e scadenza vengono dalla spesa: non si inviano e la spesa non si tocca.
@@ -223,7 +220,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
     const t = !dallaSpesa && traguardo.trim() ? serve(leggiImporto(traguardo), 'Scrivi il traguardo, es. 2.000') : null;
     const s = !dallaSpesa && scadenza.trim() ? serve(leggiData(scadenza), 'Scrivi la scadenza come GG/MM/AAAA') : null;
     if (creaSpesa && !dallaSpesa && !t && !o?.figli.length) throw new Error('Per creare la spesa serve un traguardo');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), padre_id: padre === 'nessuno' ? null : padre, ...(dallaSpesa ? {} : { traguardo: t, scadenza: s }), crea_spesa: creaSpesa, icona, nascosto };
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), padre_id: padre === 'nessuno' ? null : padre, ...(dallaSpesa ? {} : { traguardo: t, scadenza: s }), crea_spesa: creaSpesa, icona };
     const salvato = o ? await modifica<Obiettivo>(`/obiettivi/${o.id}`, corpo) : await crea<Obiettivo>('/obiettivi', corpo);
     // La spesa "mettici da parte": nasce, cambia o sparisce con l'interruttore (il contenitore delle annuali non ne ha).
     if (daParte && !contenitore) {
@@ -236,6 +233,22 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
     if (!condiviso && esistente) await cancella(`/condivisioni/${esistente.id}`);
   };
 
+  const { c } = useTema();
+  // Un argomento del modulo: titolo, una riga che dice a cosa serve e, a destra, l'interruttore se c'è.
+  const riquadro = (titolo: string, nota: string, corpo: ReactNode, interruttore?: ReactNode, tenue?: boolean) => (
+    <View style={{ gap: d['spazio-blocco'], padding: d['spazio-blocco'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-scheda'], backgroundColor: tenue ? c['sfondo-tenue'] : c['sfondo-scheda'] }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+        <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+          <Testo stile="corpo-forte" accessibilityRole="header">{titolo}</Testo>
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo>
+        </View>
+        {interruttore}
+      </View>
+      {corpo}
+    </View>
+  );
+  const ogniTesto = ogni === '1' ? 'Quanto al mese' : ogni === '12' ? "Quanto all'anno" : `Quanto ogni ${ogni} mesi`;
+
   return (
     <FinestraModulo titolo={o ? 'Modifica salvadanaio' : 'Nuovo salvadanaio'} icona={icona} aperta={!!stato} onChiudi={onChiudi} onSalva={salva}
       onElimina={o?.mio && !bloc ? () => cancella(`/obiettivi/${o.id}`).then(() => undefined) : undefined} etichettaElimina={o?.figli.length ? 'Elimina con i sotto-salvadanai' : 'Elimina'}>
@@ -245,71 +258,39 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
           {onApriSpesa ? <Pulsante tipo="testo" etichetta="Apri la spesa" icona="calendar-check" onPress={() => onApriSpesa(bloc.id)} /> : null}
         </View>
       ) : null}
-      <Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!o} disattivato={!!bloc} />
-      <SceltaIcona valore={icona} onCambia={setIcona} />
-      {o?.paga_spesa ? (
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
+        <SceltaIcona valore={icona} onCambia={setIcona} />
+        <View style={{ flex: 1, minWidth: 0 }}><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!o} disattivato={!!bloc} /></View>
+      </View>
+      {riquadro('Quanto e quando', 'Facoltativi. Con un traguardo l’app ti dice a che punto sei.', o?.paga_spesa ? (
         <Testo stile="dettaglio-normale" colore="testo-secondario">{`Cifra e scadenza vengono dalla spesa «${o.paga_spesa.nome}»: si cambiano da Spese.`}</Testo>
       ) : (
         <Affiancati>
           <Meta><Campo etichetta="Traguardo" valore={traguardo} onCambia={setTraguardo} segnaposto="Facoltativo" inputMode="decimal" disattivato={!!bloc} aiuto={o?.figli.length ? 'Vuoto: la somma dei sotto-salvadanai' : undefined} /></Meta>
           <Meta><CampoData facoltativa etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} disattivato={!!bloc} /></Meta>
         </Affiancati>
-      )}
-      {contenitore ? (
-        <Testo stile="dettaglio-normale" colore="testo-secondario">La quota mensile è la somma delle spese annuali che contiene: la trovi in Spese, box Annuali.</Testo>
-      ) : bloc ? (
-        <Testo stile="dettaglio-normale" colore="testo-secondario">Il promemoria non c’è: la quota mensile arriva dalla spesa.</Testo>
-      ) : (
-      <View style={{ gap: d['spazio-testo'] }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-          <Interruttore acceso={daParte} onCambia={accendi} etichetta="Ricordami di metterci dei soldi" />
-          <View style={{ flex: 1 }}>
-            <Testo>Ricordami di metterci dei soldi</Testo>
-            <Testo stile="dettaglio-normale" colore="testo-secondario">Compare in Spese come promemoria. I soldi non si muovono da soli: li versi tu e li segni qui con “Aggiungi quota mensile”, che spunta anche il promemoria.</Testo>
-          </View>
-        </View>
-        {daParte ? (
+      ))}
+      {contenitore ? riquadro('Ricordamelo', 'La quota mensile è la somma delle spese annuali che contiene: la trovi in Spese, box Annuali.', null, undefined, true)
+        : bloc ? riquadro('Ricordamelo', 'Il promemoria non c’è: la quota mensile arriva dalla spesa.', null, undefined, true)
+        : riquadro('Ricordamelo', 'Compare in Spese per ricordarti di versare. I soldi li metti tu e li segni qui con “Aggiungi quota mensile”.', daParte ? (
           <>
             <SceltaSegmenti etichetta="Ogni quanto" larghezzaPiena valore={ogni} onCambia={cambiaOgni} opzioni={[{ valore: '1', testo: 'Ogni mese' }, { valore: '3', testo: 'Ogni 3 mesi' }, { valore: '6', testo: 'Ogni 6 mesi' }, { valore: '12', testo: 'Ogni anno' }]} />
-            <Campo etichetta={ogni === '1' ? 'Quanto al mese' : ogni === '12' ? "Quanto all'anno" : `Quanto ogni ${ogni} mesi`} valore={quota} onCambia={setQuota} inputMode="decimal" segnaposto="0,00"
-              aiuto={consigliata !== null ? `Per arrivare in tempo: ${euro(consigliata)} ${ogni === '1' ? 'al mese' : ogni === '12' ? "all'anno" : `ogni ${ogni} mesi`}` : 'Con traguardo e scadenza l’app ti propone la cifra'} />
+            <Campo etichetta={ogniTesto} valore={quota} onCambia={setQuota} inputMode="decimal" segnaposto="0,00"
+              aiuto={consigliata !== null ? `Per arrivarci in tempo: ${euro(consigliata)} ${ogni === '1' ? 'al mese' : ogni === '12' ? "all'anno" : `ogni ${ogni} mesi`}` : 'Con traguardo e scadenza l’app ti propone la cifra'} />
+            <Tendina etichetta="Da quale conto (facoltativo)" valore={conto} opzioni={rif.conti.filter((x) => !x.archiviato).map((x) => ({ valore: x.id, testo: x.nome }))} onCambia={setConto} />
           </>
-        ) : null}
-      </View>
-      )}
-      <View style={{ alignItems: 'flex-start' }}>
-        <Pulsante tipo="testo" etichetta={altre ? 'Meno opzioni' : 'Altre opzioni'} icona={altre ? 'chevron-up' : 'chevron-down'} onPress={() => setAltre(!altre)} />
-      </View>
-      {altre ? (
-        <>
-          <Tendina etichetta="Dentro un altro salvadanaio" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" disattivato={!!bloc} />
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-            <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" disattivato={!!bloc} />
-            <View style={{ flex: 1 }}>
-              <Testo>Crea spesa al raggiungimento</Testo>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">Quando arriva al traguardo nasce una spesa prevista "una volta sola", monitorata da questo salvadanaio: non pesa sul mese.</Testo>
-            </View>
-          </View>
-          {!o || o.mio ? (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-                <Interruttore acceso={condiviso} onCambia={setCondiviso} etichetta="Condiviso" />
-                <Testo style={{ flex: 1 }}>{condiviso ? `Condiviso${altra ? ` con ${altra.nome}` : ''}: vede e modifica anche i sotto-salvadanai` : 'Privato'}</Testo>
-              </View>
-              {condiviso && !altra && !o?.condiviso ? <Campo etichetta="Email dell'altra persona" valore={email} onCambia={setEmail} iconaPrima="mail" inputMode="email" /> : null}
-            </>
-          ) : null}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-            <Interruttore acceso={nascosto} onCambia={setNascosto} etichetta="Nascosto" />
-            <Testo style={{ flex: 1 }}>{nascosto ? 'Nascosto: non compare nell’elenco, si può rimostrare in fondo' : 'Visibile nell’elenco dei salvadanai'}</Testo>
-          </View>
-          <Tendina etichetta="Da quale conto (facoltativo)" valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} />
-        </>
-      ) : null}
+        ) : null, <Interruttore acceso={daParte} onCambia={accendi} etichetta="Ricordamelo" />, true)}
+      {riquadro('Dove sta', 'Dentro un altro salvadanaio, oppure da solo.',
+        <Tendina etichetta="Dentro" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" disattivato={!!bloc} />)}
+      {riquadro('Quando lo raggiungi', 'Crea una spesa «una volta sola» che pesa su questo salvadanaio, non sul mese.', null,
+        <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" disattivato={!!bloc} />)}
+      {!o || o.mio ? riquadro('Condivisione', condiviso ? `Condiviso${altra ? ` con ${altra.nome}` : ''}: vede e modifica anche i sotto-salvadanai.` : 'Privato: lo vedi solo tu.',
+        condiviso && !altra && !o?.condiviso ? <Campo etichetta="Email dell'altra persona" valore={email} onCambia={setEmail} iconaPrima="mail" inputMode="email" /> : null,
+        <Interruttore acceso={condiviso} onCambia={setCondiviso} etichetta="Condiviso" />) : null}
       {o ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
-          <Pulsante tipo="testo" etichetta="Aggiungi sotto-salvadanaio" icona="plus" onPress={() => onSotto(o)} />
-          <Pulsante tipo="testo" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => onTraguardo(o)} />
+          <Pulsante tipo="testo" etichetta="Sotto-salvadanaio" icona="plus" onPress={() => onSotto(o)} />
+          <Pulsante tipo="testo" etichetta="Traguardo di copertura" icona="plus" onPress={() => onTraguardo(o)} />
         </View>
       ) : null}
     </FinestraModulo>

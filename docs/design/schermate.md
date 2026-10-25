@@ -61,7 +61,7 @@ Nella libreria, pagina "Schermate computer", sotto le schermate attuali. Link (`
 ## SC-04 – Obiettivi (computer)
 **Schema:** A · **Wireframe:** https://www.figma.com/design/nl92JsXsGc6X41Fy3ircSn?node-id=13-2 · **Immagine:** `immagini/SC-04.png`
 
-**A cosa serve:** vedere quanto è messo da parte e per cosa. Ogni obiettivo grande mostra traguardo, avanzamento, "+ Versa" e "Modifica", e dentro i suoi sotto-obiettivi (ceste con soldi propri) o i suoi traguardi di copertura (quanta parte di ogni emergenza copre il padre, verde con ✓ al 100%, più un riepilogo "copre per intero 5 su 6"). Gli obiettivi senza contenuto stanno in schede compatte in fondo. *Proposta dell'agente, da confermare:* nuova voce "Obiettivi" nella barra laterale dopo Spese previste; obiettivi che contengono qualcosa aperti, gli altri compatti. Dati: obiettivi e traguardi dell'Excel; gli importi messi da parte nel fondo e nel viaggio sono di esempio (nell'Excel sono a zero).
+**A cosa serve:** vedere quanto è messo da parte e per cosa. Ogni salvadanaio grande mostra traguardo, avanzamento, "+ Versa" e "Modifica", e dentro i suoi sotto-salvadanai (con soldi propri) o i suoi traguardi di copertura (quanta parte di ogni emergenza copre il padre, verde con ✓ al 100%, più un riepilogo "copre per intero 5 su 6"). I salvadanai senza contenuto stanno in schede compatte in fondo. *Proposta dell'agente, da confermare:* nuova voce "Salvadanai" nella barra laterale dopo Spese previste; salvadanai che contengono qualcosa aperti, gli altri compatti. Dati: salvadanai e traguardi dell'Excel; gli importi messi da parte nel fondo e nel viaggio sono di esempio (nell'Excel sono a zero).
 
 ---
 

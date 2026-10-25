@@ -181,7 +181,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const opzioniPadri = useMemo(() => {
     const out: { valore: string; testo: string; rientro?: number }[] = [];
     const visita = (xs: Obiettivo[], l: number) => xs.forEach((o) => {
-      if (!o.mio || o.nascosto) return;
+      if (!o.mio) return;
       if (!o.bloccato_da) { out.push({ valore: o.id, testo: o.nome, rientro: l }); visita(o.figli, l + 1); }
     });
     visita(obiettivi, 0); return out;
@@ -269,8 +269,8 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const aiutoSalvadanaio = generato ? 'Il salvadanaio nasce da questa spesa: se la elimini resta, ma torna libero.'
     : spesa?.obiettivo_id ? 'Un salvadanaio si collega a una spesa solo creandolo nuovo da qui.'
       : salv === 'crea'
-        ? `Verrà creato «${nome.trim() || 'il nome della spesa'}»${periodicaForm ? `, con traguardo ${valoreQuota ? euro((Number(valoreQuota) * (divisione === 'io' ? 100 : divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : 'la tua quota'}` : ', senza traguardo'}${periodicaForm ? (meseScad ? (giornoMese ? `, scadenza il ${giornoMese} ${nomeM}` : `, senza scadenza (esce a ${nomeM}, senza un giorno)`) : ', scadenza alla prossima uscita') : ''} e l’icona della spesa. Una spesa normale con salvadanaio non compare nella lista del mese; un’annuale conta comunque la sua quota mensile.`
-        : 'Facoltativo: crea un salvadanaio nuovo per mettere da parte i soldi di questa spesa.';
+        ? `Creo «${nome.trim() || 'il nome della spesa'}»${periodicaForm ? `, traguardo ${valoreQuota ? euro((Number(valoreQuota) * (divisione === 'io' ? 100 : divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : 'la tua quota'}${meseScad ? `, scadenza ${giornoMese ? `il ${giornoMese} ` : 'a '}${nomeM}` : ''}` : ', senza traguardo'}.`
+        : '';
   return (
     <FinestraModulo titolo={spesa ? 'Modifica spesa prevista' : 'Nuova spesa prevista'} icona={spesa?.icona ?? 'calendar-check'} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
       onElimina={spesa?.mia && !bloc ? () => cancella(`/spese-previste/${spesa.id}`).then(() => undefined) : undefined}
@@ -312,11 +312,10 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
       <Campo etichetta={tipo === 'budget' ? 'Tetto del mese' : 'Importo totale'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" disattivato={fisso('importo')} />
       <Affiancati>
         <Meta><Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} /></Meta>
-        <Meta><TendinaGriglia etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" /></Meta>
+        <Meta><Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" /></Meta>
       </Affiancati>
       {bloc || (spesa && !spesa.mia) ? null : (
         <View style={{ gap: d['spazio-blocco'] }}>
-          <Testo stile="corpo-forte" accessibilityRole="header">Salvadanaio per questa spesa (facoltativo)</Testo>
           {generato ? (
             <Testo stile="dettaglio-normale" colore="testo-secondario">{`Salvadanaio: «${collegato!.nome}». Per aprirlo vai in Salvadanai; nome, cifra e scadenza si cambiano da questa spesa.`}</Testo>
           ) : spesa?.obiettivo_id ? (
@@ -326,22 +325,18 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
             </>
           ) : (
             <>
-              <SceltaSegmenti etichetta="Salvadanaio per questa spesa" larghezzaPiena valore={salv} onCambia={setSalv} opzioni={[{ valore: 'nessuno', testo: 'Nessuno' }, { valore: 'crea', testo: 'Crea un salvadanaio per questa spesa' }]} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+                <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+                  <Testo stile="corpo-forte" accessibilityRole="header">Salvadanaio</Testo>
+                  <Testo stile="dettaglio-normale" colore="testo-secondario">Metti da parte i soldi per questa spesa</Testo>
+                </View>
+                <Interruttore acceso={salv === 'crea'} onCambia={(x) => setSalv(x ? 'crea' : 'nessuno')} etichetta="Salvadanaio per questa spesa" />
+              </View>
               {salv === 'crea' ? (
                 <>
-                  <Voce etichetta="Dove lo metto">
-                    {compatto ? (
-                      <Tendina etichetta="Dove lo metto" valore={doveEff} onCambia={(x) => setDove(x as 'solo' | 'sotto' | 'contenitore')}
-                        opzioni={[{ valore: 'solo', testo: 'Da solo' }, { valore: 'sotto', testo: 'Sotto un salvadanaio esistente' }, { valore: 'contenitore', testo: 'In un nuovo contenitore' }]} />
-                    ) : (
-                      <SceltaSegmenti etichetta="Dove lo metto" larghezzaPiena valore={doveEff} onCambia={setDove}
-                        opzioni={[{ valore: 'solo', testo: 'Da solo' }, { valore: 'sotto', testo: 'Sotto un salvadanaio esistente' }, { valore: 'contenitore', testo: 'In un nuovo contenitore' }]} />
-                    )}
-                  </Voce>
-                  {doveEff === 'sotto' ? (
-                    opzioniPadri.length ? <Tendina etichetta="Sotto quale salvadanaio" valore={padreEff} opzioni={opzioniPadri} onCambia={setPadre} iconaPrima="piggy-bank" />
-                      : <Testo stile="dettaglio-normale" colore="testo-secondario">Non hai ancora salvadanai: scegli «Da solo» o «In un nuovo contenitore».</Testo>
-                  ) : null}
+                  <Tendina etichetta="Dove lo metto" valore={doveEff === 'sotto' ? padreEff : doveEff} iconaPrima="piggy-bank"
+                    onCambia={(x) => { if (x === 'solo' || x === 'contenitore') setDove(x); else { setDove('sotto'); setPadre(x); } }}
+                    opzioni={[{ valore: 'solo', testo: 'Da solo' }, ...opzioniPadri.map((o) => ({ ...o, testo: `Dentro «${o.testo}»` })), { valore: 'contenitore', testo: '+ Nuovo contenitore…' }]} />
                   {doveEff === 'contenitore' ? <Campo etichetta="Nome del contenitore" valore={contenitore} onCambia={setContenitore} segnaposto="Es. Viaggi" /> : null}
                 </>
               ) : null}

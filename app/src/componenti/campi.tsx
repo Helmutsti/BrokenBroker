@@ -103,17 +103,19 @@ export function TendinaGriglia<T extends string>({ etichetta, valore, opzioni, o
   const apri = () => ref.current?.measureInWindow((x: number, y: number, w: number, h: number) => setAperta({ x, y: y + h + 4, w }));
   const compatto = useCompatto();
   const schermo = useWindowDimensions().width;
-  const larghezzaMenu = Math.min(soloIcone ? 8 * 52 + 16 : Math.max(aperta?.w ?? 0, 4 * 96 + 16), schermo - 16);
-  const lato = soloIcone ? 48 : compatto ? Math.floor((larghezzaMenu - 16) / 3) - 4 : 92;
+  const larghezzaMenu = Math.min(soloIcone ? 8 * 56 + 16 : Math.max(aperta?.w ?? 0, 4 * 96 + 16), schermo - 16);
+  const lato = soloIcone ? 52 : compatto ? Math.floor((larghezzaMenu - 16) / 3) - 4 : 92;
   return (
-    <View style={{ gap: d['spazio-testo'], alignSelf: larghezza ? 'flex-start' : 'stretch', width: larghezza, opacity: disattivato ? d['opacita-disattivato'] : 1 }}>
+    <View style={{ gap: d['spazio-testo'], alignSelf: larghezza || soloIcone ? 'flex-start' : 'stretch', width: larghezza, opacity: disattivato ? d['opacita-disattivato'] : 1 }}>
       {etichetta ? <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo> : null}
       <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`${etichetta ?? ''} ${scelta?.testo ?? segnaposto}`} aria-expanded={!!aperta} disabled={disattivato} onPress={apri}
-        style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']),
-          borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
-        {iconaPrima || scelta?.icona ? <Icona nome={(scelta?.icona ?? iconaPrima)!} misura={16} /> : null}
-        <Testo numberOfLines={1} colore={scelta ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{scelta?.testo ?? segnaposto}</Testo>
-        <Icona nome="chevron-down" misura={16} />
+        style={(s: StatoPressione) => [soloIcone
+          ? { width: compatto ? 44 : 40, height: compatto ? 44 : 40, alignItems: 'center', justifyContent: 'center' }
+          : { flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']) },
+          { borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+        {iconaPrima || scelta?.icona ? <Icona nome={(scelta?.icona ?? iconaPrima)!} misura={soloIcone ? 24 : 16} /> : null}
+        {soloIcone ? null : <Testo numberOfLines={1} colore={scelta ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{scelta?.testo ?? segnaposto}</Testo>}
+        {soloIcone ? null : <Icona nome="chevron-down" misura={16} />}
       </Pressable>
       <Modal transparent visible={!!aperta} onRequestClose={() => setAperta(null)}>
         <Pressable accessibilityLabel="Chiudi" style={{ flex: 1 }} onPress={() => setAperta(null)}>

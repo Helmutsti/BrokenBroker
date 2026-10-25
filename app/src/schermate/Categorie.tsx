@@ -4,7 +4,7 @@ import { anelloFocus, Esito, Pulsante, SceltaSegmenti, type StatoPressione } fro
 import { Icona } from '../componenti/Icona.tsx';
 import { Check } from 'lucide-react-native';
 import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
-import { Campo, TendinaGriglia } from '../componenti/campi.tsx';
+import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
 import { Intestazione, RigaCategoria, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
@@ -54,12 +54,11 @@ export function Categorie() {
       <Intestazione titolo="Categorie" sottotitolo="Ogni categoria ha un'icona: la vedi accanto a ogni spesa e budget."
         azioni={<Pulsante tipo="primario" etichetta="Nuova categoria" icona="plus" onPress={() => setAperta({ padre: null })} />} />
       <SceltaSegmenti etichetta="Uscite o entrate" valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'uscita', testo: `Uscite · ${radici('uscita')}` }, { valore: 'entrata', testo: `Entrate · ${radici('entrata')}` }]} />
-      <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre. Il colore si sceglie con la matita, tra quelli della tavolozza." />
+      <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre. L’icona ha il colore della categoria, che si sceglie con la matita." />
       <Scheda>
         <View role="tree" aria-label="Categorie">
           {compatto ? null : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
-            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120 }}>Colore</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Spese a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 80, textAlign: 'right' }}>% stipendio</Testo>
             <View style={{ width: 36 }} />
@@ -122,12 +121,12 @@ function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { pad
     <FinestraModulo titolo={c ? c.nome : 'Nuova categoria'} icona={icona === 'padre' ? rif.iconaCategoria(padre === 'nessuna' ? null : padre) : icona} aperta={!!stato} onChiudi={onChiudi} onSalva={salva}
       onElimina={c ? elimina : undefined}>
       <Campo etichetta="Nome" valore={nome} onCambia={setNome} autoFocus={!c} />
-      <TendinaGriglia etichetta="Dentro" valore={padre} onCambia={setPadre} opzioni={[{ valore: 'nessuna', testo: 'Nessuna: categoria principale', rientro: 0 }, ...altre]} />
+      <Tendina etichetta="Dentro" valore={padre} onCambia={setPadre} opzioni={[{ valore: 'nessuna', testo: 'Nessuna: categoria principale', rientro: 0 }, ...altre]} />
       <TendinaGriglia soloIcone etichetta="Icona" valore={icona} onCambia={setIcona} opzioni={[{ valore: 'padre', testo: 'Quella della categoria padre', icona: rif.iconaCategoria(padre === 'nessuna' ? null : padre) }, ...ICONE.map((i) => ({ valore: i, testo: i.replace(/-\d$/, '').replace(/-/g, ' '), icona: i }))]} />
       <Voce etichetta="Colore" aiuto={colore ? nomeColoreCategoria(colore) ?? undefined : 'Nessun colore'}>
         <SceltaColore valore={colore} onCambia={setColore} />
       </Voce>
-      {inUso ? <TendinaGriglia etichetta="Sposta spese e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} /> : null}
+      {inUso ? <Tendina etichetta="Sposta spese e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} /> : null}
     </FinestraModulo>
   );
 }

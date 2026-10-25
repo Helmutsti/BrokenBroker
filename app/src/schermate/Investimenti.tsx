@@ -6,7 +6,7 @@ import { GraficoLinea, Intestazione, RigaAvanzamento, Scheda, TabellaPortafoglio
 import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Bene, Esposizione, Operazione, Portafoglio, Posizione, PuntoAndamento, QuotazioneOro, TipoBene, Titolo } from '../dati/tipi.ts';
-import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, leggiPrezzo, meseCorto, numero, oggiIso, percento, prezzoInTesto } from '../formato.ts';
+import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, leggiPrezzo, meseCorto, numero, oggiIso, prezzoInTesto } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { Caricamento, mesiFino } from './comuni.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
@@ -14,7 +14,7 @@ import { useCompatto } from '../tema/compatto.ts';
 
 const quote = (q: string) => numero(q, Number.isInteger(Number(q)) ? 0 : 2);
 const prezzo = (p: string | null) => (p === null ? '—' : euro(Number(p)));
-const guadagnoTesto = (g: number, pct: number | null) => `${euro(g, { segno: true })}${pct !== null ? ` · ${pct > 0 ? '+' : ''}${numero(pct, 1)}%` : ''}`;
+const guadagnoTesto = (g: number, pct: number | null) => `${euro(g, { segno: true })}${pct !== null ? ` · ${pct > 0 ? '+' : ''}${numero(pct, 2)}%` : ''}`;
 
 const TIPI_BENE: { valore: TipoBene; testo: string }[] = [
   { valore: 'fondo_pensione', testo: 'Fondo pensione' }, { valore: 'crowdfunding', testo: 'Crowdfunding' }, { valore: 'societa', testo: 'Quota di una società' },
@@ -27,11 +27,11 @@ const grammi = (g: string | null) => (g === null ? '—' : `${numero(g, Number.i
 function guadagnoDal(costo: number, valore: number, dal: string | null) {
   if (!(costo > 0) || !Number.isFinite(valore)) return null;
   const g = valore - costo, pct = (g / costo) * 100;
-  let testo = `${euro(g, { segno: true })} (${pct >= 0 ? '+' : ''}${numero(pct, 1)}%)`;
+  let testo = `${euro(g, { segno: true })} (${pct >= 0 ? '+' : ''}${numero(pct, 2)}%)`;
   if (dal) {
     const anni = (Date.parse(oggiIso()) - Date.parse(dal)) / (365.25 * 86400000);
     testo += ` dal ${data(dal)}`;
-    if (anni >= 0.25) { const annuo = (Math.pow(valore / costo, 1 / anni) - 1) * 100; testo += `, circa ${annuo >= 0 ? '+' : ''}${numero(annuo, 1)}% l'anno`; }
+    if (anni >= 0.25) { const annuo = (Math.pow(valore / costo, 1 / anni) - 1) * 100; testo += `, circa ${annuo >= 0 ? '+' : ''}${numero(annuo, 2)}% l'anno`; }
   }
   return testo;
 }
@@ -116,7 +116,7 @@ export function Investimenti() {
               opzioni={[{ valore: 'tipo', testo: 'Per tipo' }, { valore: 'area', testo: 'Per paese' }, { valore: 'settore', testo: 'Per settore' }]} />
             {voceComposizione.length === 0 ? <Testo colore="testo-secondario">{composizioneDi === 'tipo' ? 'Ancora niente.' : 'Nessun titolo quotato con la composizione inserita.'}</Testo> : null}
             {voceComposizione.slice(0, 8).map((x) => <RigaAvanzamento key={x.nome} compatta nome={x.nome} icona={x.icona} importo={x.importo} valore={x.peso}
-              percentuale={percento(Math.round(x.peso * 10) / 10)} />)}
+              percentuale={`${numero(x.peso, 2)}%`} />)}
             {composizioneDi !== 'tipo' ? <Testo stile="dettaglio-normale" colore="testo-secondario">Per paese e per settore si guardano solo i titoli quotati.</Testo> : null}
           </View>
         </View>

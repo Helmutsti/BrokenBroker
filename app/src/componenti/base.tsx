@@ -3,7 +3,7 @@ import { Pressable, type PressableStateCallbackType, type StyleProp, View, type 
 import Svg, { Circle } from 'react-native-svg';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { type NomeColore, stiliTesto } from '../tema/token.ts';
+import { type NomeColore, stiliTesto, tintaCategoria } from '../tema/token.ts';
 import { Icona, type Misura } from './Icona.tsx';
 
 // Componenti di base (CMP-02 … CMP-16). Sono contenuti: nessun margine, la
@@ -34,12 +34,12 @@ const fondoTono: Record<Tono, NomeColore> = { accento: 'sfondo-accento-tenue', n
 const iconaTono: Record<Tono, NomeColore> = { accento: 'icona-accento', neutro: 'icona-predefinita', ok: 'icona-ok', attenzione: 'icona-attenzione', errore: 'icona-errore' };
 const pienoTono: Record<Tono, NomeColore> = { accento: 'sfondo-accento', neutro: 'icona-predefinita', ok: 'icona-ok', attenzione: 'icona-attenzione', errore: 'icona-errore' };
 
-export function Tessera({ icona, misura = 'media', tono = 'accento', suColore = false, coloreIcona }: { icona: string; misura?: keyof typeof TESSERA; tono?: Tono; suColore?: boolean; coloreIcona?: NomeColore }) {
+export function Tessera({ icona, misura = 'media', tono = 'accento', suColore = false, coloreIcona, tinta }: { icona: string; misura?: keyof typeof TESSERA; tono?: Tono; suColore?: boolean; coloreIcona?: NomeColore; tinta?: string }) {
   const { c } = useTema();
   const [lato, im] = TESSERA[misura];
   return (
-    <View style={{ width: lato, height: lato, borderRadius: d['raggio-controllo'], alignItems: 'center', justifyContent: 'center', backgroundColor: c[suColore ? pienoTono[tono] : fondoTono[tono]] }}>
-      <Icona nome={icona} misura={im as Misura} colore={coloreIcona ?? (suColore ? 'icona-su-accento' : iconaTono[tono])} />
+    <View style={{ width: lato, height: lato, borderRadius: d['raggio-controllo'], alignItems: 'center', justifyContent: 'center', backgroundColor: tinta ? tintaCategoria(tinta) : c[suColore ? pienoTono[tono] : fondoTono[tono]] }}>
+      <Icona nome={icona} misura={im as Misura} tinta={tinta} colore={coloreIcona ?? (suColore ? 'icona-su-accento' : iconaTono[tono])} />
     </View>
   );
 }
@@ -179,7 +179,8 @@ export function Separatore() {
 }
 
 // ---- CMP-09 Spunta ----
-export function Spunta({ fatta, onPress, etichetta, disattivato }: { fatta: boolean; onPress?: () => void; etichetta: string; disattivato?: boolean }) {
+// `tenue`: la spunta fatta è grigia invece che azzurra (voci già uscite, che passano in secondo piano).
+export function Spunta({ fatta, onPress, etichetta, disattivato, tenue }: { fatta: boolean; onPress?: () => void; etichetta: string; disattivato?: boolean; tenue?: boolean }) {
   const { c } = useTema();
   const bersaglio = useCompatto() ? 44 : d['misura-bersaglio'];
   return (
@@ -187,7 +188,7 @@ export function Spunta({ fatta, onPress, etichetta, disattivato }: { fatta: bool
       style={(s: StatoPressione) => [{ width: bersaglio, height: bersaglio, alignItems: 'center', justifyContent: 'center', opacity: disattivato ? d['opacita-disattivato'] : 1 }, anelloFocus(c, s.focused)]}>
       {(s: StatoPressione) => (
         <View style={{ width: d['misura-spunta'], height: d['misura-spunta'], borderRadius: d['raggio-controllo-interno'], alignItems: 'center', justifyContent: 'center',
-          backgroundColor: fatta ? c[s.hovered ? 'sfondo-accento-hover' : 'sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent',
+          backgroundColor: fatta ? c[tenue ? 'sfondo-controllo-spento' : s.hovered ? 'sfondo-accento-hover' : 'sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent',
           borderWidth: fatta ? 0 : d['misura-bordo-forte'], borderColor: c['bordo-controllo'] }}>
           {fatta ? <Icona nome="check" misura={d['misura-segno-spunta']} colore="icona-su-accento" /> : null}
         </View>

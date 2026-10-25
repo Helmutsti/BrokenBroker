@@ -99,8 +99,8 @@ export const rateDelMese = (rate: Rata[], dal: string, al: string) =>
 
 export type ScadenzaAnnuale = { s: Spesa; quando: string; copertura: { testo: string; tono: Tono } };
 
-// Prossime uscite annuali in ordine di data. Quelle pagate da un obiettivo sono
-// "coperte" finché il saldo dell'obiettivo basta, contando le uscite precedenti;
+// Prossime uscite annuali in ordine di data. Quelle pagate da un salvadanaio sono
+// "coperte" finché il saldo del salvadanaio basta, contando le uscite precedenti;
 // oltre `entroMesi` mesi si stanno ancora preparando.
 export function prossimeAnnuali(spese: Spesa[], obiettivi: Obiettivo[], entroMesi = 3, da = oggiIso()) {
   const saldi = new Map(tuttiGliObiettivi(obiettivi).map((o) => [o.id, Number(o.saldo)]));

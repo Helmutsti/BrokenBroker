@@ -92,8 +92,10 @@ export function Panoramica() {
   const ratePagate = rateMese.filter((x) => x.r.pagata);
   const usciti = spuntate.reduce((t, s) => t + importoDelMese(s), 0) + ratePagate.reduce((t, x) => t + Number(x.r.importo_rata), 0);
   const quanteUscite = spuntate.length + ratePagate.length;
+  // Ha un salvadanaio (creato da questa spesa) o nasce da uno (promemoria, spesa generata).
+  const colSalvadanaio = (s: Spesa) => !!(s.obiettivo_id || s.alimenta_obiettivo_id || s.bloccato_da);
   const voce = (s: Spesa, conIcona: boolean, icona = 'ellipsis', sotto?: string, dettaglio?: Parameters<typeof VoceDaSpuntare>[0]['dettaglio']) => (
-    <VoceDaSpuntare key={s.id} nome={s.nome} conto={conGiorno(s)} importo={euro(s.mia_quota)} sottoImporto={sotto} icona={conIcona ? s.icona ?? icona : null} fatta={s.uscita}
+    <VoceDaSpuntare key={s.id} nome={s.nome} conto={conGiorno(s)} importo={euro(s.mia_quota)} sottoImporto={sotto} icona={conIcona ? s.icona ?? icona : null} salvadanaio={colSalvadanaio(s)} fatta={s.uscita}
       onSpunta={() => spunta(s)} onApri={() => setSpesa(s)} dettaglio={dettaglio} />
   );
   // Un salvadanaio con sotto-salvadanai si apre e mostra come si divide la cifra (le parti non si spuntano).
@@ -112,7 +114,7 @@ export function Panoramica() {
   const rigaAnnuale = (s: Spesa): Riga => ({ chiave: s.id, nome: s.nome, scadenza: s.scadenza, tipo: 'annuali', categoria: s.categoria_id, importo: Number(s.quota_mensile), vista: () => (
     <VoceDaSpuntare key={s.id} nome={s.nome} conto={s.nel_mese ? conGiorno(s) : quando(s)} importo={euro(s.quota_mensile)}
       sottoImporto={s.nel_mese ? `esce questo mese: ${euro(s.mia_quota)}` : `esce a ${nomeMeseMinuscolo(prossima(s).slice(0, 7))}`}
-      icona={s.icona ?? 'calendar'} fatta={s.uscita} onSpunta={() => spunta(s)} onApri={() => setSpesa(s)} />) });
+      icona={s.icona ?? 'calendar'} salvadanaio={colSalvadanaio(s)} fatta={s.uscita} onSpunta={() => spunta(s)} onApri={() => setSpesa(s)} />) });
   const righe: Riga[] = [
     ...fisse.map((s) => ({ s, tipo: 'fisse' as const, vista: (i: boolean) => voce(s, i) })),
     ...budget.map((s) => ({ s, tipo: 'budget' as const, vista: (i: boolean) => voce(s, i, 'wallet', 'budget del mese') })),
@@ -180,12 +182,13 @@ export function Panoramica() {
       </View>
       {fuori ? createPortal(
         <View accessibilityRole="summary" style={{ position: 'fixed', top: compatto ? 0 : 12, right: compatto ? 0 : 16, ...(compatto ? { left: 0 } : {}), zIndex: 50, flexDirection: 'row', justifyContent: compatto ? 'space-between' : 'flex-start', gap: compatto ? 4 : d['spazio-colonne'], paddingVertical: compatto ? 6 : 8, paddingHorizontal: compatto ? 12 : 14, ...(compatto ? { paddingTop: 'max(6px, env(safe-area-inset-top))' } : {}),
-          backgroundColor: c['sfondo-scheda'], borderRadius: compatto ? 0 : d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'],
+          // Colori invertiti (fondo scuro, testo chiaro; l'opposto nel tema scuro) per staccarsi dalla pagina mentre si scorre.
+          backgroundColor: c['testo-primario'], borderRadius: compatto ? 0 : d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['testo-primario'],
           boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as never}>
-          {([['Usciti', euro(usciti), 'testo-primario'], ['Sul conto', saldo === null ? '—' : euro(saldo), 'testo-primario'], ['Devono uscire', euro(devonoUscire), 'testo-primario'],
-            ['Avanzo', avanzo === null ? '—' : euro(avanzo, { segno: true }), avanzo !== null && avanzo < 0 ? 'testo-errore' : 'testo-primario']] as const).map(([et, val, col]) => (
+          {([['Usciti', euro(usciti), 'sfondo-pagina'], ['Sul conto', saldo === null ? '—' : euro(saldo), 'sfondo-pagina'], ['Devono uscire', euro(devonoUscire), 'sfondo-pagina'],
+            ['Avanzo', avanzo === null ? '—' : euro(avanzo, { segno: true }), avanzo !== null && avanzo < 0 ? 'sfondo-errore-tenue' : 'sfondo-pagina']] as const).map(([et, val, col]) => (
             <View key={et} style={{ minWidth: 0, flexShrink: 1 }}>
-              <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire').replace('Sul conto', 'Conto') : et}</Testo>
+              <Testo stile="dettaglio-normale" colore="sfondo-tenue" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire').replace('Sul conto', 'Conto') : et}</Testo>
               <Testo stile="corpo-forte" colore={col as never} numberOfLines={1} style={compatto ? { fontSize: 13, lineHeight: 18 } : undefined}>{val}</Testo>
             </View>
           ))}
@@ -228,7 +231,7 @@ export function Panoramica() {
       {nonAttive.length ? (
         <View>
           <Pulsante tipo="testo" etichetta={`${spente ? 'Nascondi' : 'Mostra'} ${nonAttive.length} ${nonAttive.length === 1 ? 'spesa non attiva' : 'spese non attive'}`} icona={spente ? 'chevron-up' : 'chevron-down'} onPress={() => setSpente(!spente)} />
-          {spente ? nonAttive.map((s) => <VoceDaSpuntare key={s.id} nome={s.nome} conto={s.conto ?? '—'} importo={euro(s.mia_quota)} icona={s.icona ?? 'ellipsis'} fatta={false} onApri={() => setSpesa(s)} />) : null}
+          {spente ? nonAttive.map((s) => <VoceDaSpuntare key={s.id} nome={s.nome} conto={s.conto ?? '—'} importo={euro(s.mia_quota)} icona={s.icona ?? 'ellipsis'} salvadanaio={colSalvadanaio(s)} fatta={false} onApri={() => setSpesa(s)} />) : null}
         </View>
       ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>

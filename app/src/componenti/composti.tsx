@@ -4,7 +4,7 @@ import Svg, { Line, Polyline } from 'react-native-svg';
 import { euro, nomeMese, spostaMese } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { nomeColoreCategoria, ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
+import { ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
 import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
 import { Icona } from './Icona.tsx';
 
@@ -250,14 +250,19 @@ const Col = ({ w, children, destra }: { w: number; children: ReactNode; destra?:
 // ---- CMP-24 Voce da spuntare ----
 // Senza `icona` la riga sta in un gruppo di categoria, che ha l'icona. Con `dettaglio`
 // la riga si apre (parte chiusa) e mostra sotto le sue parti, che non si spuntano.
-export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatta, onSpunta, onApri, dettaglio }: {
-  nome: string; conto: string; importo: string; sottoImporto?: string; icona?: string | null; fatta: boolean; onSpunta?: () => void; onApri?: () => void;
+export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, salvadanaio, fatta, onSpunta, onApri, dettaglio }: {
+  nome: string; conto: string; importo: string; sottoImporto?: string; icona?: string | null; salvadanaio?: boolean; fatta: boolean; onSpunta?: () => void; onApri?: () => void;
   dettaglio?: { etichetta: string; righe: { nome: string; importo: string }[]; nota?: string };
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const [aperta, setAperta] = useState(false);
-  const col: NomeColore = fatta ? 'testo-secondario' : 'testo-primario';
+  // Le voci già uscite passano in secondo piano (testo più scuro, importo non in grassetto): risaltano quelle da pagare.
+  const col: NomeColore = fatta ? 'testo-terziario' : 'testo-primario';
+  const colSotto: NomeColore = fatta ? 'testo-terziario' : 'testo-secondario';
+  const stileImporto = fatta ? 'corpo-normale' : 'corpo-forte';
+  // Segno delle spese che hanno un salvadanaio o nascono da uno.
+  const segno = salvadanaio ? <Icona nome="piggy-bank" misura={16} colore="icona-tenue" /> : null;
   const apri = dettaglio ? (
     <Pressable accessibilityRole="button" aria-expanded={aperta} accessibilityLabel={`${aperta ? 'Chiudi' : 'Apri'} ${dettaglio.etichetta}`} onPress={() => setAperta(!aperta)}
       style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: d['spazio-testo'], minHeight: compatto ? 32 : undefined, paddingHorizontal: d['margine-etichetta-h'], paddingVertical: d['margine-etichetta-v'],
@@ -271,29 +276,31 @@ export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatt
       {compatto ? (
         // Telefono: spunta, nome e importo sulla prima riga; conto e dettaglio sotto il nome.
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] / 2 }}>
-          <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
+          <Spunta fatta={fatta} tenue onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
           <Pressable onPress={onApri} disabled={!onApri} style={{ flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', gap: 2 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
               {icona ? <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} /> : null}
               <Testo colore={col} numberOfLines={1} style={{ flexShrink: 1 }}>{nome}</Testo>
+              {segno}
             </View>
-            <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo>
+            <Testo stile="dettaglio-normale" colore={colSotto} numberOfLines={1}>{conto}</Testo>
           </Pressable>
           <View style={{ alignItems: 'flex-end', flexShrink: 0, maxWidth: '45%' }}>
-            <Testo stile="corpo-forte" colore={col}>{importo}</Testo>
-            {sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ textAlign: 'right' }}>{sottoImporto}</Testo> : null}
+            <Testo stile={stileImporto} colore={col}>{importo}</Testo>
+            {sottoImporto ? <Testo stile="dettaglio-normale" colore={colSotto} style={{ textAlign: 'right' }}>{sottoImporto}</Testo> : null}
           </View>
         </View>
       ) : (
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-          <Spunta fatta={fatta} onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
+          <Spunta fatta={fatta} tenue onPress={onSpunta} etichetta={`${nome}: ${fatta ? 'uscita' : 'da pagare'}`} disattivato={!onSpunta} />
           {icona ? <Icona nome={icona} misura={16} colore={fatta ? 'icona-tenue' : 'icona-predefinita'} /> : null}
           <Pressable onPress={onApri} disabled={!onApri} style={{ flexShrink: 1 }}><Testo colore={col} numberOfLines={1}>{nome}</Testo></Pressable>
+          {segno}
           {apri}
         </View>
-        <Col w={140}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
-        <Col w={110} destra><Testo stile="corpo-forte" colore={col}>{importo}</Testo>{sottoImporto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottoImporto}</Testo> : null}</Col>
+        <Col w={140}><Testo stile="dettaglio-normale" colore={colSotto} numberOfLines={1}>{conto}</Testo></Col>
+        <Col w={110} destra><Testo stile={stileImporto} colore={col}>{importo}</Testo>{sottoImporto ? <Testo stile="dettaglio-normale" colore={colSotto}>{sottoImporto}</Testo> : null}</Col>
       </View>
       )}
       {compatto && apri ? <View style={{ paddingHorizontal: d['margine-voce-h'] }}>{apri}</View> : null}
@@ -477,18 +484,12 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, perc
       <View style={{ width: compatto ? 28 : d['misura-icona-media'], alignItems: 'center' }}>
         {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi} hitSlop={compatto ? 10 : 0}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
       </View>
-      <Tessera icona={icona} misura="media" tono={ereditata ? 'neutro' : 'accento'} coloreIcona={ereditata ? 'icona-tenue' : undefined} />
+      <Tessera icona={icona} misura="media" tono={ereditata ? 'neutro' : 'accento'} coloreIcona={ereditata ? 'icona-tenue' : undefined} tinta={colore ?? undefined} />
       <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
         {compatto && percentuale !== undefined ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`${percentuale} dello stipendio`}</Testo> : null}
       </View>
-      {compatto ? null : (
-      <View style={{ width: 120, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: colore ?? c['bordo-scheda'] }} />
-        <Testo stile="dettaglio-normale" colore={colore ? 'testo-secondario' : 'testo-terziario'}>{nomeColoreCategoria(colore) ?? 'nessuno'}</Testo>
-      </View>
-      )}
       {compatto ? <View style={{ alignItems: 'flex-end', flexShrink: 0 }}><Testo stile="corpo-forte">{speso}</Testo></View> : <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>}
       {!compatto && percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
       <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />
