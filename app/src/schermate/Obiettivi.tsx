@@ -3,13 +3,13 @@ import { View } from 'react-native';
 import { Esito, Interruttore, Pulsante, PulsanteIcona, SceltaSegmenti, type Tono } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
 import { CifraModificabile, RigaAvanzamento, Scheda } from '../componenti/composti.tsx';
-import { cancella, crea, leggi, modifica, sostituisci, useDati } from '../dati/api.ts';
-import type { Condivisione, ElencoSpese, Obiettivo, Persona, Spesa, Traguardo } from '../dati/tipi.ts';
+import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
+import type { Condivisione, ElencoSpese, Obiettivo, Spesa, Traguardo } from '../dati/tipi.ts';
 import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso, percento } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import { Caricamento, fraMesi, proposta, prossimeAnnuali, ritmoObiettivo } from './comuni.tsx';
-import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
+import { Affiancati, ConErrore, FinestraModulo, Meta, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
@@ -164,8 +164,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
 }) {
   const o = stato?.obiettivo ?? null;
   const rif = useRiferimenti();
-  const persone = useDati<Persona[]>(stato ? '/persone' : null).dati ?? [];
-  const altra = persone.find((p) => !p.io);
+  const miaCondivisione = useDati<Condivisione[]>(stato && stato.obiettivo ? '/condivisioni' : null).dati?.find((x) => x.voce === 'obiettivo' && x.voce_id === o?.id && x.mia);
   // Decisione 37: nato da una spesa, si cambia dalla spesa; il contenitore delle annuali non ha un promemoria.
   const bloc = o?.bloccato_da ?? null;
   const contenitore = !!o && (o.contenitore_annuali || o.id === rif.profilo?.obiettivo_annuali);
@@ -176,7 +175,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
   const [scadenza, setScadenza] = useState('');
   const [creaSpesa, setCreaSpesa] = useState(false);
   const [condiviso, setCondiviso] = useState(false);
-  const [email, setEmail] = useState('');
+  const [con, setCon] = useState<string | null>(null);
   // "Ricordami": una voce in Spese, ogni mese o ogni tanto, che ricorda di mettere dei soldi nel salvadanaio.
   const [daParte, setDaParte] = useState(false);
   const [ogni, setOgni] = useState<'1' | '3' | '6' | '12'>('1');
@@ -186,7 +185,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
     if (!stato) return;
     setIcona(o ? iconaDi(o) : 'target');
     setNome(o?.nome ?? ''); setPadre(o?.padre_id ?? stato.padre ?? 'nessuno'); setTraguardo(importoInTesto(o?.traguardo));
-    setScadenza(o?.paga_spesa?.senza_giorno ? '' : dataInTesto(o?.scadenza)); setCreaSpesa(o?.crea_spesa ?? false); setCondiviso(o?.condiviso ?? false); setEmail('');
+    setScadenza(o?.paga_spesa?.senza_giorno ? '' : dataInTesto(o?.scadenza)); setCreaSpesa(o?.crea_spesa ?? false); setCondiviso(o?.condiviso ?? false); setCon(null);
     const a = o?.alimentato_da;
     setDaParte(!!a); setOgni(a && [3, 6, 12].includes(a.ogni_mesi ?? 1) ? (String(a.ogni_mesi) as '3' | '6' | '12') : '1'); setQuota(importoInTesto(a?.importo)); setConto(a?.conto_id ?? null);
   }, [stato]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -217,20 +216,17 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
     }
     // Se il salvadanaio paga una spesa, traguardo e scadenza vengono dalla spesa: non si inviano e la spesa non si tocca.
     const dallaSpesa = !!o?.paga_spesa;
-    const t = !dallaSpesa && traguardo.trim() ? serve(leggiImporto(traguardo), 'Scrivi il traguardo, es. 2.000') : null;
-    const s = !dallaSpesa && scadenza.trim() ? serve(leggiData(scadenza), 'Scrivi la scadenza come GG/MM/AAAA') : null;
-    if (creaSpesa && !dallaSpesa && !t && !o?.figli.length) throw new Error('Per creare la spesa serve un traguardo');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), padre_id: padre === 'nessuno' ? null : padre, ...(dallaSpesa ? {} : { traguardo: t, scadenza: s }), crea_spesa: creaSpesa, icona };
+    const t = !dallaSpesa && traguardo.trim() ? serve(leggiImporto(traguardo), 'Scrivi il traguardo, es. 2.000', 'traguardo') : null;
+    const s = !dallaSpesa && scadenza.trim() ? serve(leggiData(scadenza), 'Scrivi la scadenza come GG/MM/AAAA', 'scadenza') : null;
+    if (creaSpesa && !dallaSpesa && !t && !o?.figli.length) serve(null, 'Per creare la spesa serve un traguardo', 'traguardo');
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), padre_id: padre === 'nessuno' ? null : padre, ...(dallaSpesa ? {} : { traguardo: t, scadenza: s }), crea_spesa: creaSpesa, icona };
     const salvato = o ? await modifica<Obiettivo>(`/obiettivi/${o.id}`, corpo) : await crea<Obiettivo>('/obiettivi', corpo);
     // La spesa "mettici da parte": nasce, cambia o sparisce con l'interruttore (il contenitore delle annuali non ne ha).
     if (daParte && !contenitore) {
-      await sostituisci(`/obiettivi/${salvato.id}/promemoria`, { importo: serve(leggiImporto(quota), 'Scrivi quanto mettere da parte, es. 150'), ogni_mesi: Number(ogni), conto_id: conto });
+      await sostituisci(`/obiettivi/${salvato.id}/promemoria`, { importo: serve(leggiImporto(quota), 'Scrivi quanto mettere da parte, es. 150', 'quota'), ogni_mesi: Number(ogni), conto_id: conto });
     } else if (o?.alimentato_da) await cancella(`/obiettivi/${o.id}/promemoria`);
     if (o && !o.mio) return;
-    const condivisioni = await leggi<Condivisione[]>('/condivisioni');
-    const esistente = condivisioni.find((c) => c.voce === 'obiettivo' && c.voce_id === salvato.id && c.mia);
-    if (condiviso && !esistente) await crea('/condivisioni', { voce: 'obiettivo', id: salvato.id, email: altra?.email ?? serve(email.trim(), 'Scrivi l’email della persona con cui condividerlo') });
-    if (!condiviso && esistente) await cancella(`/condivisioni/${esistente.id}`);
+    await salvaCondivisione('obiettivo', salvato.id, condiviso, con ?? miaCondivisione?.condiviso_con_id ?? null);
   };
 
   const { c } = useTema();
@@ -271,14 +267,14 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
       ) : null}
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
         <SceltaIcona valore={icona} onCambia={setIcona} />
-        <View style={{ flex: 1, minWidth: 0 }}><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!o} disattivato={!!bloc} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!o} disattivato={!!bloc} /></ConErrore></View>
       </View>
       {riquadro('Quanto e quando', 'Facoltativi. Con un traguardo l’app ti dice a che punto sei.', o?.paga_spesa ? (
         <Testo stile="dettaglio-normale" colore="testo-secondario">{`Cifra e scadenza vengono dalla spesa «${o.paga_spesa.nome}»: si cambiano da Spese.`}</Testo>
       ) : (
         <Affiancati>
-          <Meta><Campo etichetta="Traguardo" valore={traguardo} onCambia={setTraguardo} segnaposto="Facoltativo" inputMode="decimal" disattivato={!!bloc} aiuto={o?.figli.length ? 'Vuoto: la somma dei sotto-salvadanai' : undefined} /></Meta>
-          <Meta><CampoData facoltativa etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} disattivato={!!bloc} /></Meta>
+          <Meta><ConErrore campo="traguardo"><Campo etichetta="Traguardo" valore={traguardo} onCambia={setTraguardo} segnaposto="Facoltativo" inputMode="decimal" disattivato={!!bloc} aiuto={o?.figli.length ? 'Vuoto: la somma dei sotto-salvadanai' : undefined} /></ConErrore></Meta>
+          <Meta><ConErrore campo="scadenza"><CampoData facoltativa etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} disattivato={!!bloc} /></ConErrore></Meta>
         </Affiancati>
       ))}
       {contenitore ? riquadro('Ricordamelo', 'La quota mensile è la somma delle spese annuali che contiene: la trovi in Spese, box Annuali.', null, undefined, true)
@@ -286,8 +282,8 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
         : riquadro('Ricordamelo', 'Compare in Spese per ricordarti di versare. I soldi li metti tu e li segni qui con “Aggiungi quota mensile”.', daParte ? (
           <>
             <SceltaSegmenti etichetta="Ogni quanto" larghezzaPiena valore={ogni} onCambia={cambiaOgni} opzioni={[{ valore: '1', testo: 'Ogni mese' }, { valore: '3', testo: 'Ogni 3 mesi' }, { valore: '6', testo: 'Ogni 6 mesi' }, { valore: '12', testo: 'Ogni anno' }]} />
-            <Campo etichetta={ogniTesto} valore={quota} onCambia={setQuota} inputMode="decimal" segnaposto="0,00"
-              aiuto={consigliata !== null ? `Per arrivarci in tempo: ${euro(consigliata)} ${ogni === '1' ? 'al mese' : ogni === '12' ? "all'anno" : `ogni ${ogni} mesi`}` : 'Con traguardo e scadenza l’app ti propone la cifra'} />
+            <ConErrore campo="quota"><Campo etichetta={ogniTesto} valore={quota} onCambia={setQuota} inputMode="decimal" segnaposto="0,00"
+              aiuto={consigliata !== null ? `Per arrivarci in tempo: ${euro(consigliata)} ${ogni === '1' ? 'al mese' : ogni === '12' ? "all'anno" : `ogni ${ogni} mesi`}` : 'Con traguardo e scadenza l’app ti propone la cifra'} /></ConErrore>
             <Tendina etichetta="Da quale conto (facoltativo)" valore={conto} opzioni={rif.conti.filter((x) => !x.archiviato).map((x) => ({ valore: x.id, testo: x.nome }))} onCambia={setConto} />
           </>
         ) : null, <Interruttore acceso={daParte} onCambia={accendi} etichetta="Ricordamelo" />, true)}
@@ -295,9 +291,10 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
         <Tendina etichetta="Dentro" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" disattivato={!!bloc} />)}
       {riquadro('Quando lo raggiungi', 'Crea una spesa «una volta sola» che pesa su questo salvadanaio, non sul mese.', null,
         <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" disattivato={!!bloc} />)}
-      {!o || o.mio ? riquadro('Condivisione', condiviso ? `Condiviso${altra ? ` con ${altra.nome}` : ''}: vede e modifica anche i sotto-salvadanai.` : 'Privato: lo vedi solo tu.',
-        condiviso && !altra && !o?.condiviso ? <Campo etichetta="Email dell'altra persona" valore={email} onCambia={setEmail} iconaPrima="mail" inputMode="email" /> : null,
-        <Interruttore acceso={condiviso} onCambia={setCondiviso} etichetta="Condiviso" />) : null}
+      {!o || o.mio ? (
+        <ConErrore campo="condivisione"><RiquadroCondivisione aperta={!!stato} nome="questo salvadanaio" condiviso={condiviso} onCambia={setCondiviso} con={con ?? miaCondivisione?.condiviso_con_id ?? null} onCon={setCon}
+          giaCondivisa={!!o?.condiviso} testoAttivo="Vede e modifica anche i sotto-salvadanai." /></ConErrore>
+      ) : null}
       {o ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
           <Pulsante tipo="testo" etichetta="Sotto-salvadanaio" icona="plus" onPress={() => onSotto(o)} />

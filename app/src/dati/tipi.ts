@@ -3,8 +3,8 @@
 export type Profilo = { id: string; email: string; nome: string; stipendio_netto: string | null; giorno_paga: number | null; inizio_mese: number; creato_il: string;
   sul_conto: string | null; sul_conto_al: string | null; obiettivo_annuali: string | null };
 
-// I conti sono un elenco di nomi con un'icona: niente tipo, niente saldo.
-export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; mio: boolean; condiviso: boolean };
+// I conti sono un elenco di nomi con un'icona; il saldo («Sul conto oggi», scritto a mano) è quello di chi guarda.
+export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; mio: boolean; condiviso: boolean; saldo: string | null; saldo_al: string | null };
 
 export type Categoria = { id: string; proprietario_id: string; padre_id: string | null; nome: string; tipo: 'uscita' | 'entrata'; colore: string | null; icona: string | null; ordine: number; figli?: Categoria[] };
 
@@ -69,3 +69,4 @@ export type Operazione = { id: string; titolo_id: string; titolo: string; isin: 
 
 export type Persona = { id: string; nome: string; email: string; io: boolean };
 export type Condivisione = { id: string; mia: boolean; voce: 'conto' | 'spesa' | 'obiettivo'; voce_id: string; nome: string | null; proprietario: string; condiviso_con: string; condiviso_con_id: string; proprietario_id: string };
+export type PersonaSistema = { id: string; nome: string };

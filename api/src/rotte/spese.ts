@@ -170,7 +170,8 @@ rotteSpese.delete('/:id/spunta', async (req, res) => {
   res.status(204).end();
 });
 
-// Come si divide la spesa: [{utente_id, percentuale}], la somma deve fare 100.
+// Come si divide la spesa: [{utente_id, percentuale}], la somma deve fare 100
+// (oppure una sola quota, la tua, tra 0 e 100 esclusi: divisione non specificata).
 // Elenco vuoto = torna alla divisione di base (tutto a chi l'ha creata, metà se condivisa).
 rotteSpese.put('/:id/quote', async (req, res) => {
   const id = v.idPercorso(req.params.id);
@@ -181,7 +182,9 @@ rotteSpese.put('/:id/quote', async (req, res) => {
     return { utente: v.id(r, 'utente_id', true)!, pct: v.importo(r, 'percentuale', true)! };
   });
   const somma = quote.reduce((t, q) => t + Number(q.pct), 0);
-  if (quote.length && Math.abs(somma - 100) > 0.001) throw new ErroreApi(400, 'Le quote devono fare 100%');
+  // Una sola quota, la mia, tra 0 e 100 esclusi = divisione «non specificata» (con chi, non si dice).
+  const nonSpecificata = quote.length === 1 && quote[0].utente === res.locals.utenteId && Number(quote[0].pct) > 0 && Number(quote[0].pct) < 100;
+  if (quote.length && !nonSpecificata && Math.abs(somma - 100) > 0.001) throw new ErroreApi(400, 'Le quote devono fare 100%');
   await conUtente(res.locals.utenteId, async (db) => {
     if (!(await db.query('select 1 from spese_previste where id = $1', [id])).rowCount) throw nonTrovato('Spesa prevista');
     await db.query('delete from quote where spesa_prevista_id = $1', [id]);

@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
-import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
+import { Campo, CampoData, Tendina, TendinaGiorni } from '../componenti/campi.tsx';
 import { CalendarioAnnuali, Intestazione, NumeroChiave, RigaNumeri, RigaSpesa, Scheda, TitoloGruppo, Vuoto } from '../componenti/composti.tsx';
-import { cancella, crea, leggi, modifica, sostituisci, useDati } from '../dati/api.ts';
+import { cancella, modifica, crea, sostituisci, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
-import type { Condivisione, ElencoSpese, Obiettivo, Persona, Spesa, TipoSpesa } from '../dati/tipi.ts';
-import { euro, importoInTesto, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
+import type { Condivisione, ElencoSpese, Obiettivo, PersonaSistema, Spesa, TipoSpesa } from '../dati/tipi.ts';
+import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento, calendarioAnnuali, eAnnuale, proxSpesa, prossimeAnnuali, quando, segnoQuota } from './comuni.tsx';
-import { Affiancati, FinestraModulo, Meta, Riquadro, serve, Voce } from './moduli.tsx';
+import { ConErrore, FinestraModulo, Riquadro, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
 type Filtro = 'tutte' | 'mese' | 'periodiche' | 'spente';
 type Frequenza = 'mese' | 'anno' | 'biennale' | 'n' | 'una';
-type Divisione = 'io' | 'meta' | 'altra';
+type Divisione = 'meta' | 'altra';
 
 // SC-02 Spese previste (proposta v2): le spese di ogni mese e le annuali in due
 // schede separate; le annuali con il calendario dei prossimi 12 mesi e la quota da
@@ -125,7 +125,6 @@ export function SpesePreviste() {
   );
 }
 
-const OPZIONI_GIORNO = [{ valore: '', testo: '—' }, ...Array.from({ length: 31 }, (_, i) => ({ valore: String(i + 1), testo: String(i + 1) }))];
 const OPZIONI_MESE = [{ valore: '', testo: '—' }, ...Array.from({ length: 12 }, (_, i) => ({ valore: String(i + 1), testo: nomeMese(`2000-${String(i + 1).padStart(2, '0')}`, false) }))];
 const giorniDel = (anno: number, mese: number) => new Date(Date.UTC(anno, mese, 0)).getUTCDate();
 
@@ -138,19 +137,26 @@ export function primaOccorrenza(giorno: number | null, mese: number, oggi = oggi
   return iso(passata ? a + 1 : a);
 }
 
+const NON_SPECIFICATO = 'non-specificato';
 // SC-03 Aggiungi o modifica una spesa prevista (finestra al centro, variante B).
 export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void }) {
   const rif = useRiferimenti();
-  const persone = useDati<Persona[]>(aperta ? '/persone' : null).dati ?? [];
   const obiettivi = useDati<Obiettivo[]>(aperta ? '/obiettivi' : null).dati ?? [];
-  const altra = persone.find((p) => !p.io);
+  const miaCondivisione = useDati<Condivisione[]>(aperta && spesa ? '/condivisioni' : null).dati?.find((x) => x.voce === 'spesa' && x.voce_id === spesa?.id && x.mia);
+  // Con chi è divisa una spesa non condivisa: si legge dalle quote del dettaglio.
+  const dettaglio = useDati<Spesa & { quote: { utente_id: string }[] }>(aperta && spesa?.mia ? `/spese-previste/${spesa.id}` : null).dati;
+  const persone = useDati<PersonaSistema[]>(aperta ? '/persone/tutte' : null).dati;
   const [nome, setNome] = useState('');
   const [importo, setImporto] = useState('');
   const [giornoMese, setGiornoMese] = useState('');
   const [meseScad, setMeseScad] = useState('');
-  const [divisione, setDivisione] = useState<Divisione>('io');
+  const [dataUna, setDataUna] = useState(''); // "una volta sola": la data intera, GG/MM/AAAA
+  // Dividere (le quote) e condividere (l'altra persona la vede e la modifica) sono due scelte: la seconda si propone dopo la prima.
+  const [diviso, setDiviso] = useState(false);
+  const [condiviso, setCondiviso] = useState(false);
+  const [con, setCon] = useState<string | null>(null);
+  const [divisione, setDivisione] = useState<Divisione>('meta');
   const [miaQuota, setMiaQuota] = useState('50');
-  const [email, setEmail] = useState('');
   const [frequenza, setFrequenza] = useState<Frequenza>('mese');
   const [ogniN, setOgniN] = useState('6');
   const [tipo, setTipo] = useState<TipoSpesa>('fissa');
@@ -171,7 +177,8 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     setNome(s?.nome ?? ''); setImporto(importoInTesto(s?.importo)); setGiornoMese(s?.prossima_scadenza && !s.senza_giorno ? String(Number(s.prossima_scadenza.slice(8, 10))) : '');
     // Il mese si chiede solo se la spesa non esce ogni mese; l'anno non si mostra mai.
     setMeseScad(s?.prossima_scadenza && s.ogni_mesi !== 1 ? String(Number((proxSpesa(s) ?? s.prossima_scadenza).slice(5, 7))) : '');
-    setDivisione(!s?.condivisa ? 'io' : s.mia_percentuale === 50 ? 'meta' : 'altra'); setMiaQuota(String(s?.mia_percentuale ?? 50)); setEmail('');
+    setDataUna(s && s.ogni_mesi === null ? dataInTesto(s.prossima_scadenza) : '');
+    setDiviso(!!s && (s.condivisa || (s.mia && s.mia_percentuale < 100))); setCondiviso(s?.condivisa ?? false); setCon(null); setDivisione(!s || s.mia_percentuale === 50 || s.mia_percentuale === 100 ? 'meta' : 'altra'); setMiaQuota(String(s?.mia_percentuale ?? 50));
     setFrequenza(!s || s.ogni_mesi === 1 ? 'mese' : s.ogni_mesi === null ? 'una' : s.ogni_mesi === 12 ? 'anno' : s.ogni_mesi === 24 ? 'biennale' : 'n'); setOgniN(String(s?.ogni_mesi && s.ogni_mesi > 1 ? s.ogni_mesi : 6));
     setTipo(s?.tipo ?? 'fissa'); setConto(s?.conto_id ?? null); setCategoria(s?.categoria_id ?? null); setSalv('nessuno'); setDove(null); setPadre(null); setContenitore(''); setScollega(false);
     setNote(s?.note ?? ''); setAttiva(s?.attiva ?? true);
@@ -210,14 +217,15 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
       await dividi(spesa.id);
       return;
     }
-    const valore = serve(leggiImporto(importo), 'Scrivi l’importo, es. 117,80');
+    const valore = serve(leggiImporto(importo), 'Scrivi l’importo, es. 117,80', 'importo');
     const ogni = tipo === 'budget' || frequenza === 'mese' ? 1 : frequenza === 'anno' ? 12 : frequenza === 'biennale' ? 24 : frequenza === 'una' ? null : Number(ogniN);
     // Ogni mese basta il giorno (la serie parte dal mese già salvato, o da questo); altrimenti servono almeno il mese, e l'anno lo sceglie l'app.
     let prima: string | null = null;
     let senzaGiorno = false;
     const g = giornoMese ? Number(giornoMese) : null;
-    if (ogni !== null && (!Number.isInteger(ogni) || ogni < 1)) throw new Error('Scrivi ogni quanti mesi, es. 6');
+    if (ogni !== null && (!Number.isInteger(ogni) || ogni < 1)) serve(null, 'Scrivi ogni quanti mesi, es. 6', 'ogniN');
     if (tipo === 'budget') prima = null;
+    else if (ogni === null) prima = serve(leggiData(dataUna), 'Scegli il giorno in cui esce', 'scadenza');
     else if (ogni === 1) {
       if (g !== null) {
         const [a, m] = (spesa?.prossima_scadenza ?? oggiIso()).slice(0, 7).split('-').map(Number);
@@ -226,14 +234,13 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     } else if (meseScad) {
       prima = primaOccorrenza(g, Number(meseScad));
       senzaGiorno = g === null;
-    } else if (g !== null) throw new Error('Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese');
-    else if (ogni === null) throw new Error('Una spesa che esce una volta sola ha bisogno almeno del mese');
-    else throw new Error('Scegli almeno il mese in cui esce: da lì si ripete');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, tipo, conto_id: conto, categoria_id: categoria,
+    } else if (g !== null) serve(null, 'Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese', 'scadenza');
+    else serve(null, 'Scegli almeno il mese in cui esce: da lì si ripete', 'scadenza');
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, tipo, conto_id: conto, categoria_id: categoria,
       ...(scollega ? { obiettivo_id: null } : {}), note: note.trim() || null, attiva };
     if (salv === 'crea' && !spesa?.obiettivo_id) {
-      if (doveEff === 'sotto' && !padreEff) throw new Error('Scegli sotto quale salvadanaio metterlo');
-      if (doveEff === 'contenitore' && !contenitore.trim()) throw new Error('Scrivi il nome del nuovo contenitore');
+      if (doveEff === 'sotto' && !padreEff) serve(null, 'Scegli sotto quale salvadanaio metterlo', 'padre');
+      if (doveEff === 'contenitore' && !contenitore.trim()) serve(null, 'Scrivi il nome del nuovo contenitore', 'contenitore');
       Object.assign(corpo, { nuovo_salvadanaio: doveEff === 'sotto' ? { padre_id: padreEff } : doveEff === 'contenitore' ? { contenitore: contenitore.trim() } : {} });
     }
     const salvata = spesa ? await modifica<Spesa>(`/spese-previste/${spesa.id}`, corpo) : await crea<Spesa>('/spese-previste', corpo);
@@ -243,22 +250,40 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
 
   // Divisione con l'altra persona: condividere, togliere la condivisione, quote.
   const dividi = async (spesaId: string) => {
-    const condivisioni = await leggi<Condivisione[]>('/condivisioni');
-    const esistente = condivisioni.find((c) => c.voce === 'spesa' && c.voce_id === spesaId && c.mia);
-    if (divisione === 'io') { if (esistente) await cancella(`/condivisioni/${esistente.id}`); await sostituisci(`/spese-previste/${spesaId}/quote`, { quote: [] }); return; }
-    let altroId = esistente?.condiviso_con_id ?? altra?.id;
-    if (!esistente) { const nuova = await crea<{ condiviso_con_id: string }>('/condivisioni', { voce: 'spesa', id: spesaId, email: altra?.email ?? serve(email.trim(), 'Scrivi l’email della persona con cui la dividi') }); altroId = nuova.condiviso_con_id; }
+    if (!diviso) {
+      await salvaCondivisione('spesa', spesaId, false, null);
+      await sostituisci(`/spese-previste/${spesaId}/quote`, { quote: [] });
+      return;
+    }
+    const nessuno = conEff === NON_SPECIFICATO;
+    const altroId = nessuno ? null : serve(conEff, 'Scegli con chi la dividi', 'divisione');
     const mia = divisione === 'meta' ? 50 : Number(miaQuota.replace(',', '.'));
-    if (!(mia > 0 && mia < 100)) throw new Error('La tua quota deve essere tra 1 e 99%');
-    await sostituisci(`/spese-previste/${spesaId}/quote`, { quote: divisione === 'meta' ? [] : [{ utente_id: rif.profilo!.id, percentuale: String(mia) }, { utente_id: altroId, percentuale: String(100 - mia) }] });
+    if (!(mia > 0 && mia < 100)) serve(null, 'La tua quota deve essere tra 1 e 99%', 'quota');
+    if (!altroId) {
+      // Senza dire con chi: niente condivisione, solo la mia quota.
+      await salvaCondivisione('spesa', spesaId, false, null);
+      await sostituisci(`/spese-previste/${spesaId}/quote`, { quote: [{ utente_id: rif.profilo!.id, percentuale: String(mia) }] });
+      return;
+    }
+    await salvaCondivisione('spesa', spesaId, condiviso, altroId);
+    // Quote sempre scritte: senza condivisione la metà non si deduce da sola.
+    await sostituisci(`/spese-previste/${spesaId}/quote`, { quote: [{ utente_id: rif.profilo!.id, percentuale: String(mia) }, { utente_id: altroId, percentuale: String(100 - mia) }] });
   };
 
+  const conEff = con ?? miaCondivisione?.condiviso_con_id ?? dettaglio?.quote.find((q) => q.utente_id !== rif.profilo?.id)?.utente_id ?? (dettaglio?.quote.length === 1 ? NON_SPECIFICATO : null) ?? (persone?.length === 1 ? persone[0].id : persone?.length === 0 ? NON_SPECIFICATO : null);
+  const nonSpec = conEff === NON_SPECIFICATO;
+  const bloccata = !!spesa?.condivisa && condiviso;
+  const nomeAltro = persone?.find((p) => p.id === conEff)?.nome ?? 'l’altra persona';
   const valoreQuota = leggiImporto(importo);
-  const quotaTesto = divisione === 'io' ? 'Solo tua.' : `La tua quota: ${valoreQuota ? euro((Number(valoreQuota) * (divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : '—'}. L’altra persona la vede e la può modificare; solo tu puoi eliminarla.`;
+  const quotaTesto = `La tua quota: ${valoreQuota ? euro((Number(valoreQuota) * (divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : '—'}.`;
+  const accendiDivisione = (v: boolean) => { setDiviso(v); if (v && !spesa?.condivisa) setCondiviso(true); if (!v) setCondiviso(false); };
   const compatto = useCompatto();
-  const nomeM = meseScad ? nomeMeseMinuscolo(`2000-${meseScad.padStart(2, '0')}`) : '';
+  const isoUna = frequenza === 'una' ? leggiData(dataUna) : null;
+  const nomeM = isoUna ? `${nomeMeseMinuscolo(isoUna)} ${isoUna.slice(0, 4)}` : meseScad ? nomeMeseMinuscolo(`2000-${meseScad.padStart(2, '0')}`) : '';
   const poi = frequenza === 'anno' ? ', ogni anno' : frequenza === 'biennale' ? ', ogni due anni' : frequenza === 'n' ? `, poi ogni ${ogniN || 'N'} mesi` : '';
-  const aiutoScadenza = frequenza === 'mese'
+  const aiutoScadenza = frequenza === 'una'
+    ? (isoUna ? `Esce il ${Number(isoUna.slice(8, 10))} ${nomeM}, una volta sola.` : 'Scegli il giorno in cui esce.')
+    : frequenza === 'mese'
     ? (giornoMese ? `Esce il ${giornoMese} di ogni mese.` : 'Facoltativo: serve a metterla in ordine nella lista del mese.')
     : nomeM && giornoMese ? `Esce il ${giornoMese} ${nomeM}${poi}.`
       : nomeM ? `Esce a ${nomeM}, senza un giorno preciso${poi}.`
@@ -272,7 +297,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const aiutoSalvadanaio = generato ? 'Il salvadanaio nasce da questa spesa: se la elimini resta, ma torna libero.'
     : spesa?.obiettivo_id ? 'Un salvadanaio si collega a una spesa solo creandolo nuovo da qui.'
       : salv === 'crea'
-        ? `Creo «${nome.trim() || 'il nome della spesa'}»${periodicaForm ? `, traguardo ${valoreQuota ? euro((Number(valoreQuota) * (divisione === 'io' ? 100 : divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : 'la tua quota'}${meseScad ? `, scadenza ${giornoMese ? `il ${giornoMese} ` : 'a '}${nomeM}` : ''}` : ', senza traguardo'}.`
+        ? `Creo «${nome.trim() || 'il nome della spesa'}»${periodicaForm ? `, traguardo ${valoreQuota ? euro((Number(valoreQuota) * (!diviso ? 100 : divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : 'la tua quota'}${isoUna ? `, scadenza il ${Number(isoUna.slice(8, 10))} ${nomeM}` : meseScad ? `, scadenza ${giornoMese ? `il ${giornoMese} ` : 'a '}${nomeM}` : ''}` : ', senza traguardo'}.`
         : '';
   return (
     <FinestraModulo titolo={spesa ? 'Modifica spesa prevista' : 'Nuova spesa prevista'} icona={spesa?.icona ?? 'calendar-check'} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
@@ -289,13 +314,20 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
         <Testo stile="dettaglio-normale" colore="testo-secondario">{`Nasce dal salvadanaio «${bloc.nome}»: per cambiarla apri il salvadanaio, in Salvadanai.`}</Testo>
       ) : null}
       <Riquadro titolo="Che spesa è" nota="Come si chiama, di che tipo è e quanto costa.">
-        <Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} disattivato={fisso('nome')} />
-        <Voce etichetta="Tipo" aiuto={tipo === 'budget' ? 'Una cifra da tenere da parte per le spese del mese di questa categoria: si spunta quando l’hai usata.' : tipo === 'investimento' ? 'Soldi che metti da parte o investi ogni volta, es. il piano di accumulo.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
-          <SceltaSegmenti etichetta="Tipo di spesa" larghezzaPiena valore={tipo} onCambia={fisso('tipo') ? () => {} : setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'budget', testo: 'Budget del mese' }, { valore: 'investimento', testo: 'Investimento' }]} />
+        <ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} disattivato={fisso('nome')} /></ConErrore>
+        <Voce etichetta="Tipo" aiuto={tipo === 'budget' ? 'Una cifra da tenere da parte per le spese del mese di questa categoria: si spunta quando l’hai usata.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
+          <SceltaSegmenti etichetta="Tipo di spesa" larghezzaPiena valore={tipo} onCambia={fisso('tipo') ? () => {} : setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'budget', testo: 'Budget del mese' }, ...(spesa?.tipo === 'investimento' ? [{ valore: 'investimento' as const, testo: 'Investimento' }] : [])]} />
         </Voce>
-        <Campo etichetta={tipo === 'budget' ? 'Tetto del mese' : 'Importo totale'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" disattivato={fisso('importo')} />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'] }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <ConErrore campo="importo"><Campo etichetta={tipo === 'budget' ? 'Tetto del mese' : 'Importo totale'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" disattivato={fisso('importo')} /></ConErrore>
+          </View>
+          <View style={{ flex: 1.5, minWidth: 0 }}>
+            <Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" />
+          </View>
+        </View>
       </Riquadro>
-      <Riquadro titolo="Quando esce" nota={tipo === 'budget' ? 'Un budget vale per tutto il mese: non serve una data.' : 'Ogni quanto si ripete e in quale giorno o mese esce.'}>
+      <Riquadro titolo="Regole di uscita" nota={tipo === 'budget' ? 'Un budget vale per tutto il mese: non serve una data. Scegli solo il conto da cui paghi.' : 'Ogni quanto si ripete, in quale giorno o mese esce e da quale conto.'}>
         {tipo === 'budget' ? null : (
           <>
             <Voce etichetta="Ogni quanto esce">
@@ -303,28 +335,27 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
             </Voce>
             <View style={{ gap: d['spazio-testo'] }}>
               <View style={{ gap: d['spazio-blocco'] }}>
-                {frequenza === 'n' ? <Campo etichetta="Ogni quanti mesi" valore={ogniN} onCambia={setOgniN} inputMode="numeric" segnaposto="Es. 6" disattivato={fisso('ogni_mesi')} /> : null}
+                {frequenza === 'n' ? <ConErrore campo="ogniN"><Campo etichetta="Ogni quanti mesi" valore={ogniN} onCambia={setOgniN} inputMode="numeric" segnaposto="Es. 6" disattivato={fisso('ogni_mesi')} /></ConErrore> : null}
+                <ConErrore campo="scadenza">
+                {frequenza === 'una' ? <CampoData etichetta="Giorno in cui esce" valore={dataUna} onCambia={setDataUna} disattivato={bloccoScadenza} /> : (
                 <View style={{ flexDirection: 'row', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'] }}>
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <TendinaGriglia etichetta="Giorno (facoltativo)" valore={giornoMese} opzioni={OPZIONI_GIORNO} onCambia={setGiornoMese} disattivato={bloccoScadenza} />
+                    <TendinaGiorni etichetta="Giorno (facoltativo)" valore={giornoMese} onCambia={setGiornoMese} disattivato={bloccoScadenza} />
                   </View>
                   {frequenza !== 'mese' ? (
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Tendina etichetta={frequenza === 'una' ? 'Mese in cui esce' : 'Mese'} valore={meseScad} opzioni={OPZIONI_MESE} onCambia={setMeseScad} disattivato={bloccoScadenza} />
+                      <Tendina etichetta="Mese" valore={meseScad} opzioni={OPZIONI_MESE} onCambia={setMeseScad} disattivato={bloccoScadenza} />
                     </View>
                   ) : null}
                 </View>
+                )}
+                </ConErrore>
               </View>
               <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoScadenza}</Testo>
             </View>
           </>
         )}
-      </Riquadro>
-      <Riquadro titolo="Da dove esce" nota="Il conto da cui paghi e la categoria in cui la conti.">
-        <Affiancati>
-          <Meta><Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} /></Meta>
-          <Meta><Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" /></Meta>
-        </Affiancati>
+        <Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} />
       </Riquadro>
       {bloc || (spesa && !spesa.mia) ? null : generato ? (
         <Riquadro titolo="Salvadanaio" nota="Metti da parte i soldi per questa spesa.">
@@ -344,27 +375,41 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
           {salv === 'crea' ? (
             <>
               {escludeDallaLista ? avvisoLista : null}
-              <Tendina etichetta="Dove lo metto" valore={doveEff === 'sotto' ? padreEff : doveEff} iconaPrima="piggy-bank"
+              <ConErrore campo="padre"><Tendina etichetta="Dove lo metto" valore={doveEff === 'sotto' ? padreEff : doveEff} iconaPrima="piggy-bank"
                 onCambia={(x) => { if (x === 'solo' || x === 'contenitore') setDove(x); else { setDove('sotto'); setPadre(x); } }}
-                opzioni={[{ valore: 'solo', testo: 'Da solo' }, ...opzioniPadri.map((o) => ({ ...o, testo: `Dentro «${o.testo}»` })), { valore: 'contenitore', testo: '+ Nuovo contenitore…' }]} />
-              {doveEff === 'contenitore' ? <Campo etichetta="Nome del contenitore" valore={contenitore} onCambia={setContenitore} segnaposto="Es. Viaggi" /> : null}
+                opzioni={[{ valore: 'solo', testo: 'Da solo' }, ...opzioniPadri.map((o) => ({ ...o, testo: `Dentro «${o.testo}»` })), { valore: 'contenitore', testo: '+ Nuovo contenitore…' }]} /></ConErrore>
+              {doveEff === 'contenitore' ? <ConErrore campo="contenitore"><Campo etichetta="Nome del contenitore" valore={contenitore} onCambia={setContenitore} segnaposto="Es. Viaggi" /></ConErrore> : null}
               {aiutoSalvadanaio ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoSalvadanaio}</Testo> : null}
             </>
           ) : null}
         </Riquadro>
       )}
-      <Riquadro titolo="Con chi la dividi" nota="Solo se la spesa è in due: indica con chi la dividi e in che percentuale. In fondo, una nota se ti serve.">
-        {!spesa || spesa.mia ? (
-          <>
-            <Voce etichetta="Con chi la dividi" aiuto={quotaTesto}>
-              <SceltaSegmenti etichetta="Con chi la dividi" larghezzaPiena valore={divisione} onCambia={setDivisione} opzioni={[{ valore: 'io', testo: 'Solo io' }, { valore: 'meta', testo: 'A metà' }, { valore: 'altra', testo: 'Altra quota' }]} />
-            </Voce>
-            {divisione !== 'io' && !altra && !spesa?.condivisa ? <Campo etichetta="Email dell'altra persona" valore={email} onCambia={setEmail} iconaPrima="mail" inputMode="email" /> : null}
-            {divisione === 'altra' ? <Campo etichetta="La tua quota in %" valore={miaQuota} onCambia={setMiaQuota} inputMode="decimal" /> : null}
-          </>
-        ) : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condivisa con te: la tua quota è ${spesa.mia_percentuale}%. Può cambiarla solo chi l'ha creata.`}</Testo>}
-        <Campo etichetta="Note (facoltative)" valore={note} onCambia={setNote} />
-      </Riquadro>
+      {!spesa || spesa.mia ? (
+        <>
+          <Riquadro titolo="Dividi la spesa con qualcuno" icona="users" nota={diviso ? 'Scegli con chi e come la dividete: nei tuoi conti conta solo la tua quota.' : 'Accendi se la spesa la paghi in due: conta solo la tua quota.'}
+            interruttore={<Interruttore acceso={diviso} onCambia={accendiDivisione} etichetta="Dividi la spesa con qualcuno" />}>
+            {diviso ? (
+              <>
+                <ConErrore campo="divisione"><Tendina etichetta="Con chi" valore={conEff} iconaPrima="user" disattivato={bloccata} onCambia={(v) => { setCon(v); if (v === NON_SPECIFICATO) setCondiviso(false); }} segnaposto="Scegli una persona"
+                    opzioni={[{ valore: NON_SPECIFICATO, testo: 'Non specificato' }, ...(persone ?? []).map((p) => ({ valore: p.id, testo: p.nome }))]} />
+                  {bloccata ? <Testo stile="dettaglio-normale" colore="testo-secondario">Per cambiare persona spegni prima la condivisione.</Testo> : persone && persone.length === 0 ? <Testo stile="dettaglio-normale" colore="testo-secondario">Nessun altro utente nel sistema: puoi dividerla senza dire con chi.</Testo> : null}</ConErrore>
+                <Voce etichetta="Come la dividete" aiuto={quotaTesto}>
+                  <SceltaSegmenti etichetta="Come la dividete" larghezzaPiena valore={divisione} onCambia={setDivisione} opzioni={[{ valore: 'meta', testo: 'A metà' }, { valore: 'altra', testo: 'Altra quota' }]} />
+                </Voce>
+                {divisione === 'altra' ? <ConErrore campo="quota"><Campo etichetta="La tua quota in %" valore={miaQuota} onCambia={setMiaQuota} inputMode="decimal" /></ConErrore> : null}
+                {nonSpec ? null : <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+                  <View style={{ flex: 1, gap: d['spazio-testo'] }}>
+                    <Testo stile="corpo-forte">{`Condividi anche con ${nomeAltro}`}</Testo>
+                    <Testo stile="dettaglio-normale" colore="testo-secondario">{condiviso ? `${nomeAltro.charAt(0).toUpperCase()}${nomeAltro.slice(1)} la vede e la può modificare; solo tu puoi eliminarla.` : 'Spento: la spesa la vedi solo tu.'}</Testo>
+                  </View>
+                  <Interruttore acceso={condiviso} onCambia={setCondiviso} etichetta={`Condividi anche con ${nomeAltro}`} />
+                </View>}
+              </>
+            ) : null}
+          </Riquadro>
+        </>
+      ) : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condivisa con te: la tua quota è ${spesa.mia_percentuale}%. Può cambiarla solo chi l'ha creata.`}</Testo>}
+      <Campo etichetta="Note (facoltative)" valore={note} onCambia={setNote} />
     </FinestraModulo>
   );
 }

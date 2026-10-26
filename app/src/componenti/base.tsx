@@ -38,7 +38,7 @@ export function Tessera({ icona, misura = 'media', tono = 'accento', suColore = 
   const { c } = useTema();
   const [lato, im] = TESSERA[misura];
   return (
-    <View style={{ width: lato, height: lato, borderRadius: d['raggio-controllo'], alignItems: 'center', justifyContent: 'center', backgroundColor: tinta ? tintaCategoria(tinta) : c[suColore ? pienoTono[tono] : fondoTono[tono]] }}>
+    <View style={{ width: lato, height: lato, flexShrink: 0, borderRadius: d['raggio-controllo'], alignItems: 'center', justifyContent: 'center', backgroundColor: tinta ? tintaCategoria(tinta) : c[suColore ? pienoTono[tono] : fondoTono[tono]] }}>
       <Icona nome={icona} misura={im as Misura} tinta={tinta} colore={coloreIcona ?? (suColore ? 'icona-su-accento' : iconaTono[tono])} />
     </View>
   );

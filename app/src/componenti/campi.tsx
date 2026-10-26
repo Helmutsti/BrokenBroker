@@ -1,4 +1,4 @@
-import { type ComponentRef, useRef, useState } from 'react';
+import { type ComponentRef, type ReactNode, type RefObject, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, TextInput, type TextInputProps, useWindowDimensions, View } from 'react-native';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
@@ -10,6 +10,15 @@ import { Icona } from './Icona.tsx';
 
 // Tiene un menu a comparsa dentro lo schermo (su telefono i campi sono larghi quanto lo schermo).
 const dentroLoSchermo = (x: number, larghezza: number, schermo: number) => Math.max(8, Math.min(x, schermo - larghezza - 8));
+
+// Messaggio d'errore sotto un campo (stesso aspetto di Campo).
+export function MessaggioErrore({ testo }: { testo: string }) {
+  return (
+    <View style={{ flexDirection: 'row', gap: d['spazio-testo'], alignItems: 'center' }}>
+      <Icona nome="circle-alert" misura={16} colore="icona-errore" /><Testo stile="dettaglio-normale" colore="testo-errore" style={{ flex: 1 }}>{testo}</Testo>
+    </View>
+  );
+}
 
 type CampoProps = {
   etichetta?: string; valore: string; onCambia: (v: string) => void; segnaposto?: string; aiuto?: string; errore?: string;
@@ -42,34 +51,36 @@ export function Campo({ etichetta, valore, onCambia, segnaposto, aiuto, errore, 
   );
 }
 
+// Riga al posto delle voci quando una tendina non ha niente da mostrare: mai un menu vuoto.
+const NessunRisultato = () => (
+  <View style={{ flexGrow: 1, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'] }}>
+    <Testo colore="testo-terziario">Nessun risultato</Testo>
+  </View>
+);
+
 export type Opzione<T extends string> = { valore: T; testo: string; icona?: string; rientro?: number };
 
-export function Tendina<T extends string>({ etichetta, valore, opzioni, onCambia, segnaposto = 'Scegli…', iconaPrima, disattivato, larghezza }: {
-  etichetta?: string; valore: T | null; opzioni: Opzione<T>[]; onCambia: (v: T) => void; segnaposto?: string; iconaPrima?: string; disattivato?: boolean; larghezza?: number;
+// Menu a comparsa riusabile da qualsiasi trigger: `children` riceve il ref da mettere sul trigger, `apri` e se il menu è aperto.
+export function MenuScelta<T extends string>({ valore, opzioni, onCambia, larghezzaMinima = 200, children }: {
+  valore: T | null; opzioni: Opzione<T>[]; onCambia: (v: T) => void; larghezzaMinima?: number;
+  children: (p: { ref: RefObject<ComponentRef<typeof View> | null>; apri: () => void; aperto: boolean }) => ReactNode;
 }) {
   const { c } = useTema();
   const ref = useRef<ComponentRef<typeof View>>(null);
   const [aperta, setAperta] = useState<null | { x: number; y: number; w: number }>(null);
-  const scelta = opzioni.find((o) => o.valore === valore);
   const apri = () => ref.current?.measureInWindow((x: number, y: number, w: number, h: number) => setAperta({ x, y: y + h + 4, w }));
   const compatto = useCompatto();
   const schermo = useWindowDimensions().width;
   return (
-    <View style={{ gap: d['spazio-testo'], alignSelf: larghezza ? 'flex-start' : 'stretch', width: larghezza, opacity: disattivato ? d['opacita-disattivato'] : 1 }}>
-      {etichetta ? <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo> : null}
-      <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`${etichetta ?? ''} ${scelta?.testo ?? segnaposto}`} aria-expanded={!!aperta} disabled={disattivato} onPress={apri}
-        style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']),
-          borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
-        {iconaPrima || scelta?.icona ? <Icona nome={(scelta?.icona ?? iconaPrima)!} misura={16} /> : null}
-        <Testo numberOfLines={1} colore={scelta ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{scelta?.testo ?? segnaposto}</Testo>
-        <Icona nome="chevron-down" misura={16} />
-      </Pressable>
+    <>
+      {children({ ref, apri, aperto: !!aperta })}
       <Modal transparent visible={!!aperta} onRequestClose={() => setAperta(null)}>
         <Pressable accessibilityLabel="Chiudi" style={{ flex: 1 }} onPress={() => setAperta(null)}>
           {aperta ? (
-            <View style={{ position: 'absolute', left: dentroLoSchermo(aperta.x, Math.min(Math.max(aperta.w, 200), schermo - 16), schermo), top: aperta.y, width: Math.min(Math.max(aperta.w, 200), schermo - 16), maxHeight: 320, backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-controllo'],
+            <View style={{ position: 'absolute', left: dentroLoSchermo(aperta.x, Math.min(Math.max(aperta.w, larghezzaMinima), schermo - 16), schermo), top: aperta.y, width: Math.min(Math.max(aperta.w, larghezzaMinima), schermo - 16), maxHeight: 320, backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-controllo'],
               borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as object}>
               <ScrollView contentContainerStyle={{ padding: d['margine-gruppo-controlli'], gap: d['spazio-elenco'] }}>
+                {opzioni.length ? null : <NessunRisultato />}
                 {opzioni.map((o) => (
                   <Pressable key={o.valore} accessibilityRole="menuitem" onPress={() => { onCambia(o.valore); setAperta(null); }}
                     style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'],
@@ -84,6 +95,31 @@ export function Tendina<T extends string>({ etichetta, valore, opzioni, onCambia
           ) : null}
         </Pressable>
       </Modal>
+    </>
+  );
+}
+
+export function Tendina<T extends string>({ etichetta, valore, opzioni, onCambia, segnaposto = 'Scegli…', iconaPrima, disattivato, larghezza, errore }: {
+  etichetta?: string; valore: T | null; opzioni: Opzione<T>[]; onCambia: (v: T) => void; segnaposto?: string; iconaPrima?: string; disattivato?: boolean; larghezza?: number; errore?: string;
+}) {
+  const { c } = useTema();
+  const scelta = opzioni.find((o) => o.valore === valore);
+  const compatto = useCompatto();
+  return (
+    <View style={{ gap: d['spazio-testo'], alignSelf: larghezza ? 'flex-start' : 'stretch', width: larghezza, opacity: disattivato ? d['opacita-disattivato'] : 1 }}>
+      {etichetta ? <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo> : null}
+      <MenuScelta valore={valore} opzioni={opzioni} onCambia={onCambia}>
+        {({ ref, apri, aperto }) => (
+          <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`${etichetta ?? ''} ${scelta?.testo ?? segnaposto}`} aria-expanded={aperto} disabled={disattivato} onPress={apri}
+            style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']),
+              borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[errore ? 'bordo-errore' : aperto ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+            {iconaPrima || scelta?.icona ? <Icona nome={(scelta?.icona ?? iconaPrima)!} misura={16} /> : null}
+            <Testo numberOfLines={1} colore={scelta ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{scelta?.testo ?? segnaposto}</Testo>
+            <Icona nome="chevron-down" misura={16} />
+          </Pressable>
+        )}
+      </MenuScelta>
+      {errore ? <MessaggioErrore testo={errore} /> : null}
     </View>
   );
 }
@@ -93,8 +129,8 @@ export function Tendina<T extends string>({ etichetta, valore, opzioni, onCambia
 // che sia `soloIcone`): per categorie e icone, dove si riconosce più in fretta il disegno
 // di una riga di testo in una lista. Le voci con `rientro` (sottocategorie) hanno una
 // linea d'accento a sinistra.
-export function TendinaGriglia<T extends string>({ etichetta, valore, opzioni, onCambia, segnaposto = 'Scegli…', iconaPrima, disattivato, larghezza, soloIcone }: {
-  etichetta?: string; valore: T | null; opzioni: Opzione<T>[]; onCambia: (v: T) => void; segnaposto?: string; iconaPrima?: string; disattivato?: boolean; larghezza?: number; soloIcone?: boolean;
+export function TendinaGriglia<T extends string>({ etichetta, valore, opzioni, onCambia, segnaposto = 'Scegli…', iconaPrima, disattivato, larghezza, soloIcone, errore }: {
+  etichetta?: string; valore: T | null; opzioni: Opzione<T>[]; onCambia: (v: T) => void; segnaposto?: string; iconaPrima?: string; disattivato?: boolean; larghezza?: number; soloIcone?: boolean; errore?: string;
 }) {
   const { c } = useTema();
   const ref = useRef<ComponentRef<typeof View>>(null);
@@ -112,17 +148,19 @@ export function TendinaGriglia<T extends string>({ etichetta, valore, opzioni, o
         style={(s: StatoPressione) => [soloIcone
           ? { width: compatto ? 44 : 40, height: compatto ? 44 : 40, alignItems: 'center', justifyContent: 'center' }
           : { flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']) },
-          { borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+          { borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[errore ? 'bordo-errore' : aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
         {iconaPrima || scelta?.icona ? <Icona nome={(scelta?.icona ?? iconaPrima)!} misura={soloIcone ? 24 : 16} /> : null}
         {soloIcone ? null : <Testo numberOfLines={1} colore={scelta ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{scelta?.testo ?? segnaposto}</Testo>}
         {soloIcone ? null : <Icona nome="chevron-down" misura={16} />}
       </Pressable>
+      {errore ? <MessaggioErrore testo={errore} /> : null}
       <Modal transparent visible={!!aperta} onRequestClose={() => setAperta(null)}>
         <Pressable accessibilityLabel="Chiudi" style={{ flex: 1 }} onPress={() => setAperta(null)}>
           {aperta ? (
             <View style={{ position: 'absolute', left: dentroLoSchermo(aperta.x, larghezzaMenu, schermo), top: aperta.y, width: larghezzaMenu, maxHeight: 360, backgroundColor: c['sfondo-scheda'],
               borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as object}>
               <ScrollView contentContainerStyle={{ padding: d['margine-gruppo-controlli'], flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                {opzioni.length ? null : <NessunRisultato />}
                 {opzioni.map((o) => {
                   const sel = o.valore === valore;
                   return (
@@ -169,8 +207,8 @@ const isoDa = (testo: string) => {
 const testoDa = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
 const oggiCal = () => { const o = new Date(); return `${o.getFullYear()}-${String(o.getMonth() + 1).padStart(2, '0')}-${String(o.getDate()).padStart(2, '0')}`; };
 
-export function CampoData({ etichetta, valore, onCambia, segnaposto = 'Scegli il giorno', aiuto, facoltativa, disattivato }: {
-  etichetta?: string; valore: string; onCambia: (v: string) => void; segnaposto?: string; aiuto?: string; facoltativa?: boolean; disattivato?: boolean;
+export function CampoData({ etichetta, valore, onCambia, segnaposto = 'Scegli il giorno', aiuto, facoltativa, disattivato, errore }: {
+  etichetta?: string; valore: string; onCambia: (v: string) => void; segnaposto?: string; aiuto?: string; facoltativa?: boolean; disattivato?: boolean; errore?: string;
 }) {
   const { c } = useTema();
   const ref = useRef<ComponentRef<typeof View>>(null);
@@ -201,12 +239,13 @@ export function CampoData({ etichetta, valore, onCambia, segnaposto = 'Scegli il
       {etichetta ? <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo> : null}
       <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`${etichetta ?? ''} ${leggibile ?? segnaposto}`} aria-expanded={!!aperta} disabled={disattivato} onPress={apri}
         style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']),
-          borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+          borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[errore ? 'bordo-errore' : aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
         <Icona nome="calendar" misura={16} />
         <Testo numberOfLines={1} colore={leggibile ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{leggibile ?? segnaposto}</Testo>
         <Icona nome="chevron-down" misura={16} />
       </Pressable>
       {aiuto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiuto}</Testo> : null}
+      {errore ? <MessaggioErrore testo={errore} /> : null}
       <Modal transparent visible={!!aperta} onRequestClose={() => setAperta(null)}>
         <Pressable accessibilityLabel="Chiudi il calendario" style={{ flex: 1 }} onPress={() => setAperta(null)}>
           {aperta ? (
@@ -233,6 +272,55 @@ export function CampoData({ etichetta, valore, onCambia, segnaposto = 'Scegli il
                 <Pressable accessibilityRole="button" onPress={() => scegli(oggi)} style={{ padding: d['spazio-testo'] * 2, minHeight: compatto ? 44 : undefined, justifyContent: 'center' }}><Testo stile="corpo-forte" colore="testo-accento">Oggi</Testo></Pressable>
                 {facoltativa && scelto ? <Pressable accessibilityRole="button" onPress={() => scegli(null)} style={{ padding: d['spazio-testo'] * 2 }}><Testo colore="testo-secondario">Togli la data</Testo></Pressable> : null}
               </View>
+            </Pressable>
+          ) : null}
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+// ---- Tendina dei giorni del mese ----
+// Come la Tendina, ma il menu mostra solo i numeri 1-31 in una griglia a 7 colonne, senza mese né giorni della settimana.
+export function TendinaGiorni({ etichetta, valore, onCambia, disattivato, errore }: { etichetta?: string; valore: string; onCambia: (v: string) => void; disattivato?: boolean; errore?: string }) {
+  const { c } = useTema();
+  const ref = useRef<ComponentRef<typeof View>>(null);
+  const [aperta, setAperta] = useState<null | { x: number; y: number }>(null);
+  const compatto = useCompatto();
+  const schermo = useWindowDimensions().width;
+  const apri = () => ref.current?.measureInWindow((x: number, y: number, _w: number, h: number) => {
+    const alto = compatto ? 380 : 270, sotto = y + h + 4;
+    setAperta({ x, y: typeof window !== 'undefined' && sotto + alto > window.innerHeight ? Math.max(8, y - alto - 4) : sotto });
+  });
+  const scegli = (v: string) => { onCambia(v); setAperta(null); };
+  const cella = compatto ? 44 : 34;
+  return (
+    <View style={{ gap: d['spazio-testo'], alignSelf: 'stretch', opacity: disattivato ? d['opacita-disattivato'] : 1 }}>
+      {etichetta ? <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo> : null}
+      <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`${etichetta ?? ''} ${valore || 'nessun giorno'}`} aria-expanded={!!aperta} disabled={disattivato} onPress={apri}
+        style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: compatto ? 44 : undefined, paddingVertical: dentroIlBordo(d['margine-controllo-v']), paddingHorizontal: dentroIlBordo(d['margine-controllo-h']),
+          borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c[errore ? 'bordo-errore' : aperta ? 'bordo-focus' : 'bordo-controllo'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
+        <Icona nome="calendar" misura={16} />
+        <Testo numberOfLines={1} colore={valore ? 'testo-primario' : 'testo-terziario'} style={{ flex: 1 }}>{valore || '—'}</Testo>
+        <Icona nome="chevron-down" misura={16} />
+      </Pressable>
+      {errore ? <MessaggioErrore testo={errore} /> : null}
+      <Modal transparent visible={!!aperta} onRequestClose={() => setAperta(null)}>
+        <Pressable accessibilityLabel="Chiudi" style={{ flex: 1 }} onPress={() => setAperta(null)}>
+          {aperta ? (
+            <Pressable onPress={() => {}} accessibilityRole="menu" aria-label="Giorno del mese"
+              style={{ position: 'absolute', left: dentroLoSchermo(aperta.x, 292, schermo), top: aperta.y, width: 292, padding: d['margine-gruppo-controlli'] * 3, gap: d['spazio-testo'], backgroundColor: c['sfondo-scheda'],
+                borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as object}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                {Array.from({ length: 31 }, (_, i) => String(i + 1)).map((g) => (
+                  <Pressable key={g} accessibilityRole="menuitem" accessibilityLabel={g} aria-selected={g === valore} onPress={() => scegli(g)}
+                    style={(s: StatoPressione) => ({ width: 38, height: cella, alignItems: 'center', justifyContent: 'center', borderRadius: d['raggio-controllo-interno'],
+                      backgroundColor: g === valore ? c['sfondo-accento'] : s.hovered ? c['sfondo-hover'] : 'transparent' })}>
+                    <Testo stile={g === valore ? 'corpo-forte' : 'corpo-normale'} colore={g === valore ? 'testo-su-accento' : 'testo-primario'}>{g}</Testo>
+                  </Pressable>
+                ))}
+              </View>
+              {valore ? <Pressable accessibilityRole="button" onPress={() => scegli('')} style={{ padding: d['spazio-testo'] * 2, minHeight: compatto ? 44 : undefined, justifyContent: 'center' }}><Testo colore="testo-secondario">Nessun giorno</Testo></Pressable> : null}
             </Pressable>
           ) : null}
         </Pressable>

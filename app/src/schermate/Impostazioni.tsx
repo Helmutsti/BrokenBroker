@@ -85,10 +85,10 @@ export function Impostazioni() {
             {altra ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
                 <Avatar nome={altra.nome} />
-                <View style={{ flex: 1, gap: d['spazio-testo'] }}><Testo stile="corpo-forte">{`${altra.nome} · ${altra.email}`}</Testo>
+                <View style={{ flex: 1, gap: d['spazio-testo'] }}><Testo stile="corpo-forte">{altra.nome}</Testo>
                   <Testo stile="dettaglio-normale" colore="testo-secondario">{`${condivisioni.filter((c) => c.mia).length} voci condivise da te · ${condivisioni.filter((c) => !c.mia).length} condivise con te`}</Testo></View>
               </View>
-            ) : <Vuoto testo="Ancora nessuna condivisione. Per condividere un conto, una spesa o un salvadanaio aprilo e attiva Condiviso: ti chiederà l'email dell'altra persona." />}
+            ) : <Vuoto testo="Ancora nessuna condivisione. Per condividere un conto, una spesa o un salvadanaio aprilo e attiva Condividi: scegli con chi nel form." />}
             {condivisioni.length ? (
               <View>
                 {condivisioni.map((c) => (

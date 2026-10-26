@@ -221,7 +221,8 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, on
 
 // ---- CMP-23 Numero chiave ----
 export type ToneNumero = 'normale' | 'ok' | 'attenzione' | 'errore';
-export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale' }: { etichetta: string; valore: string; nota?: string; icona: string; tono?: ToneNumero }) {
+// `titolo` sostituisce l'etichetta con un nodo (es. un selettore); `onPress` rende premibile cifra e nota (non il titolo).
+export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale', titolo, onPress, etichettaPressione }: { etichetta: string; valore: string; nota?: string; icona: string; tono?: ToneNumero; titolo?: ReactNode; onPress?: () => void; etichettaPressione?: string }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const t: Tono = tono === 'normale' ? 'accento' : tono;
@@ -229,12 +230,14 @@ export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale' 
   return (
     <View style={{ flex: 1, minWidth: 0, ...(compatto ? { flexBasis: '45%', flexGrow: 1, padding: 12 } : { padding: d['margine-scheda'] }), gap: d['spazio-icona'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'],
       borderColor: c[tono === 'errore' ? 'bordo-errore' : 'bordo-scheda'], backgroundColor: c[tono === 'errore' ? 'sfondo-errore-tenue' : 'sfondo-scheda'] }}>
-      <Tessera icona={icona} misura="piccola" tono={t} suColore={tono === 'errore'} />
-      <View style={{ gap: d['spazio-testo'] }}>
-        <Testo stile="dettaglio-forte" colore="testo-secondario">{etichetta}</Testo>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+        <Tessera icona={icona} misura="piccola" tono={t} suColore={tono === 'errore'} />
+        {titolo ?? <Testo stile={compatto ? 'corpo-forte' : 'titolo-scheda'} colore={tono === 'normale' ? 'testo-secondario' : coloreValore} style={{ flex: 1, minWidth: 0 }}>{etichetta}</Testo>}
+      </View>
+      <Pressable disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={onPress ? etichettaPressione : undefined} onPress={onPress} style={{ gap: d['spazio-testo'] }}>
         <Testo stile="numero-grande" colore={coloreValore} style={compatto ? { fontSize: 20, lineHeight: 26 } : undefined}>{valore}</Testo>
         {nota ? <Testo stile="dettaglio-normale" colore={tono === 'normale' ? 'testo-secondario' : coloreValore}>{nota}</Testo> : null}
-      </View>
+      </Pressable>
     </View>
   );
 }

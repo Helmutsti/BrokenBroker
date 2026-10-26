@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
+import { oggi } from '../periodo.ts';
 import * as v from '../valida.ts';
 
 export const rotteConti = Router();
@@ -9,8 +10,10 @@ export const rotteConti = Router();
 const SELEZIONE = `
   select c.id, c.proprietario_id, c.nome, c.icona, c.archiviato,
          c.proprietario_id = fp_me() as mio,
-         exists (select 1 from condivisioni s where s.conto_id = c.id) as condiviso
-    from conti c`;
+         exists (select 1 from condivisioni s where s.conto_id = c.id) as condiviso,
+         sc.importo::text as saldo, sc.al as saldo_al
+    from conti c
+    left join saldi_conto sc on sc.conto_id = c.id and sc.utente_id = fp_me()`;
 
 rotteConti.get('/', async (req, res) => {
   const archiviati = req.query.archiviati === 'true';
@@ -49,6 +52,23 @@ rotteConti.patch('/:id', async (req, res) => {
   const conto = await conUtente(res.locals.utenteId, async (db) => {
     const { rowCount } = await db.query(`update conti set ${set.sql} where id = $1`, [id, ...set.valori]);
     if (!rowCount) return undefined;
+    return (await db.query(`${SELEZIONE} where c.id = $1`, [id])).rows[0];
+  });
+  if (!conto) throw nonTrovato('Conto');
+  res.json(conto);
+});
+
+// "Sul conto oggi" di questo conto, per chi lo scrive: importo null lo toglie. La data è oggi.
+rotteConti.put('/:id/saldo', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  const c = v.corpo(req.body);
+  const importo = v.annullabile(c, 'importo', () => v.importo(c, 'importo', true));
+  const conto = await conUtente(res.locals.utenteId, async (db) => {
+    if (!(await db.query('select 1 from conti where id = $1', [id])).rowCount) return undefined;
+    if (importo === null) await db.query('delete from saldi_conto where conto_id = $1 and utente_id = fp_me()', [id]);
+    else await db.query(
+      `insert into saldi_conto (utente_id, conto_id, importo, al) values (fp_me(), $1, $2, $3)
+       on conflict (utente_id, conto_id) do update set importo = excluded.importo, al = excluded.al`, [id, importo, oggi()]);
     return (await db.query(`${SELEZIONE} where c.id = $1`, [id])).rows[0];
   });
   if (!conto) throw nonTrovato('Conto');

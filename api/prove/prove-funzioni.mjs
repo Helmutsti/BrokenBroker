@@ -84,11 +84,31 @@ const persone = (await r('GET', '/persone', A)).j;
 verifica(persone.length === 2 && persone[0].io, 'persone collegate', persone);
 verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, A, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '30' }] })).s === 400, 'quote non a 100');
 verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '40' }] })).s === 204, 'quote 60/40');
+verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: b.utente_id, percentuale: '70' }] })).s === 204, 'quota sola (non specificata)');
+verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '70' }] })).s === 400, 'quota sola di un altro rifiutata');
+verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: b.utente_id, percentuale: '100' }] })).s === 400, 'quota sola al 100 rifiutata');
+await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '40' }] });
 verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.mia_quota === '420.00', 'quota 60%');
 verifica((await r('DELETE', `/spese-previste/${affitto.j.id}`, Bt)).s === 403, "l'altro non cancella la spesa");
 const cond = (await r('GET', '/condivisioni', Bt)).j;
 verifica(cond.length === 1 && cond[0].nome === 'Affitto' && cond[0].mia === false, 'elenco condivisioni', cond);
 verifica((await r('DELETE', `/condivisioni/${cond[0].id}`, Bt)).s === 403, "l'altro non toglie la condivisione");
+
+// Condivisione scegliendo la persona dall'elenco (senza email)
+const tutte = (await r('GET', '/persone/tutte', A)).j;
+verifica(tutte.length >= 1 && tutte.some((x) => x.id === b.utente_id) && !tutte.some((x) => x.id === a.utente_id) && !('email' in tutte[0]), 'elenco altre persone', tutte);
+const contoDaCondividere = (await r('POST', '/conti', A, { nome: 'Conto in due' })).j;
+verifica((await r('POST', '/condivisioni', A, { voce: 'conto', id: contoDaCondividere.id, utente_id: '00000000-0000-4000-8000-000000000000' })).s === 404, 'utente_id sconosciuto 404');
+verifica((await r('POST', '/condivisioni', A, { voce: 'conto', id: contoDaCondividere.id, utente_id: b.utente_id })).s === 201, 'condivisione con utente_id');
+
+// "Sul conto oggi" per conto: un saldo per persona, privato anche sul conto condiviso
+const sc1 = await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: '1250.40' });
+verifica(sc1.s === 200 && sc1.j.saldo === '1250.40' && /^\d{4}-\d{2}-\d{2}/.test(sc1.j.saldo_al), 'saldo del conto scritto', sc1.j);
+verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, Bt, { importo: '-20' })).j.saldo === '-20.00', 'saldo dell\'altra persona sullo stesso conto');
+verifica((await r('GET', '/conti', A)).j.find((x) => x.id === contoDaCondividere.id).saldo === '1250.40', 'il saldo di A non cambia con quello di B');
+verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: 'abc' })).s === 400, 'saldo non valido rifiutato');
+verifica((await r('PUT', `/conti/${conto.id}/saldo`, Bt, { importo: '5' })).s === 404, 'saldo di un conto non visibile: 404');
+verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: null })).j.saldo === null, 'saldo del conto tolto');
 
 // Obiettivi, versamenti, traguardi, crea spesa
 const fondo = (await r('POST', '/obiettivi', A, { nome: 'Fondo emergenza' })).j;

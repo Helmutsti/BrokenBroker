@@ -30,15 +30,18 @@ rotteCondivisioni.get('/', async (_req, res) => {
   res.json(elenco);
 });
 
-// Corpo: { voce: conto|spesa|obiettivo, id, email }
+// Corpo: { voce: conto|spesa|obiettivo, id, utente_id | email }
 rotteCondivisioni.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const voce = v.scelta(c, 'voce', VOCI, true)!;
   const id = v.id(c, 'id', true)!;
-  const email = v.testo(c, 'email', true, 254)!;
+  const utenteId = v.id(c, 'utente_id', false);
+  const email = utenteId ? null : v.testo(c, 'email', true, 254)!;
   const creata = await conUtente(res.locals.utenteId, async (db) => {
-    const altro = (await db.query<{ id: string | null }>('select fp_utente_per_email($1) as id', [email])).rows[0].id;
-    if (!altro) throw new ErroreApi(404, 'Nessuna persona con questa email');
+    const altro = utenteId
+      ? (await db.query<{ id: string }>('select id from fp_altri_utenti() where id = $1', [utenteId])).rows[0]?.id
+      : (await db.query<{ id: string | null }>('select fp_utente_per_email($1) as id', [email])).rows[0].id;
+    if (!altro) throw new ErroreApi(404, utenteId ? 'Persona non trovata' : 'Nessuna persona con questa email');
     const possiede = (await db.query<{ ok: boolean }>(
       `select fp_possiede_voce($1, $2, $3) as ok`,
       VOCI.map((k) => (k === voce ? id : null)))).rows[0].ok;
@@ -58,6 +61,11 @@ rotteCondivisioni.delete('/:id', async (req, res) => {
     throw visibile ? new ErroreApi(403, 'Solo chi ha condiviso la voce può smettere di condividerla') : nonTrovato('Condivisione');
   });
   res.status(204).end();
+});
+
+// Tutte le altre persone del sistema (solo id e nome), per scegliere con chi condividere.
+rottePersone.get('/tutte', async (_req, res) => {
+  res.json(await conUtente(res.locals.utenteId, async (db) => (await db.query('select id, nome from fp_altri_utenti()')).rows));
 });
 
 // Le persone con cui c'è almeno una condivisione (servono per le quote).

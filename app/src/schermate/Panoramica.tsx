@@ -3,12 +3,12 @@ import { createPortal } from 'react-dom';
 import { Pressable, View } from 'react-native';
 import { Icona } from '../componenti/Icona.tsx';
 import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
-import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
-import { Foglio, Intestazione, NumeroChiave, RigaRata, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
-import { cancella, crea, modifica, useDati } from '../dati/api.ts';
+import { Campo, CampoData, MenuScelta, Tendina } from '../componenti/campi.tsx';
+import { Foglio, Intestazione, NumeroChiave, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
+import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
-import type { ControlloRate, ElencoSpese, Obiettivo, Proiezione, Rata, RiepilogoMese, Spesa } from '../dati/tipi.ts';
-import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
+import type { Conto, ControlloRate, ElencoSpese, Obiettivo, Rata, RiepilogoMese, Spesa } from '../dati/tipi.ts';
+import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { ombre } from '../tema/token.ts';
 import { Caricamento, divisioneTraSotto, importoDelMese, proxSpesa, quando, rateDelMese, tuttiGliObiettivi, vociDelMese } from './comuni.tsx';
@@ -17,22 +17,26 @@ import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
+// Il conto scelto nella tendina resta finché l'app è aperta, anche cambiando schermata.
+let ultimoConto = 'tutti';
+
 // Mese (proposta v5): il foglio Spese dell'Excel in una pagina. In alto il conto
 // dell'Excel (sul conto oggi − devono uscire = avanzo), poi una sola lista con le
-// spunte, da cui si aggiungono e si modificano le voci; in fondo le rate,
-// cosa succede se nulla cambia. Le annuali contano ogni mese con la quota mensile.
+// spunte, da cui si aggiungono e si modificano le voci; in fondo le rate.
+// Le annuali contano ogni mese con la quota mensile.
 export function Panoramica() {
   const rif = useRiferimenti();
   const { mese, setMese } = rif;
   const riepilogo = useDati<RiepilogoMese>(`/analisi/mese?mese=${mese}`);
   const spese = useDati<ElencoSpese>(`/spese-previste?mese=${mese}`);
-  const rate = useDati<Rata[]>(`/rate?mese=${mese}`).dati ?? [];
-  const proiezione = useDati<Proiezione>('/analisi/proiezione').dati;
+  const tutteLeRate = useDati<Rata[]>(`/rate?mese=${mese}`).dati ?? [];
   const controllo = useDati<ControlloRate>('/analisi/rate').dati;
   const [errore, setErrore] = useState<string | null>(null);
   const [spesa, setSpesa] = useState<Spesa | 'nuova' | null>(null);
   const [rata, setRata] = useState<Rata | 'nuova' | null>(null);
   const [sulConto, setSulConto] = useState(false);
+  const [contoScelto, setContoScelto] = useState(ultimoConto);
+  const scegliConto = (v: string) => { ultimoConto = v; setContoScelto(v); };
   const [spente, setSpente] = useState(false);
   const [raggruppa, setRaggruppa] = useState<'tipo' | 'categoria'>('tipo');
   const [ordina, setOrdina] = useState<'scadenza' | 'nome'>('scadenza');
@@ -52,8 +56,14 @@ export function Panoramica() {
     o.observe(nodo);
     return () => o.disconnect();
   }, [pronto]);
-  const r = riepilogo.dati, el = spese.dati, profilo = rif.profilo;
-  if (!r || !el || !profilo) return <Caricamento errore={riepilogo.errore ?? spese.errore} />;
+  const r = riepilogo.dati, elencoCompleto = spese.dati, profilo = rif.profilo;
+  if (!r || !elencoCompleto || !profilo) return <Caricamento errore={riepilogo.errore ?? spese.errore} />;
+  // Un conto scelto: solo le sue spese e rate (quelle senza conto compaiono solo in «Tutti i conti») e il suo saldo.
+  const conti = rif.conti.filter((x) => !x.archiviato);
+  const conto = conti.find((x) => x.id === contoScelto) ?? null;
+  const titoloSaldo = conto ? `Su ${conto.nome} oggi` : 'Sui conti oggi';
+  const el: ElencoSpese = conto ? { ...elencoCompleto, spese: elencoCompleto.spese.filter((s) => s.conto_id === conto.id) } : elencoCompleto;
+  const rate = conto ? tutteLeRate.filter((x) => x.conto_id === conto.id) : tutteLeRate;
   const p = el.periodo;
   // In ordine di uscita: la data nel mese, poi il nome.
   const perUscita = (a: Spesa, b: Spesa) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome);
@@ -72,7 +82,8 @@ export function Panoramica() {
   const rateDaPagare = rateMese.filter((x) => !x.r.pagata);
   const devonoUscire = daSpuntare.reduce((t, s) => t + importoDelMese(s), 0) + rateDaPagare.reduce((t, x) => t + Number(x.r.importo_rata), 0);
   const quanteDaSpuntare = daSpuntare.length + rateDaPagare.length;
-  const saldo = profilo.sul_conto === null ? null : Number(profilo.sul_conto);
+  const saldoScritto = conto ? conto.saldo : profilo.sul_conto, saldoAl = conto ? conto.saldo_al : profilo.sul_conto_al;
+  const saldo = saldoScritto === null ? null : Number(saldoScritto);
   const avanzo = saldo === null ? null : saldo - devonoUscire;
 
   const spunta = async (s: Spesa) => {
@@ -183,16 +194,27 @@ export function Panoramica() {
         <SelettorePeriodo mese={mese} meseOggi={rif.meseOggi} onCambia={setMese} />
       </View>
       <View ref={quattro as never} style={{ flexDirection: 'row', flexWrap: compatto ? 'wrap' : 'nowrap', alignItems: 'stretch', gap: compatto ? d['spazio-colonne'] : d['spazio-blocco'] }}>
+        <NumeroChiave etichetta={titoloSaldo} valore={saldo === null ? 'Scrivilo' : euro(saldo)} icona="wallet"
+          onPress={() => setSulConto(true)} etichettaPressione={`Cambia quanto c'è ${conto ? `su ${conto.nome}` : 'sui conti'} oggi`}
+          titolo={conti.length ? (
+            <MenuScelta valore={conto ? conto.id : 'tutti'} onCambia={scegliConto} larghezzaMinima={240}
+              opzioni={[{ valore: 'tutti', testo: 'Tutti i conti', icona: 'wallet' }, ...conti.map((x) => ({ valore: x.id, testo: x.nome, icona: x.icona }))]}>
+              {({ ref, apri, aperto }) => (
+                <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`Scegli il conto: ${conto ? conto.nome : 'Tutti i conti'}`} aria-expanded={aperto} onPress={apri}
+                  style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], minHeight: compatto ? 44 : undefined }}>
+                  <Testo stile={compatto ? 'corpo-forte' : 'titolo-scheda'} colore="testo-secondario" style={{ flexShrink: 1, minWidth: 0 }}>{titoloSaldo}</Testo>
+                  <Icona nome="chevron-down" misura={16} />
+                </Pressable>
+              )}
+            </MenuScelta>
+          ) : undefined}
+          nota={saldo === null ? (conto ? `Scrivi quanto c'è su ${conto.nome}` : 'Il saldo del conto, come lo vedi in banca') : `Scritto il ${data(saldoAl, 'corta')} · tocca per cambiarlo`} />
         <NumeroChiave etichetta="Usciti" valore={euro(usciti)} icona="circle-check"
           nota={quanteUscite ? `${quanteUscite} ${quanteUscite === 1 ? 'voce spuntata' : 'voci spuntate'}` : 'Ancora nessuna voce spuntata'} />
-        <Pressable accessibilityRole="button" accessibilityLabel="Cambia quanto c'è sul conto oggi" onPress={() => setSulConto(true)} style={{ flex: 1, minWidth: 0, flexDirection: 'row', ...(compatto ? { flexBasis: '45%', flexGrow: 1 } : {}) }}>
-          <NumeroChiave etichetta="Sul conto oggi" valore={saldo === null ? 'Scrivilo' : euro(saldo)} icona="wallet"
-            nota={saldo === null ? 'Il saldo del conto, come lo vedi in banca' : `Scritto il ${data(profilo.sul_conto_al, 'corta')} · tocca per cambiarlo`} />
-        </Pressable>
         <NumeroChiave etichetta="Devono uscire" valore={euro(devonoUscire)} icona="arrow-up-right"
           nota={[quanteDaSpuntare ? `${quanteDaSpuntare} ${quanteDaSpuntare === 1 ? 'voce' : 'voci'} da spuntare` : 'Tutto spuntato'].join(' · ')} />
-        <NumeroChiave etichetta="Avanzo" valore={avanzo === null ? '—' : euro(avanzo, { segno: true })} icona="scale" tono={avanzo === null ? 'normale' : avanzo < 0 ? 'errore' : 'ok'}
-          nota={avanzo === null ? 'Scrivi quanto c\'è sul conto' : avanzo < 0 ? `Sul conto mancano ${euro(-avanzo)} per arrivare a fine mese` : 'Resta sul conto dopo le uscite del mese'} />
+        <NumeroChiave etichetta="Avanzo" valore={avanzo === null ? '—' : euro(avanzo, { segno: true })} icona="scale" tono={avanzo === null ? 'normale' : avanzo < 0 ? 'errore' : avanzo < 0.005 ? 'attenzione' : 'ok'}
+          nota={avanzo === null ? (conto ? `Scrivi quanto c'è su ${conto.nome}` : 'Scrivi quanto c\'è sul conto') : avanzo < 0 ? `Sul conto mancano ${euro(-avanzo)} per sostenere le spese` : 'Resta sul conto dopo le uscite del mese'} />
       </View>
       {fuori ? createPortal(
         <View accessibilityRole="summary" style={{ position: 'fixed', top: compatto ? 0 : 12, right: compatto ? 0 : 16, ...(compatto ? { left: 0 } : {}), zIndex: 50, flexDirection: 'row', justifyContent: compatto ? 'space-between' : 'flex-start', gap: compatto ? 4 : d['spazio-colonne'], paddingVertical: compatto ? 6 : 8, paddingHorizontal: compatto ? 12 : 14, ...(compatto ? { paddingTop: 'max(6px, env(safe-area-inset-top))' } : {}),
@@ -200,10 +222,10 @@ export function Panoramica() {
           // si stacca dalla pagina mentre si scorre, in tutti e due i temi, senza mai un blocco bianco.
           backgroundColor: c['sfondo-scheda'], borderRadius: compatto ? 0 : d['raggio-scheda'], borderWidth: 2, borderColor: c['testo-terziario'],
           boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as never}>
-          {([['Usciti', euro(usciti), 'testo-primario'], ['Sul conto', saldo === null ? '—' : euro(saldo), 'testo-primario'], ['Devono uscire', euro(devonoUscire), 'testo-primario'],
-            ['Avanzo', avanzo === null ? '—' : euro(avanzo, { segno: true }), avanzo !== null && avanzo < 0 ? 'testo-errore' : 'testo-primario']] as const).map(([et, val, col]) => (
+          {([[conto ? conto.nome : 'Sui conti', saldo === null ? '—' : euro(saldo), 'testo-primario'], ['Usciti', euro(usciti), 'testo-primario'], ['Devono uscire', euro(devonoUscire), 'testo-primario'],
+            ['Avanzo', avanzo === null ? '—' : euro(avanzo, { segno: true }), avanzo === null ? 'testo-primario' : avanzo < 0 ? 'testo-errore' : avanzo < 0.005 ? 'testo-attenzione' : 'testo-ok']] as const).map(([et, val, col]) => (
             <View key={et} style={{ minWidth: 0, flexShrink: 1 }}>
-              <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire').replace('Sul conto', 'Conto') : et}</Testo>
+              <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire').replace('Sui conti', 'Conti') : et}</Testo>
               <Testo stile="corpo-forte" colore={col} numberOfLines={1} style={compatto ? { fontSize: 13, lineHeight: 18 } : undefined}>{val}</Testo>
             </View>
           ))}
@@ -261,38 +283,27 @@ export function Panoramica() {
           {spente ? nonAttive.map((s) => <VoceDaSpuntare key={s.id} nome={s.nome} conto={s.conto ?? '—'} importo={euro(s.mia_quota)} icona={s.icona ?? 'ellipsis'} salvadanaio={colSalvadanaio(s)} fatta={false} onApri={() => setSpesa(s)} />) : null}
         </View>
       ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>
-        {proiezione ? (
-          <Scheda titolo="Se nulla cambia" icona="trending-up" style={{ flex: 1 }}>
-            <View>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">Patrimonio con l'avanzo di ogni mese, contando la fine delle rate</Testo>
-              {[1, 12, 60].map((m) => {
-                const punto = proiezione.punti.find((x) => x.mesi === m);
-                return <RigaRata key={m} compatta icona="trending-up" nome={m === 1 ? 'Fra 1 mese' : m === 12 ? 'Fra 1 anno' : 'Fra 5 anni'} fine="" rata={euroTondi(Number(punto?.patrimonio ?? 0))} />;
-              })}
-            </View>
-          </Scheda>
-        ) : null}
-      </View>
       <DaGirareAiConti />
       <FinestraSpesa spesa={spesa === 'nuova' ? null : spesa} aperta={!!spesa} onChiudi={() => setSpesa(null)} />
       <FinestraRata rata={rata === 'nuova' ? null : rata} aperta={!!rata} onChiudi={() => setRata(null)} />
-      <FinestraSulConto aperta={sulConto} valore={profilo.sul_conto} onChiudi={() => setSulConto(false)} />
+      <FinestraSulConto aperta={sulConto} valore={saldoScritto} conto={conto} onChiudi={() => setSulConto(false)} />
     </>
   );
 }
 
 // "Sul conto oggi": il saldo scritto a mano, come la cella dell'Excel.
-function FinestraSulConto({ aperta, valore, onChiudi }: { aperta: boolean; valore: string | null; onChiudi: () => void }) {
+function FinestraSulConto({ aperta, valore, conto, onChiudi }: { aperta: boolean; valore: string | null; conto: Conto | null; onChiudi: () => void }) {
   const [testo, setTesto] = useState('');
   useEffect(() => { if (aperta) setTesto(importoInTesto(valore)); }, [aperta, valore]);
   const salva = async () => {
-    await modifica('/profilo', { sul_conto: testo.trim() ? serve(leggiImporto(testo), 'Scrivi il saldo, es. 450,79 (anche negativo, es. -20,00)') : null });
+    const importo = testo.trim() ? serve(leggiImporto(testo), 'Scrivi il saldo, es. 450,79 (anche negativo, es. -20,00)') : null;
+    if (conto) await sostituisci(`/conti/${conto.id}/saldo`, { importo });
+    else await modifica('/profilo', { sul_conto: importo });
   };
   return (
-    <FinestraModulo titolo="Sul conto oggi" icona="wallet" aperta={aperta} onChiudi={onChiudi} onSalva={salva}>
+    <FinestraModulo titolo={conto ? `Sul conto oggi · ${conto.nome}` : 'Sul conto oggi'} icona={conto?.icona ?? 'wallet'} aperta={aperta} onChiudi={onChiudi} onSalva={salva}>
       <Campo etichetta="Quanto c'è sul conto" valore={testo} onCambia={setTesto} inputMode="decimal" segnaposto="0,00" autoFocus
-        aiuto="Il saldo del conto da cui escono le spese del mese, come lo vedi in banca. Serve a calcolare l'avanzo." />
+        aiuto={conto ? `Il saldo di ${conto.nome}, come lo vedi in banca. Serve a calcolare l'avanzo di questo conto.` : "Il saldo del conto da cui escono le spese del mese, come lo vedi in banca. Serve a calcolare l'avanzo."} />
     </FinestraModulo>
   );
 }

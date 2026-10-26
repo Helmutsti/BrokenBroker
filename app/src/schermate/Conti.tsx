@@ -3,11 +3,11 @@ import { View } from 'react-native';
 import { Interruttore, Pulsante } from '../componenti/base.tsx';
 import { Campo, SceltaIcona } from '../componenti/campi.tsx';
 import { Intestazione, Scheda, SchedaConto, Vuoto } from '../componenti/composti.tsx';
-import { cancella, crea, leggi, modifica, useDati } from '../dati/api.ts';
-import type { Condivisione, Conto, ElencoSpese, Persona, Rata } from '../dati/tipi.ts';
+import { cancella, crea, modifica, useDati } from '../dati/api.ts';
+import type { Condivisione, Conto, ElencoSpese, Rata } from '../dati/tipi.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento } from './comuni.tsx';
-import { FinestraModulo, serve } from './moduli.tsx';
+import { ConErrore, FinestraModulo, RiquadroCondivisione, salvaCondivisione, serve } from './moduli.tsx';
 
 // SC-06 Conti: l'elenco dei conti da cui si paga, con nome e icona. Niente saldi né movimenti.
 export function Conti() {
@@ -42,8 +42,7 @@ export function Conti() {
 }
 
 function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; aperta: boolean; onChiudi: () => void }) {
-  const persone = useDati<Persona[]>(aperta ? '/persone' : null).dati ?? [];
-  const altra = persone.find((p) => !p.io);
+  const miaCondivisione = useDati<Condivisione[]>(aperta && conto ? '/condivisioni' : null).dati?.find((x) => x.voce === 'conto' && x.voce_id === conto?.id && x.mia);
   // Quante spese e rate usano il conto: con il conto eliminato restano senza conto.
   const spese = useDati<ElencoSpese>(aperta && conto ? '/spese-previste' : null).dati;
   const rate = useDati<Rata[]>(aperta && conto ? '/rate' : null).dati;
@@ -54,33 +53,28 @@ function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; apert
   const [icona, setIcona] = useState('landmark');
   const [archiviato, setArchiviato] = useState(false);
   const [condiviso, setCondiviso] = useState(false);
-  const [email, setEmail] = useState('');
+  const [con, setCon] = useState<string | null>(null);
   useEffect(() => {
     if (!aperta) return;
-    setNome(conto?.nome ?? ''); setIcona(conto?.icona ?? 'landmark'); setArchiviato(conto?.archiviato ?? false); setCondiviso(conto?.condiviso ?? false); setEmail('');
+    setNome(conto?.nome ?? ''); setIcona(conto?.icona ?? 'landmark'); setArchiviato(conto?.archiviato ?? false); setCondiviso(conto?.condiviso ?? false); setCon(null);
   }, [aperta, conto]);
   const salva = async () => {
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome'), icona, ...(conto ? { archiviato } : {}) };
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), icona, ...(conto ? { archiviato } : {}) };
     const salvato = conto ? await modifica<Conto>(`/conti/${conto.id}`, corpo) : await crea<Conto>('/conti', corpo);
     if (!salvato.mio) return;
-    const esistente = (await leggi<Condivisione[]>('/condivisioni')).find((c) => c.voce === 'conto' && c.voce_id === salvato.id && c.mia);
-    if (condiviso && !esistente) await crea('/condivisioni', { voce: 'conto', id: salvato.id, email: altra?.email ?? serve(email.trim(), 'Scrivi l’email della persona con cui condividerlo') });
-    if (!condiviso && esistente) await cancella(`/condivisioni/${esistente.id}`);
+    await salvaCondivisione('conto', salvato.id, condiviso, con ?? miaCondivisione?.condiviso_con_id ?? null);
   };
   return (
     <FinestraModulo titolo={conto ? conto.nome : 'Nuovo conto'} icona={icona} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
       onElimina={conto?.mio ? () => cancella(`/conti/${conto.id}`).then(() => undefined) : undefined} etichettaElimina="Elimina conto"
       confermaElimina={conto ? { nome: `«${conto.nome}»`, dettaglio: collegate ? `${collegate} restano senza conto.` : 'Nessuna spesa o rata usa questo conto.' } : undefined}>
-      <Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. BPER" autoFocus={!conto} />
-      <SceltaIcona valore={icona} onCambia={setIcona} />
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
+        <SceltaIcona valore={icona} onCambia={setIcona} />
+        <View style={{ flex: 1, minWidth: 0 }}><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. BPER" autoFocus={!conto} /></ConErrore></View>
+      </View>
       {!conto || conto.mio ? (
-        <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-            <Interruttore acceso={condiviso} onCambia={setCondiviso} etichetta="Condiviso" />
-            <Testo style={{ flex: 1 }}>{condiviso ? `Condiviso${altra ? ` con ${altra.nome}` : ''}: lo vede e lo usa nelle spese` : 'Privato'}</Testo>
-          </View>
-          {condiviso && !altra && !conto?.condiviso ? <Campo etichetta="Email dell'altra persona" valore={email} onCambia={setEmail} iconaPrima="mail" inputMode="email" /> : null}
-        </>
+        <ConErrore campo="condivisione"><RiquadroCondivisione aperta={aperta} nome="questo conto" condiviso={condiviso} onCambia={setCondiviso} con={con ?? miaCondivisione?.condiviso_con_id ?? null} onCon={setCon}
+          giaCondivisa={!!conto?.condiviso && conto.mio} testoAttivo="Lo vede e lo usa nelle spese." /></ConErrore>
       ) : <Testo stile="dettaglio-normale" colore="testo-secondario">Conto condiviso con te: puoi modificarlo, solo chi l'ha creato può eliminarlo.</Testo>}
       {conto ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
