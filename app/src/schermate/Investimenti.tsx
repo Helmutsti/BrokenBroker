@@ -81,7 +81,7 @@ export function Investimenti() {
                 <Testo stile="corpo-forte" colore={guadagno >= 0 ? 'testo-ok' : 'testo-errore'}>{`${guadagnoTesto(guadagno, p.guadagno_percentuale)} da sempre`}</Testo>
                 <Testo colore="testo-secondario">{`Investiti ${euro(p.messo_dentro)}`}</Testo>
                 {scelto && !scelto.conta_nel_patrimonio ? <Testo stile="dettaglio-normale" colore="testo-secondario">Portafoglio di prova: non conta nei totali generali né nel patrimonio.</Testo> : null}
-                {p.incompleto ? <Esito tono="attenzione" testo={`Alcuni prezzi mancano (${senza}): il valore è parziale e quelle voci non contano nel guadagno.`} /> : null}
+                {p.incompleto ? <Esito tono="attenzione" testo={`Alcuni prezzi mancano (${senza}): il valore è parziale e quegli asset non contano nel guadagno.`} /> : null}
               </View>
               <SceltaSegmenti etichetta="Periodo del grafico" larghezzaPiena={compatto} valore={periodo} onCambia={setPeriodo}
                 opzioni={[{ valore: '1', testo: '1 mese' }, { valore: '6', testo: '6 mesi' }, { valore: '12', testo: '1 anno' }, { valore: 'tutto', testo: 'Da sempre' }]} />
@@ -173,7 +173,7 @@ function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi }: { p: Porta
               <View key={l} style={{ gap: d['spazio-testo'] }}><Testo stile="dettaglio-normale" colore="testo-secondario">{l}</Testo><Testo stile={i === 0 ? 'titolo-scheda' : 'corpo-forte'} colore={col}>{v}</Testo></View>
             ))}
           </View>
-          {p.incompleto ? <Esito tono="attenzione" testo={`Mancano ${senza} ${senza === 1 ? 'prezzo' : 'prezzi'}: il valore è parziale e ${senza === 1 ? 'quella voce non conta' : 'quelle voci non contano'} nel guadagno.`} /> : null}
+          {p.incompleto ? <Esito tono="attenzione" testo={`Mancano ${senza} ${senza === 1 ? 'prezzo' : 'prezzi'}: il valore è parziale e ${senza === 1 ? "quell'asset non conta" : 'quegli asset non contano'} nel guadagno.`} /> : null}
           {vecchi > 0 ? <Testo stile="dettaglio-normale" colore="testo-attenzione">{`${vecchi} ${vecchi === 1 ? 'prezzo non aggiornato' : 'prezzi non aggiornati'} da qualche giorno.`}</Testo> : null}
           {p.vuoto ? <Vuoto testo="Portafoglio vuoto. Aggiungi un titolo, un bene non quotato o un metallo." /> : null}
           {!p.vuoto && !dett ? <Caricamento /> : null}

@@ -537,11 +537,18 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 }
 
 // ---- CMP-31 Riga categoria ----
-export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica }: {
-  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void;
+export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina }: {
+  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
+  const pulsanti = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], flexShrink: 0 }}>
+      {onNuovo ? <PulsanteIcona icona="plus" etichetta={`Nuova sottocategoria di ${nome}`} onPress={onNuovo} /> : null}
+      <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />
+      {onElimina ? <PulsanteIcona icona="trash-2" etichetta={`Elimina ${nome}`} onPress={onElimina} /> : null}
+    </View>
+  );
   return (
     <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
       style={{ flexDirection: 'row', alignItems: 'center', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: compatto ? 0 : d['margine-voce-h'], borderRadius: d['raggio-controllo'] }}>
@@ -554,10 +561,11 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, perc
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
         {compatto && percentuale !== undefined ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`${percentuale} dello stipendio`}</Testo> : null}
+        {compatto ? <View style={{ alignSelf: 'flex-start' }}>{pulsanti}</View> : null}
       </View>
       {compatto ? <View style={{ alignItems: 'flex-end', flexShrink: 0 }}><Testo stile="corpo-forte">{speso}</Testo></View> : <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>}
       {!compatto && percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
-      <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />
+      {compatto ? null : pulsanti}
     </View>
   );
 }
@@ -948,7 +956,7 @@ export function RigaObiettivo({ nome, scadenza, messo, cifra, avanzamento, tonoB
 // `avviso`: riga piccola sotto il nome (prezzo vecchio o mancante); `azione`: testo premibile accanto (es. «Scrivi il prezzo»).
 export type RigaTabellaPortafoglio = { chiave: string; nome: string; dettaglio: string; prezzo: string; valore: string; guadagno: string; peso: string; positivo: boolean | null; onApri?: () => void;
   avviso?: { testo: string; tono: 'attenzione' | 'errore' }; azione?: { etichetta: string; onPress: () => void } };
-export function TabellaPortafoglio({ righe, titoloColonna = 'Voce', titoloPrezzo = 'Prezzo' }: { righe: RigaTabellaPortafoglio[]; titoloColonna?: string; titoloPrezzo?: string }) {
+export function TabellaPortafoglio({ righe, titoloColonna = 'Asset', titoloPrezzo = 'Prezzo' }: { righe: RigaTabellaPortafoglio[]; titoloColonna?: string; titoloPrezzo?: string }) {
   const { c } = useTema();
   const coloreGuadagno = (r: RigaTabellaPortafoglio): NomeColore => (r.positivo === null ? 'testo-secondario' : r.positivo ? 'testo-ok' : 'testo-errore');
   const sotto = (r: RigaTabellaPortafoglio) => (r.avviso || r.azione ? (

@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { anelloFocus, Esito, Pulsante, SceltaSegmenti, type StatoPressione } from '../componenti/base.tsx';
+import { ALTEZZA_CONTROLLO, anelloFocus, Esito, Pulsante, SceltaSegmenti, type StatoPressione } from '../componenti/base.tsx';
 import { Icona } from '../componenti/Icona.tsx';
 import { Check } from 'lucide-react-native';
 import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
@@ -27,6 +27,7 @@ export function Categorie() {
   const [tipo, setTipo] = useState<'uscita' | 'entrata'>('uscita');
   const [aperte, setAperte] = useState<Set<string>>(new Set());
   const [aperta, setAperta] = useState<Categoria | { padre: string | null } | null>(null);
+  const [daEliminare, setDaEliminare] = useState<Categoria | null>(null);
   const tutte = rif.categorie;
   const figli = (id: string | null) => tutte.filter((c) => c.padre_id === id && c.tipo === tipo).sort((a, b) => a.ordine - b.ordine || a.nome.localeCompare(b.nome));
   const spesoDiretto = new Map(spese.map((s) => [s.categoria_id, Number(s.speso)]));
@@ -43,7 +44,8 @@ export function Categorie() {
       const s = speso(c.id);
       righe.push(<RigaCategoria key={c.id} livello={Math.min(livello, 2)} ramo={ramo} nome={c.nome} sottocategorie={sotto.length ? `${sotto.length} sottocategorie` : undefined}
         speso={s ? euro(s) : '—'} percentuale={s && stipendio > 0 ? `${numero((s / stipendio) * 100, 1)}%` : '—'} icona={rif.iconaCategoria(c.id)} ereditata={!c.icona} colore={c.colore}
-        onApriChiudi={() => { const n = new Set(aperte); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); setAperte(n); }} onModifica={() => setAperta(c)} />);
+        onApriChiudi={() => { const n = new Set(aperte); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); setAperte(n); }} onModifica={() => setAperta(c)}
+        onNuovo={() => setAperta({ padre: c.id })} onElimina={() => setDaEliminare(c)} />);
       if (ramo === 'aperto') visita(c.id, livello + 1);
     }
   };
@@ -61,12 +63,13 @@ export function Categorie() {
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Spese a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 80, textAlign: 'right' }}>% stipendio</Testo>
-            <View style={{ width: 36 }} />
+            <View style={{ width: 3 * ALTEZZA_CONTROLLO + 2 * d['spazio-testo'] }} />
           </View>}
           {righe}
         </View>
       </Scheda>
       <FinestraCategoria stato={aperta} tipo={tipo} onChiudi={() => setAperta(null)} />
+      <FinestraEliminaCategoria categoria={daEliminare} onChiudi={() => setDaEliminare(null)} />
     </>
   );
 }
@@ -145,6 +148,36 @@ function FinestraCategoria({ stato, tipo, onChiudi }: { stato: Categoria | { pad
             : 'La categoria è in uso: scegli dove spostare le voci.'}</Testo>
         </View>
       ) : null}
+    </FinestraModulo>
+  );
+}
+
+// Eliminazione dalla riga: stesso controllo della finestra di modifica (se la categoria è in uso, prima si sceglie dove spostare le voci).
+function FinestraEliminaCategoria({ categoria: c, onChiudi }: { categoria: Categoria | null; onChiudi: () => void }) {
+  const rif = useRiferimenti();
+  const [sposta, setSposta] = useState<string | null>(null);
+  const spese = useDati<ElencoSpese>(c ? '/spese-previste' : null).dati;
+  const rate = useDati<Rata[]>(c ? '/rate' : null).dati;
+  const nSpese = c ? (spese?.spese.filter((s) => s.categoria_id === c.id).length ?? 0) : 0;
+  const nRate = c ? (rate?.filter((x) => x.categoria_id === c.id).length ?? 0) : 0;
+  const nSotto = c ? rif.categorie.filter((x) => x.padre_id === c.id).length : 0;
+  const coinvolte = nSpese + nRate + nSotto;
+  const elenco = [nSpese ? `${nSpese} ${nSpese === 1 ? 'spesa' : 'spese'}` : null, nRate ? `${nRate} ${nRate === 1 ? 'rata' : 'rate'}` : null, nSotto ? `${nSotto} ${nSotto === 1 ? 'sottocategoria' : 'sottocategorie'}` : null].filter(Boolean).join(', ');
+  useEffect(() => { setSposta(null); }, [c]);
+  const elimina = async () => {
+    if (coinvolte && !sposta) throw new Error('Scegli prima dove spostare le voci, nel campo «Sposta spese e sottocategorie su».');
+    try { await cancella(`/categorie/${c!.id}${sposta ? `?sposta_su=${sposta}` : ''}`); }
+    catch (e) { if ((e as { stato?: number }).stato === 409) throw new Error('La categoria è in uso: riprova scegliendo dove spostare le voci.'); throw e; }
+  };
+  const altre = opzioniCategorie(rif.categorie).filter((o) => o.valore !== c?.id);
+  return (
+    <FinestraModulo titolo={c ? `Eliminare «${c.nome}»?` : 'Elimina'} icona="trash-2" aperta={!!c} onChiudi={onChiudi} onSalva={elimina} etichettaSalva="Elimina">
+      {coinvolte ? (
+        <>
+          <Testo colore="testo-secondario">{`${elenco} ${coinvolte === 1 ? 'passa' : 'passano'} alla categoria che scegli qui sotto.`}</Testo>
+          <Tendina etichetta="Sposta spese e sottocategorie su" valore={sposta} onCambia={setSposta} opzioni={altre} />
+        </>
+      ) : <Testo colore="testo-secondario">Nessuna spesa o rata la usa. Non si può annullare.</Testo>}
     </FinestraModulo>
   );
 }
