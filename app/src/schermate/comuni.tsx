@@ -53,6 +53,11 @@ export const segnoQuota = (s: Spesa) => (s.mia_percentuale === 50 ? ' · ½' : s
 // ---- Annuali e obiettivi (proposta v2) ----
 
 export const tuttiGliObiettivi = (xs: Obiettivo[]): Obiettivo[] => xs.flatMap((o) => [o, ...tuttiGliObiettivi(o.figli)]);
+// Filtro per conto in Salvadanai (decisione 45): 'tutti', 'senza' (nessun conto) o l'id di un conto.
+// Un salvadanaio conta per il suo conto che vale (proprio o ereditato) e solo con i soldi messi direttamente in lui (`versato`).
+export const suQuelConto = (o: Obiettivo, filtro: string) => (filtro === 'tutti' ? true : filtro === 'senza' ? !o.conto_id : o.conto_id === filtro);
+export const sommaSuConto = (radici: Obiettivo[], filtro: string) =>
+  tuttiGliObiettivi(radici).filter((o) => suQuelConto(o, filtro)).reduce((t, o) => t + Number(o.versato), 0);
 
 // Spese annuali o periodiche: escono ogni N mesi (N > 1), budget esclusi; non le
 // spese "mettici da parte", che riempiono un salvadanaio invece di uscire.

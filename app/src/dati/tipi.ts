@@ -28,6 +28,8 @@ export type Traguardo = { id: string; nome: string; importo: string; ordine: num
 export type Obiettivo = {
   id: string; padre_id: string | null; nome: string; traguardo: string | null; scadenza: string | null; crea_spesa: boolean; spesa_creata_id: string | null; icona: string | null; nascosto: boolean;
   bloccato_da: Blocco | null; // nasce da una spesa
+  // Conto del salvadanaio: quello scelto (conto_proprio_id) o, se manca, quello del padre (conto_ereditato).
+  conto_proprio_id: string | null; conto_id: string | null; conto: string | null; conto_icona: string | null; conto_ereditato: boolean;
   mio: boolean; condiviso: boolean; versato: string; saldo: string; traguardo_effettivo: string | null; percentuale: number | null;
   traguardi: Traguardo[]; figli: Obiettivo[];
   paga_spesa: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string; senza_giorno: boolean } | null;

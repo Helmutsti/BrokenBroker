@@ -405,5 +405,56 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   verifica(pro1.j.nel_mese === true && pro6.j.nel_mese === true && pro6.j.senza_giorno === true, 'promemoria cambiato da 1 a 6 mesi non sparisce', [pro1.j, pro6.j]);
 }
 
+// Conto del salvadanaio (decisione 45): il sotto-salvadanaio senza conto proprio eredita quello del padre.
+{
+  const cA = (await r('POST', '/conti', A, { nome: 'Conto A', tipo: 'corrente' })).j;
+  const cB = (await r('POST', '/conti', A, { nome: 'Conto B', tipo: 'risparmio' })).j;
+  const cBruno = (await r('POST', '/conti', Bt, { nome: 'Conto di Bruno', tipo: 'corrente' })).j;
+  const nodi = (xs) => xs.flatMap((o) => [o, ...nodi(o.figli)]);
+  const dammi = async (id) => nodi((await r('GET', '/obiettivi', A)).j).find((o) => o.id === id);
+  const padre = (await r('POST', '/obiettivi', A, { nome: 'Padre conti', conto_id: cA.id })).j;
+  const figlioEred = (await r('POST', '/obiettivi', A, { nome: 'Figlio ereditato', padre_id: padre.id })).j;
+  const figlioB = (await r('POST', '/obiettivi', A, { nome: 'Figlio su B', padre_id: padre.id, conto_id: cB.id })).j;
+  const nipote = (await r('POST', '/obiettivi', A, { nome: 'Nipote ereditato', padre_id: figlioB.id })).j;
+  const libero = (await r('POST', '/obiettivi', A, { nome: 'Senza conto' })).j;
+  for (const [o, imp] of [[padre, '100'], [figlioEred, '50'], [figlioB, '200'], [nipote, '30'], [libero, '7']]) await r('POST', `/obiettivi/${o.id}/versamenti`, A, { importo: imp });
+  const p1 = await dammi(padre.id), e1 = await dammi(figlioEred.id), b1 = await dammi(figlioB.id), n1 = await dammi(nipote.id), l1 = await dammi(libero.id);
+  verifica(p1.conto_id === cA.id && p1.conto === 'Conto A' && p1.conto_ereditato === false && p1.conto_proprio_id === cA.id && p1.conto_icona, 'conto proprio del padre', p1);
+  verifica(e1.conto_id === cA.id && e1.conto === 'Conto A' && e1.conto_ereditato === true && e1.conto_proprio_id === null, 'il figlio senza conto eredita quello del padre', e1);
+  verifica(b1.conto_id === cB.id && b1.conto_ereditato === false, 'il figlio con un conto suo lo tiene', b1);
+  verifica(n1.conto_id === cB.id && n1.conto === 'Conto B' && n1.conto_ereditato === true, 'il nipote eredita dal figlio, non dal nonno', n1);
+  verifica(l1.conto_id === null && l1.conto === null && l1.conto_ereditato === false, 'salvadanaio senza conto', l1);
+  // Somme del filtro: ogni salvadanaio conta una volta, col conto che vale e con i soldi messi direttamente in lui.
+  const tutti = nodi((await r('GET', '/obiettivi', A)).j).filter((o) => [padre.id, figlioEred.id, figlioB.id, nipote.id, libero.id].includes(o.id));
+  const somma = (f) => tutti.filter((o) => (f === 'senza' ? !o.conto_id : o.conto_id === f)).reduce((t, o) => t + Number(o.versato), 0);
+  verifica(somma(cA.id) === 150 && somma(cB.id) === 230 && somma('senza') === 7, 'somme per conto senza doppi conteggi', [somma(cA.id), somma(cB.id), somma('senza')]);
+  verifica(Number(p1.saldo) === 380 && somma(cA.id) + somma(cB.id) === 380, 'le somme per conto tornano col saldo del padre', p1.saldo);
+  // Cambiare il conto del padre cambia quello dei figli che ereditano, non di chi ha il suo.
+  const mod = await r('PATCH', `/obiettivi/${padre.id}`, A, { conto_id: cB.id });
+  verifica(mod.s === 200 && (await dammi(figlioEred.id)).conto_id === cB.id && (await dammi(figlioB.id)).conto_id === cB.id, 'cambia il conto del padre: i figli che ereditano lo seguono', mod.j);
+  // Tolto il conto al padre, il figlio ereditato resta senza conto; si può togliere anche quello proprio.
+  await r('PATCH', `/obiettivi/${padre.id}`, A, { conto_id: null });
+  await r('PATCH', `/obiettivi/${figlioB.id}`, A, { conto_id: null });
+  const e2 = await dammi(figlioEred.id), b2 = await dammi(figlioB.id);
+  verifica(e2.conto_id === null && e2.conto_ereditato === false && b2.conto_id === null && b2.conto_proprio_id === null, 'togliere il conto lo toglie ai figli che ereditano', [e2, b2]);
+  // Un conto che non si vede non si può scegliere; uno inesistente neppure.
+  verifica((await r('PATCH', `/obiettivi/${padre.id}`, A, { conto_id: cBruno.id })).s === 404, 'conto di un altro (non condiviso) rifiutato');
+  verifica((await r('POST', '/obiettivi', A, { nome: 'Con conto altrui', conto_id: cBruno.id })).s === 404, 'creare con il conto di un altro rifiutato');
+  verifica((await r('PATCH', `/obiettivi/${padre.id}`, A, { conto_id: 'non-un-id' })).s === 400, 'conto_id non valido rifiutato');
+  // Cancellando il conto il salvadanaio resta, senza conto.
+  await r('PATCH', `/obiettivi/${libero.id}`, A, { conto_id: cA.id });
+  await r('DELETE', `/conti/${cA.id}`, A);
+  const l2 = await dammi(libero.id);
+  verifica(l2 && l2.conto_id === null, 'conto cancellato: il salvadanaio resta senza conto', l2);
+  // Un salvadanaio nato da una spesa (decisione 37) tiene bloccato il resto ma il conto si cambia.
+  const spesaConto = (await r('POST', '/spese-previste', A, { nome: 'Assicurazione conto', importo: '240', ogni_mesi: 12, prossima_scadenza: '2027-03-15' })).j;
+  await r('PATCH', `/spese-previste/${spesaConto.id}`, A, { nuovo_salvadanaio: {} });
+  const nato = nodi((await r('GET', '/obiettivi', A)).j).find((o) => o.nome === 'Assicurazione conto');
+  verifica(nato?.bloccato_da, 'salvadanaio nato dalla spesa è bloccato', nato);
+  const cambioConto = await r('PATCH', `/obiettivi/${nato.id}`, A, { conto_id: cB.id });
+  verifica(cambioConto.s === 200 && cambioConto.j.conto_id === cB.id, 'salvadanaio bloccato: il conto resta modificabile', cambioConto.j);
+  verifica((await r('PATCH', `/obiettivi/${nato.id}`, A, { nome: 'Altro' })).s === 409, 'salvadanaio bloccato: il nome no');
+}
+
 console.log(`prove: ${ok} passate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

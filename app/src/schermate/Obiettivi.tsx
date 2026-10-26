@@ -9,7 +9,7 @@ import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImp
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import { meseDi, meseDiVoce } from '../mesePersonale.ts';
-import { Caricamento, fraMesi, proposta, prossimeAnnuali } from './comuni.tsx';
+import { Caricamento, fraMesi, proposta, prossimeAnnuali, sommaSuConto, suQuelConto } from './comuni.tsx';
 import { Affiancati, ConErrore, FinestraModulo, Meta, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
@@ -45,7 +45,7 @@ const pctDi = (o: Obiettivo) => (o.traguardo_effettivo && o.percentuale !== null
 
 // Dentro Salvadanai: ogni salvadanaio ha il suo riquadro (richiesta di Manuel), con quanto
 // c'è, i traguardi di copertura e i sotto-salvadanai annidati, in ordine di scadenza.
-export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
+export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; filtro?: string }) {
   const tutti = useDati<Obiettivo[]>('/obiettivi');
   const dati = tutti.dati ?? null, errore = tutti.errore;
   const spese = useDati<ElencoSpese>('/spese-previste').dati;
@@ -71,17 +71,18 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
   const apriChiudi = (id: string) => setAperti((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // Sotto-salvadanai annidati: ogni livello ha un rientro con una linea a sinistra e il suo "Aggiungi dentro".
-  const albero = (figli: Obiettivo[], livello = 0): ReactNode => (
+  const albero = (figli: Obiettivo[], padreConto: string | null, livello = 0): ReactNode => (
     <View style={{ gap: d['spazio-pillole'] }}>
       {figli.map((f) => (
         <View key={f.id} style={{ gap: d['spazio-pillole'] }}>
           <RigaSalvadanaio variante="sotto" nome={f.nome} icona={iconaDi(f)} valore={f.percentuale ?? 0} tono={tonoDi(f.percentuale)} cifra={cifraDi(f)} percentuale={pctDi(f)} scadenza={scadenzaDi(f, inizio)}
+            conto={f.conto && !f.conto_ereditato && f.conto_id !== padreConto ? { nome: f.conto, icona: f.conto_icona } : undefined}
             nota={f.paga_spesa ? `Esce a ${nomeMese(meseDi(f.paga_spesa.prossima, inizio)).toLowerCase()} · ${euro(Number(f.paga_spesa.importo) / f.paga_spesa.ogni_mesi)} al mese` : undefined}
             onCifra={() => setVersa(f)} onModifica={() => setModifica({ obiettivo: f })} />
           {f.figli.length ? (
             <View style={{ gap: d['spazio-pillole'], paddingLeft: d['margine-voce-h'], borderLeftWidth: d['misura-bordo-forte'], borderLeftColor: c['bordo-separatore'] }}>
               {rigaPropria(f, () => setVersa(f))}
-              {albero(f.figli, livello + 1)}
+              {albero(f.figli, f.conto_id, livello + 1)}
               <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta={`Aggiungi dentro ${f.nome}`} icona="plus" onPress={() => setModifica({ obiettivo: null, padre: f.id })} /></View>
             </View>
           ) : null}
@@ -97,13 +98,16 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
     const ordinatiTr = [...o.traguardi].sort((a, b) => Number(a.importo) - Number(b.importo));
     const visibili = aperti.has(o.id) ? ordinatiTr : ordinatiTr.slice(0, 3);
     const nota = o.alimentato_da ? `promemoria in Spese ${euro(o.alimentato_da.importo)} ${o.alimentato_da.ogni_mesi === 12 ? "all'anno" : o.alimentato_da.ogni_mesi && o.alimentato_da.ogni_mesi > 1 ? `ogni ${o.alimentato_da.ogni_mesi} mesi` : 'al mese'}` : '';
+    // Con un conto scelto in alto: quanto di questo salvadanaio sta su quel conto (il resto è su altri conti).
+    const notaFiltro = filtro === 'tutti' ? '' : `${filtro === 'senza' ? 'Senza conto' : `Su ${rif.conti.find((x) => x.id === filtro)?.nome ?? 'questo conto'}`}: ${euro(sommaSuConto([o], filtro))}`;
     return (
       <View key={o.id} {...{ onMouseEnter: () => setSopra(o.id), onMouseLeave: () => setSopra(null) }} style={{ width: '100%' }}>
         <Scheda style={{ width: '100%' }}>
           <View style={{ gap: d['spazio-blocco'] }}>
-            <RigaSalvadanaio variante="testata" nome={o.nome} icona={iconaDi(o)} valore={o.percentuale ?? 0} tono={mancaPer(o) ? 'attenzione' : tonoDi(o.percentuale)} cifra={cifraDi(o)} percentuale={pctDi(o)} scadenza={scadenzaDi(o, inizio)} nota={nota || undefined}
+            <RigaSalvadanaio variante="testata" nome={o.nome} icona={iconaDi(o)} valore={o.percentuale ?? 0} tono={mancaPer(o) ? 'attenzione' : tonoDi(o.percentuale)} cifra={cifraDi(o)} percentuale={pctDi(o)} scadenza={scadenzaDi(o, inizio)} nota={[nota, notaFiltro].filter(Boolean).join(' · ') || undefined}
+              conto={o.conto ? { nome: o.conto, icona: o.conto_icona } : undefined}
               matitaNascosta={!compatto && sopra !== o.id} onCifra={() => setVersa(o)} onModifica={() => setModifica({ obiettivo: o })} />
-            {o.figli.length ? <View style={{ gap: d['spazio-pillole'] }}>{rigaPropria(o, () => setVersa(o))}{albero(o.figli)}</View> : null}
+            {o.figli.length ? <View style={{ gap: d['spazio-pillole'] }}>{rigaPropria(o, () => setVersa(o))}{albero(o.figli, o.conto_id)}</View> : null}
             {o.traguardi.length ? (
               <View style={{ gap: d['spazio-pillole'] }}>
                 <Esito tono={primo ? 'attenzione' : 'ok'} testo={primo
@@ -111,7 +115,7 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
                   : 'Copre per intero tutti i traguardi.'} />
                 {visibili.map((t) => (
                   <RigaSalvadanaio key={t.id} variante="sotto" nome={t.nome} icona="shield" valore={t.percentuale} tono={t.percentuale >= 100 ? 'ok' : 'attenzione'}
-                    cifra={`${euro(Math.min(Number(o.saldo), Number(t.importo)))}/${euro(t.importo)}`} percentuale={percento(t.percentuale)}
+                    cifra={euro(t.importo)} percentuale={percento(t.percentuale)}
                     onCifra={() => setTraguardo({ obiettivo: o, traguardo: t })} onModifica={() => setTraguardo({ obiettivo: o, traguardo: t })} />
                 ))}
                 {ordinatiTr.length > 3 ? (
@@ -132,7 +136,7 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
   };
 
   // In ordine di scadenza, poi quelli senza scadenza per nome.
-  const ordinati = [...dati].sort((a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it'));
+  const ordinati = dati.filter((o) => filtro === 'tutti' || tuttiGliObiettivi([o]).some((x) => suQuelConto(x, filtro))).sort((a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it'));
   // Stima dell'altezza di un riquadro (sotto-salvadanai nell'albero + traguardi visibili, max 3, + avviso):
   // ogni riquadro va, in ordine, nella colonna più leggera finora (due colonne indipendenti, senza righe).
   const contaFigli = (x: Obiettivo): number => x.figli.reduce((t, f) => t + 1 + contaFigli(f), 0);
@@ -144,6 +148,7 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
   }
   return (
     <>
+      {!ordinati.length && dati.length ? <Testo colore="testo-secondario">Nessun salvadanaio su questo conto.</Testo> : null}
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>
         {colonne.map((col, i) => (
           <View key={i} style={{ flex: 1, minWidth: 0, gap: d['spazio-blocco'] }}>{col.map(scheda)}</View>
@@ -180,11 +185,13 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
   const [ogni, setOgni] = useState<'1' | '3' | '6' | '12'>('1');
   const [quota, setQuota] = useState('');
   const [conto, setConto] = useState<string | null>(null);
+  // Su quale conto stanno i soldi: 'nessuno', 'ereditato' (come il salvadanaio superiore) o l'id di un conto.
+  const [contoSal, setContoSal] = useState('nessuno');
   useEffect(() => {
     if (!stato) return;
     setIcona(o ? iconaDi(o) : 'target');
     setNome(o?.nome ?? ''); setPadre(o?.padre_id ?? stato.padre ?? 'nessuno'); setTraguardo(importoInTesto(o?.traguardo));
-    setScadenza(o?.paga_spesa?.senza_giorno ? '' : dataInTesto(o?.scadenza)); setCreaSpesa(o?.crea_spesa ?? false); setCondiviso(o?.condiviso ?? false); setCon(null);
+    setScadenza(o?.paga_spesa?.senza_giorno ? '' : dataInTesto(o?.scadenza)); setContoSal(o?.conto_proprio_id ?? ((o?.padre_id ?? stato.padre) ? 'ereditato' : 'nessuno')); setCreaSpesa(o?.crea_spesa ?? false); setCondiviso(o?.condiviso ?? false); setCon(null);
     const a = o?.alimentato_da;
     setDaParte(!!a); setOgni(a && [3, 6, 12].includes(a.ogni_mesi ?? 1) ? (String(a.ogni_mesi) as '3' | '6' | '12') : '1'); setQuota(importoInTesto(a?.importo)); setConto(a?.conto_id ?? null);
   }, [stato]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -208,9 +215,16 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
     visita(obiettivi, 0); return out;
   }, [o, obiettivi]);
 
+  const contoDaSalvare = contoSal === 'nessuno' || contoSal === 'ereditato' ? null : contoSal;
+  // Dei conti proposti: quelli non archiviati (e quello già scelto). Un sotto-salvadanaio può prendere il conto del superiore.
+  const opzioniConto = [
+    ...(padre !== 'nessuno' ? [{ valore: 'ereditato', testo: 'Come il salvadanaio superiore', icona: 'layers' }] : []),
+    { valore: 'nessuno', testo: 'Nessun conto', icona: 'circle-x' },
+    ...rif.conti.filter((x) => !x.archiviato || x.id === o?.conto_proprio_id).map((x) => ({ valore: x.id, testo: x.nome, icona: x.icona })),
+  ];
   const salva = async () => {
     if (o && bloc) { // solo l'icona: il resto si cambia dalla spesa
-      await modifica<Obiettivo>(`/obiettivi/${o.id}`, { icona });
+      await modifica<Obiettivo>(`/obiettivi/${o.id}`, { icona, conto_id: contoDaSalvare });
       return;
     }
     // Se il salvadanaio paga una spesa, traguardo e scadenza vengono dalla spesa: non si inviano e la spesa non si tocca.
@@ -218,7 +232,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
     const t = !dallaSpesa && traguardo.trim() ? serve(leggiImporto(traguardo), 'Scrivi il traguardo, es. 2.000', 'traguardo') : null;
     const s = !dallaSpesa && scadenza.trim() ? serve(leggiData(scadenza), 'Scrivi la scadenza come GG/MM/AAAA', 'scadenza') : null;
     if (creaSpesa && !dallaSpesa && !t && !o?.figli.length) serve(null, 'Per creare la spesa serve un traguardo', 'traguardo');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), padre_id: padre === 'nessuno' ? null : padre, ...(dallaSpesa ? {} : { traguardo: t, scadenza: s }), crea_spesa: creaSpesa, icona };
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), padre_id: padre === 'nessuno' ? null : padre, ...(dallaSpesa ? {} : { traguardo: t, scadenza: s }), crea_spesa: creaSpesa, icona, conto_id: contoDaSalvare };
     const salvato = o ? await modifica<Obiettivo>(`/obiettivi/${o.id}`, corpo) : await crea<Obiettivo>('/obiettivi', corpo);
     // La spesa "mettici da parte": nasce, cambia o sparisce con l'interruttore.
     if (daParte && !bloc) {
@@ -285,8 +299,11 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto, o
             <Tendina etichetta="Da quale conto (facoltativo)" valore={conto} opzioni={rif.conti.filter((x) => !x.archiviato).map((x) => ({ valore: x.id, testo: x.nome }))} onCambia={setConto} />
           </>
         ) : null, <Interruttore acceso={daParte} onCambia={accendi} etichetta="Ricordamelo" />, true)}
-      {riquadro('Dove sta', 'Dentro un altro salvadanaio, oppure da solo.',
-        <Tendina etichetta="Dentro" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" disattivato={!!bloc} />)}
+      {riquadro('Dove sta', 'Dentro un altro salvadanaio, oppure da solo; e su quale conto stanno i suoi soldi.',
+        <>
+          <Tendina etichetta="Dentro" valore={padre} opzioni={padri} onCambia={setPadre} iconaPrima="layers" disattivato={!!bloc} />
+          <Tendina etichetta="Su quale conto" valore={padre === 'nessuno' && contoSal === 'ereditato' ? 'nessuno' : contoSal} opzioni={opzioniConto} onCambia={setContoSal} />
+        </>)}
       {riquadro('Quando lo raggiungi', 'Crea una spesa «una volta sola» che pesa su questo salvadanaio, non sul mese.', null,
         <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" disattivato={!!bloc} />)}
       {!o || o.mio ? (

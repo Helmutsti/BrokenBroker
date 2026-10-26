@@ -23,6 +23,9 @@ type Nodo = {
   alimentato_da?: { id: string; importo: string; ogni_mesi: number | null; conto_id: string | null } | null;
   // Se il salvadanaio nasce da una spesa (modulo della spesa): quali campi si cambiano solo da lì.
   bloccato_da: Blocco | null;
+  // Il conto del salvadanaio (decisione 45): conto_proprio_id è quello scelto, conto_id quello che vale
+  // (se manca eredita dal padre); conto_ereditato dice che viene dal padre. Chi non vede il conto lo vede vuoto.
+  conto_proprio_id: string | null; conto_id: string | null; conto: string | null; conto_icona: string | null; conto_ereditato: boolean;
   figli: Nodo[];
 };
 
@@ -39,8 +42,9 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
             o.proprietario_id = fp_me() as mio,
             exists (select 1 from condivisioni s where s.obiettivo_id = o.id) as condiviso,
             ${sqlBloccoObiettivo('o')} as bloccato_da,
+            c.id as conto_proprio_id, c.nome as conto, c.icona as conto_icona,
             coalesce((select sum(x.importo) from versamenti x where x.obiettivo_id = o.id), 0)::text as versato
-       from obiettivi o order by o.nome`)).rows;
+       from obiettivi o left join conti c on c.id = o.conto_id order by o.nome`)).rows;
   const traguardi = (await db.query(
     `select id, obiettivo_id, nome, importo::text as importo, ordine from traguardi_copertura order by ordine, importo`)).rows;
   const collegate = (await db.query<{ id: string; nome: string; obiettivo_id: string | null; alimenta_obiettivo_id: string | null; ogni_mesi: number | null;
@@ -51,7 +55,7 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
   const perId = new Map(nodi.map((n) => {
     const paga = collegate.find((s) => s.obiettivo_id === n.id && s.ogni_mesi && s.ogni_mesi > 1);
     const alim = collegate.find((s) => s.alimenta_obiettivo_id === n.id);
-    const nodo: Nodo = { ...n, figli: [],
+    const nodo: Nodo = { ...n, conto_id: n.conto_proprio_id, conto_ereditato: false, figli: [],
       paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui, paga.senza_giorno, inizio, paga.giorno_mese), senza_giorno: paga.senza_giorno } : null,
       alimentato_da: alim ? { id: alim.id, importo: alim.importo, ogni_mesi: alim.ogni_mesi, conto_id: alim.conto_id } : null };
     // Un salvadanaio di una spesa annuale si prepara per la prossima uscita, del suo importo.
@@ -63,6 +67,14 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
     const padre = n.padre_id ? perId.get(n.padre_id) : undefined;
     (padre ? padre.figli : radici).push(n);
   }
+  // Il conto che vale: il proprio, altrimenti quello del padre (e così via verso l'alto).
+  const risolviConto = (n: Nodo, padre?: Nodo): void => {
+    if (!n.conto_proprio_id && padre?.conto_id) {
+      n.conto_id = padre.conto_id; n.conto = padre.conto; n.conto_icona = padre.conto_icona; n.conto_ereditato = true;
+    }
+    n.figli.forEach((f) => risolviConto(f, n));
+  };
+  radici.forEach((n) => risolviConto(n));
   const calcola = (n: Nodo): void => {
     n.figli.forEach(calcola);
     const saldo = Number(n.versato) + n.figli.reduce((t, f) => t + Number(f.saldo), 0);
@@ -161,13 +173,20 @@ function leggi(c: Record<string, unknown>, nuovo: boolean) {
     scadenza: v.annullabile(c, 'scadenza', () => v.data(c, 'scadenza')),
     crea_spesa: v.booleano(c, 'crea_spesa'),
     icona: v.annullabile(c, 'icona', () => v.testo(c, 'icona', false, 60)),
+    conto_id: v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')),
     nascosto: v.booleano(c, 'nascosto'),
   };
+}
+
+// Il conto scelto deve essere uno che si vede (le chiavi esterne non guardano la visibilità).
+async function verificaConto(db: PoolClient, contoId: string | null | undefined): Promise<void> {
+  if (contoId && !(await db.query('select 1 from conti where id = $1', [contoId])).rowCount) throw nonTrovato('Conto');
 }
 
 rotteObiettivi.post('/', async (req, res) => {
   const campi = leggi(v.corpo(req.body), true);
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
+    await verificaConto(db, campi.conto_id);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
       `insert into obiettivi (proprietario_id, ${voci.map(([k]) => k).join(', ')})
@@ -180,9 +199,11 @@ rotteObiettivi.post('/', async (req, res) => {
 rotteObiettivi.patch('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
-  const set = v.setParziale(leggi(c, false), 2);
+  const campi = leggi(c, false);
+  const set = v.setParziale(campi, 2);
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
     vietaCampi(await bloccoObiettivo(db, id), Object.keys(c), erroreObiettivoBloccato);
+    await verificaConto(db, campi.conto_id);
     const { rowCount } = await db.query(`update obiettivi set ${set.sql} where id = $1`, [id, ...set.valori]);
     if (!rowCount) return undefined;
     await creaSpeseRaggiunte(db, id);

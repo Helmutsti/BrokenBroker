@@ -819,8 +819,8 @@ export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string
 // Schizzo di Manuel: icona, nome, barra, «X su Y» (si preme per cambiare la cifra) e la matita.
 // Variante «testata»: titolo del riquadro (testo più forte, matita dopo il nome, visibile in hover).
 // Variante «sotto»: riga di un sotto-salvadanaio (matita in fondo alla riga).
-export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, scadenza, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
-  scadenza?: { testo: string; tono: 'secondario' | 'attenzione' | 'errore' }; nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
+export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, conto, scadenza, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
+  scadenza?: { testo: string; tono: 'secondario' | 'attenzione' | 'errore' }; conto?: { nome: string; icona: string | null }; nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();
   const stretto = useCompatto();
@@ -837,7 +837,18 @@ export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, 
       </View>
     </Pressable>
   );
-  const dettaglio = nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null;
+  // Sotto il nome, in discreto: il conto su cui stanno i soldi e la nota.
+  const dettaglio = conto || nota ? (
+    <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
+      {conto ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+          <Icona nome={conto.icona ?? 'wallet'} misura={16} colore="testo-secondario" />
+          <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1} style={{ flexShrink: 1 }}>{conto.nome}</Testo>
+        </View>
+      ) : null}
+      {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
+    </View>
+  ) : null;
   const dataScad = scadenza ? (
     <Testo stile="dettaglio-normale" colore={scadenza.tono === 'secondario' ? 'testo-secondario' : `testo-${scadenza.tono}`} numberOfLines={1} style={{ textAlign: 'right', flexShrink: 0 }}>{scadenza.testo}</Testo>
   ) : null;
