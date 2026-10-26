@@ -820,30 +820,25 @@ export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string
 // Variante «testata»: titolo del riquadro (testo più forte, matita dopo il nome, visibile in hover).
 // Variante «sotto»: riga di un sotto-salvadanaio (matita in fondo alla riga).
 export function RigaSalvadanaio(p: Parameters<typeof RigaSalvadanaioInterna>[0]) {
-  const { c } = useTema();
-  // Scadenza in attenzione o passata: tutta la riga (o la testata) prende lo sfondo tenue del tono e la barra ne segue il colore.
+  // Scadenza in attenzione o passata: icona, nome, cifra e barra prendono il colore del tono (niente sfondo).
   const t = p.scadenza && p.scadenza.tono !== 'secondario' ? p.scadenza.tono : undefined;
-  return (
-    <View style={{ paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo-interno'], backgroundColor: t ? c[`sfondo-${t}-tenue`] : 'transparent' }}>
-      <RigaSalvadanaioInterna {...p} tono={t ?? p.tono} />
-    </View>
-  );
+  return <RigaSalvadanaioInterna {...p} tono={t ?? p.tono} allerta={t} />;
 }
-function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, conto, scadenza, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
-  scadenza?: { testo: string; tono: 'secondario' | 'attenzione' | 'errore' }; conto?: { nome: string; icona: string | null }; nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
+function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, conto, scadenza, variante = 'sotto', matitaNascosta, propria, allerta, onCifra, onModifica }: {
+  allerta?: 'attenzione' | 'errore'; scadenza?: { testo: string; tono: 'secondario' | 'attenzione' | 'errore' }; conto?: { nome: string; icona: string | null }; nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();
   const stretto = useCompatto();
   const testata = variante === 'testata';
   const matita = <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} fantasma nascosto={matitaNascosta || propria} onPress={onModifica} />;
-  const titolo = <Testo stile={testata ? 'titolo-scheda' : 'corpo-normale'} accessibilityRole={testata ? 'header' : undefined} aria-level={testata ? 2 : undefined} numberOfLines={stretto ? 2 : 1} style={{ flexShrink: 1 }}>{nome}</Testo>;
+  const titolo = <Testo stile={testata ? 'titolo-scheda' : 'corpo-normale'} accessibilityRole={testata ? 'header' : undefined} aria-level={testata ? 2 : undefined} numberOfLines={stretto ? 2 : 1} colore={allerta ? `testo-${allerta}` : undefined} style={{ flexShrink: 1 }}>{nome}</Testo>;
   const cifraPremibile = (
     <Pressable accessibilityRole="button" accessibilityLabel={`Cambia la cifra di ${nome}: ${cifra.replace('/', ' di ')}${percentuale ? `, ${percentuale}` : ''}${scadenza ? `, ${scadenza.testo}` : ''}`} onPress={onCifra}
       style={(s: StatoPressione) => [{ flexShrink: 0, minHeight: stretto ? 44 : ALTEZZA_CONTROLLO, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
         backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent', cursor: 'pointer' } as object, anelloFocus(c, s.focused)]}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: d['spazio-icona'] }}>
-        <Testo stile="corpo-forte" numberOfLines={1}>{cifra}</Testo>
-        {percentuale ? <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{percentuale}</Testo> : null}
+        <Testo stile="corpo-forte" numberOfLines={1} colore={allerta ? `testo-${allerta}` : undefined}>{cifra}</Testo>
+        {percentuale ? <Testo stile="dettaglio-normale" colore={allerta ? `testo-${allerta}` : 'testo-secondario'} numberOfLines={1}>{percentuale}</Testo> : null}
       </View>
     </Pressable>
   );
@@ -869,7 +864,7 @@ function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, 
   if (stretto && testata) return (
     <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'] }}>
-        <Tessera icona={icona} misura="piccola" />
+        <Tessera icona={icona} misura="piccola" tono={allerta} />
         <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', minHeight: 44 }}>{titolo}</View>
         {cifraConData}
         {propria ? null : matita}
@@ -882,7 +877,7 @@ function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, 
     // Telefono: in colonna, nome e cifra sopra, barra sotto.
     <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-        <Tessera icona={icona} misura="piccola" />
+        <Tessera icona={icona} misura="piccola" tono={allerta} />
         <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' }}>{titolo}</View>
         {cifraPremibile}
         {propria ? null : matita}
@@ -895,7 +890,7 @@ function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, 
     // «sotto»: icona, nome, cifra e matita sulla riga; barra sotto a tutta larghezza (come sul telefono).
     <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-        <Tessera icona={icona} misura="piccola" />
+        <Tessera icona={icona} misura="piccola" tono={allerta} />
         <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' }}>{titolo}</View>
         {cifraPremibile}
         {propria ? null : matita}
@@ -909,7 +904,7 @@ function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, 
     <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
         <View style={{ flexGrow: 0, flexShrink: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-          <Tessera icona={icona} misura="piccola" />
+          <Tessera icona={icona} misura="piccola" tono={allerta} />
           {titolo}
           {propria ? null : matita}
         </View>
