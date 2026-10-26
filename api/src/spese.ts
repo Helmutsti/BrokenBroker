@@ -7,7 +7,7 @@ import { type Periodo, scadenzaNelPeriodo } from './periodo.ts';
 // per le spese ricevute sta in spese_dati_utente (decisione 43), mai quella del creatore.
 
 export type SpesaDelMese = {
-  id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean;
+  id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null;
   conto_id: string | null; conto: string | null; categoria_id: string | null; categoria: string | null;
   categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: 'fissa' | 'budget' | 'investimento'; attiva: boolean; note: string | null; obiettivo_id: string | null;
@@ -28,7 +28,7 @@ const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
 export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string): Promise<SpesaDelMese[]> {
   const { rows } = await db.query(
-    `select s.id, s.nome, s.importo::text as importo, s.ogni_mesi, s.prossima_scadenza, s.senza_giorno, s.conto_id, co.nome as conto,
+    `select s.id, s.nome, s.importo::text as importo, s.ogni_mesi, s.prossima_scadenza, s.senza_giorno, s.giorno_mese, s.conto_id, co.nome as conto,
             c.id as categoria_id, c.nome as categoria, pc.nome as categoria_padre,
             (with recursive su as (
                select id, padre_id, icona from categorie where id = c.id
@@ -55,7 +55,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
     [p.dal, p.al, soloId ?? null]);
 
   return rows.map((s) => {
-    const scadenza = s.tipo === 'budget' ? p.dal : scadenzaNelPeriodo(s.prossima_scadenza, s.ogni_mesi, p, s.senza_giorno);
+    const scadenza = s.tipo === 'budget' ? p.dal : scadenzaNelPeriodo(s.prossima_scadenza, s.ogni_mesi, p, s.senza_giorno, s.giorno_mese);
     const pct = s.percentuale_scritta !== null ? Number(s.percentuale_scritta) : s.condivisa ? 50 : s.mia ? 100 : 0;
     const importo = Number(s.importo);
     return {

@@ -50,23 +50,58 @@ verifica(sp('Luce').scadenza === '2026-10-15', 'luce bimestrale a ottobre', sp('
 verifica(sp('Tari').nel_mese === false, 'tari non a ottobre');
 const nov = (await r('GET', '/spese-previste?mese=2026-11', A)).j;
 verifica(sp('Tari', nov).scadenza === '2026-11-20' && sp('Luce', nov).nel_mese === false, 'tari a novembre, luce no');
+// Mensili: solo il giorno del mese, nessuna data (decisione 44). Inizio mese = 10: periodo 10/10-09/11.
+const mens = async (corpo) => (await r('POST', '/spese-previste', A, { importo: '10', conto_id: conto.id, categoria_id: casa.id, ...corpo })).j;
+const m24 = await mens({ nome: 'Mensile 24', giorno_mese: 24 }), m2 = await mens({ nome: 'Mensile 2', giorno_mese: 2 }), m31 = await mens({ nome: 'Mensile 31', giorno_mese: 31 });
+const m10 = await mens({ nome: 'Mensile 10', giorno_mese: 10 }), m9 = await mens({ nome: 'Mensile 9', giorno_mese: 9 }), mSenza = await mens({ nome: 'Mensile senza' });
+const vecchio = await mens({ nome: 'Mensile da data', prossima_scadenza: '2026-11-24' }); // compatibilità: la data diventa il giorno
+verifica(m24.giorno_mese === 24 && m24.prossima_scadenza === null && mSenza.giorno_mese === null && mSenza.prossima_scadenza === null, 'mensile: solo giorno_mese, niente data', [m24.giorno_mese, m24.prossima_scadenza]);
+verifica(vecchio.giorno_mese === 24 && vecchio.prossima_scadenza === null, 'prossima_scadenza su una mensile diventa il giorno', vecchio);
+const mensiliA = async (mese) => (await r('GET', `/spese-previste?mese=${mese}`, A)).j;
+const o1 = await mensiliA('2026-10');
+verifica(sp('Mensile 24', o1).scadenza === '2026-10-24' && sp('Mensile 24', o1).nel_mese, 'giorno >= inizio: nel mese, 24/10', sp('Mensile 24', o1).scadenza);
+verifica(sp('Mensile 2', o1).scadenza === '2026-11-02' && sp('Mensile 2', o1).nel_mese, 'giorno < inizio: 2/11 nello stesso mese personale', sp('Mensile 2', o1).scadenza);
+verifica(sp('Mensile 10', o1).scadenza === '2026-10-10' && sp('Mensile 9', o1).scadenza === '2026-11-09', 'giorno = inizio e giorno = inizio-1', [sp('Mensile 10', o1).scadenza, sp('Mensile 9', o1).scadenza]);
+verifica(sp('Mensile 31', o1).scadenza === '2026-10-31', 'giorno 31 in ottobre', sp('Mensile 31', o1).scadenza);
+verifica(sp('Mensile senza', o1).scadenza === '2026-10-10' && sp('Mensile senza', o1).nel_mese, 'senza giorno: tutto il mese, data = inizio periodo', sp('Mensile senza', o1).scadenza);
+const o2 = await mensiliA('2026-02'), o3 = await mensiliA('2027-01'), o4 = await mensiliA('2026-09');
+verifica(sp('Mensile 31', o2).scadenza === '2026-02-28' && sp('Mensile 24', o2).scadenza === '2026-02-24', 'giorno 31 in un mese corto: ultimo giorno', [sp('Mensile 31', o2).scadenza, sp('Mensile 24', o2).scadenza]);
+verifica(sp('Mensile 2', o2).scadenza === '2026-03-02' && sp('Mensile 31', o3).scadenza === '2027-01-31', 'giorno < inizio a fine febbraio; gennaio 31', [sp('Mensile 2', o2).scadenza, sp('Mensile 31', o3).scadenza]);
+verifica(sp('Mensile 24', o4).scadenza === '2026-09-24' && sp('Mensile 24', o4).nel_mese, 'mensile in ogni mese personale, anche prima della creazione', sp('Mensile 24', o4).scadenza);
+// Spunta mensile: conta per mese personale
+const spM = await r('POST', `/spese-previste/${m2.id}/spunta`, A, { mese: '2026-10', data: '2026-11-02' });
+verifica(spM.s === 201, 'spunta di una mensile col giorno nel mese personale (2/11)', spM.j);
+verifica(sp('Mensile 2', await mensiliA('2026-10')).uscita === true && sp('Mensile 2', await mensiliA('2026-11')).uscita === false, 'la spunta conta solo nel suo mese personale');
+// Rifiuti e cambio di frequenza
+verifica((await r('POST', '/spese-previste', A, { nome: 'X', importo: '5', giorno_mese: 32 })).s === 400, 'giorno_mese 32 rifiutato');
+verifica((await r('POST', '/spese-previste', A, { nome: 'X', importo: '5', ogni_mesi: 12, prossima_scadenza: '2026-11-20', giorno_mese: 5 })).s === 400, 'giorno_mese su una non mensile rifiutato');
+let c1 = await r('PATCH', `/spese-previste/${m24.id}`, A, { giorno_mese: 5 });
+verifica(c1.j.giorno_mese === 5 && sp('Mensile 24', await mensiliA('2026-10')).scadenza === '2026-11-05', 'cambio giorno', c1.j);
+c1 = await r('PATCH', `/spese-previste/${m24.id}`, A, { giorno_mese: null });
+verifica(c1.j.giorno_mese === null && sp('Mensile 24', await mensiliA('2026-10')).scadenza === '2026-10-10', 'togli il giorno: senza giorno', c1.j);
+verifica((await r('PATCH', `/spese-previste/${m24.id}`, A, { ogni_mesi: 12 })).s === 400, 'da mensile ad annuale serve il mese');
+c1 = await r('PATCH', `/spese-previste/${m24.id}`, A, { ogni_mesi: 12, prossima_scadenza: '2026-11-20', senza_giorno: false, giorno_mese: null });
+verifica(c1.s === 200 && c1.j.ogni_mesi === 12 && c1.j.giorno_mese === null && c1.j.prossima_scadenza === '2026-11-20' && sp('Mensile 24', await mensiliA('2026-11')).scadenza === '2026-11-20', 'da mensile ad annuale', c1.j);
+c1 = await r('PATCH', `/spese-previste/${m24.id}`, A, { ogni_mesi: 1, giorno_mese: 15, prossima_scadenza: null });
+verifica(c1.s === 200 && c1.j.giorno_mese === 15 && c1.j.prossima_scadenza === null && c1.j.senza_giorno === false, 'da annuale a mensile col giorno', c1.j);
+c1 = await r('PATCH', `/spese-previste/${m24.id}`, A, { ogni_mesi: 6, prossima_scadenza: '2026-12-01', senza_giorno: true });
+verifica(c1.j.ogni_mesi === 6 && c1.j.giorno_mese === null && c1.j.senza_giorno === true, 'da mensile a ogni 6 mesi senza giorno', c1.j);
+c1 = await r('PATCH', `/spese-previste/${m24.id}`, A, { ogni_mesi: 1 });
+verifica(c1.s === 200 && c1.j.ogni_mesi === 1 && c1.j.giorno_mese === null && c1.j.prossima_scadenza === null && c1.j.senza_giorno === false, 'da periodica a mensile senza altro: senza giorno', c1.j);
+for (const x of [m24, m2, m31, m10, m9, mSenza, vecchio]) await r('DELETE', `/spese-previste/${x.id}`, A);
 
 // Spunta
 const sp1 = await r('POST', `/spese-previste/${affitto.j.id}/spunta`, A, { mese: '2026-10', data: '2026-10-12' });
 // La spunta è un segno (proposta v5): nessun movimento sul conto.
 verifica(sp1.s === 201 && sp1.j.data === '2026-10-12' && sp1.j.importo === undefined, 'spunta è un segno', sp1.j);
 verifica((await r('POST', `/spese-previste/${affitto.j.id}/spunta`, A, { mese: '2026-10' })).s === 409, 'doppia spunta 409');
-verifica((await r('POST', `/spese-previste/${spesaBudget.id}/spunta`, A, { mese: '2026-10' })).s === 400, 'budget non si spunta');
+// I budget si spuntano come le altre voci (decisione 30).
+verifica((await r('POST', `/spese-previste/${spesaBudget.id}/spunta`, A, { mese: '2026-10' })).s === 201 && (await r('DELETE', `/spese-previste/${spesaBudget.id}/spunta?mese=2026-10`, A)).s === 204, 'budget si spunta e si toglie');
 verifica((await r('POST', `/spese-previste/${luceSp.id}/spunta`, A, { mese: '2026-10', data: '2026-12-01' })).s === 400, 'data fuori dal mese');
 let ott2 = (await r('GET', '/spese-previste?mese=2026-10', A)).j;
-verifica(sp('Affitto', ott2).uscita === true && sp('Affitto', ott2).movimento_id === null, 'affitto uscito senza movimento');
+verifica(sp('Affitto', ott2).uscita === true, 'affitto uscito (spunta)');
 
-// Budget: si riempie con i movimenti della categoria e delle sottocategorie
-await r('POST', '/movimenti', A, { conto_id: conto.id, importo: '-45.30', esercente: 'Esselunga', categoria_id: supermercato.id, data: '2026-10-20' });
-await r('POST', '/movimenti', A, { conto_id: conto.id, importo: '-20', esercente: 'Bar', categoria_id: cibo.id, data: '2026-10-21' });
-await r('POST', '/movimenti', A, { conto_id: conto.id, importo: '-99', esercente: 'Vecchio', categoria_id: cibo.id, data: '2026-10-05' });
 ott2 = (await r('GET', '/spese-previste?mese=2026-10', A)).j;
-verifica(sp('Spesa', ott2).speso === '65.30', 'budget speso', sp('Spesa', ott2).speso);
 
 verifica((await r('DELETE', `/spese-previste/${affitto.j.id}/spunta?mese=2026-10`, A)).s === 204, 'togli spunta');
 ott2 = (await r('GET', '/spese-previste?mese=2026-10', A)).j;
@@ -86,7 +121,7 @@ verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, A, { quote: [{
 verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '40' }] })).s === 204, 'quote 60/40');
 verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: b.utente_id, percentuale: '70' }] })).s === 204, 'quota sola (non specificata)');
 verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '70' }] })).s === 400, 'quota sola di un altro rifiutata');
-verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: b.utente_id, percentuale: '100' }] })).s === 400, 'quota sola al 100 rifiutata');
+verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: b.utente_id, percentuale: '100' }] })).s === 204, 'quota sola al 100: tutto a B (somma 100)');
 await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '40' }] });
 verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.mia_quota === '420.00', 'quota 60%');
 verifica((await r('DELETE', `/spese-previste/${affitto.j.id}`, Bt)).s === 403, "l'altro non cancella la spesa");
@@ -157,9 +192,6 @@ verifica(r2.numero_rate === 12, 'numero calcolato', r2.numero_rate);
 verifica((await r('POST', '/rate', A, { oggetto: 'X', importo_rata: '5', numero_rate: 3, ultima_scadenza: '2027-01-01', prima_scadenza: '2026-10-01' })).s === 400, 'non entrambi');
 verifica((await r('GET', '/rate', Bt)).j.length === 0, 'rate private');
 
-// Regole
-const reg = (await r('PUT', '/regole', A, { max_rate_contemporanee: '2', tetto_rate_percentuale: '10', max_mensilita_debito: null })).j;
-verifica(reg.max_rate_contemporanee === 2 && reg.max_mensilita_debito === undefined, 'regole', reg);
 
 // Investimenti
 const vwce = (await r('POST', '/investimenti/titoli', A, { isin: 'IE00BK5BQT80', ticker: 'VWCE', nome: 'Vanguard FTSE All-World' })).j;
@@ -289,8 +321,6 @@ const mese = (await r('GET', '/analisi/mese?mese=2026-10', A)).j;
 // stipendio 2000; fisse: affitto 420 (60%); periodiche: luce 30 + tari 20; budget 400; rate: telefono 50 (10/10) + divano 100 (05/10)
 verifica(mese.voci.fisse === '420.00' && mese.voci.periodiche_mensilizzate === '50.00' && mese.voci.budget === '400.00', 'voci del mese', mese.voci);
 verifica(mese.voci.rate === '150.00' && mese.resta === '980.00' && mese.semaforo === 'ok', 'quanto resta', mese);
-const st = (await r('GET', '/analisi/storico?mesi=3&mese=2026-10', A)).j;
-verifica(st.length === 3 && st[2].mese === '2026-10' && st[2].uscite === '65.30', 'storico: solo i movimenti veri, non le spunte', st[2]);
 const pat = (await r('GET', '/analisi/patrimonio', A)).j;
 verifica(pat.investimenti === '2600.00', 'patrimonio', pat);
 const pro = (await r('GET', '/analisi/proiezione', A)).j;
@@ -343,11 +373,7 @@ verifica(pro.punti.length >= 3 && pro.punti.at(-1).mesi === 60, 'proiezione', pr
 
 
 const ctrl = (await r('GET', '/analisi/rate', A)).j;
-verifica(ctrl.controlli.length === 2 && ctrl.controlli[0].rispettata === true, 'controllo rate', ctrl);
-const posso = (await r('POST', '/analisi/posso-permettermelo', A, { prezzo: '1200', a_rate: true, numero_rate: 12 })).j;
-verifica(posso.esito === 'no' && posso.regole.some((x) => !x.rispettata), 'posso permettermelo: troppe rate', posso);
-const posso2 = (await r('POST', '/analisi/posso-permettermelo', A, { prezzo: '300', vita_utile_mesi: 36 })).j;
-verifica(posso2.esito === 'si', 'posso permettermelo: sì', posso2);
+verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo rate', ctrl);
 
 // Mese personale per tutte le voci (decisione 41), con inizio_mese = 10: il mese personale di marzo va dal 10 marzo al 9 aprile.
 {

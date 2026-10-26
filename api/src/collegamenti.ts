@@ -11,8 +11,8 @@ import { ErroreApi } from './errori.ts';
 // Campi del salvadanaio che si cambiano solo dalla spesa.
 export const CAMPI_OBIETTIVO_BLOCCATI = ['nome', 'traguardo', 'scadenza', 'padre_id', 'crea_spesa'] as const;
 // Campi della spesa che si cambiano solo dal salvadanaio (categoria, note, attiva e divisione restano liberi).
-export const CAMPI_SPESA_PROMEMORIA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'tipo', 'obiettivo_id', 'alimenta_obiettivo_id', 'conto_id'] as const;
-export const CAMPI_SPESA_CREATA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'tipo', 'obiettivo_id', 'alimenta_obiettivo_id'] as const;
+export const CAMPI_SPESA_PROMEMORIA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'giorno_mese', 'tipo', 'obiettivo_id', 'alimenta_obiettivo_id', 'conto_id'] as const;
+export const CAMPI_SPESA_CREATA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'giorno_mese', 'tipo', 'obiettivo_id', 'alimenta_obiettivo_id'] as const;
 
 const json = (xs: readonly string[]) => `'${JSON.stringify(xs)}'::jsonb`;
 

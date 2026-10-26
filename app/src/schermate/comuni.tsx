@@ -17,9 +17,12 @@ export function Caricamento({ errore }: { errore?: string | null }) {
 // Il mese è sempre il mese personale (decisione 41): vedi ../mesePersonale.ts.
 export { aggiungiMesi, periodoDi };
 
+// Una spesa mensile ha solo il giorno del mese e può non averlo (decisione 44).
+export const mensileSenzaGiorno = (s: Pick<Spesa, 'ogni_mesi' | 'giorno_mese'>) => s.ogni_mesi === 1 && s.giorno_mese === null;
+
 // Prossima uscita di una spesa, per mesi personali: il mese personale in corso conta ancora anche se il giorno è
 // già passato (senza giorno: l'inizio del mese personale, vale tutto il mese).
-export const proxSpesa = (s: Pick<Spesa, 'prossima_scadenza' | 'ogni_mesi' | 'senza_giorno'>, da = oggiIso(), inizio = 1) =>
+export const proxSpesa = (s: Pick<Spesa, 'prossima_scadenza' | 'ogni_mesi' | 'senza_giorno' | 'giorno_mese'>, da = oggiIso(), inizio = 1) =>
   proxOccorrenza(s, da, inizio);
 
 // La scadenza della rata dentro un periodo, se c'è.
@@ -37,8 +40,7 @@ export function scadenzaRataNel(r: Rata, dal: string, al: string): string | null
 export function quando(s: Spesa, inizio = 1): string {
   if (s.tipo === 'budget') return 'Tutto il mese';
   if (s.ogni_mesi === null) return `Una volta · ${dataSpesa(s.prossima_scadenza, s.senza_giorno)}`;
-  const giorno = s.prossima_scadenza ? Number(s.prossima_scadenza.slice(8, 10)) : null;
-  if (s.ogni_mesi === 1) return giorno ? `Il ${giorno} · ogni mese` : 'Ogni mese';
+  if (s.ogni_mesi === 1) return s.giorno_mese ? `Il ${s.giorno_mese} · ogni mese` : 'Ogni mese';
   const prossima = proxSpesa(s, oggiIso(), inizio);
   const mese = prossima ? dataSpesa(prossima, s.senza_giorno) : '';
   const nome = mese.charAt(0).toUpperCase() + mese.slice(1);

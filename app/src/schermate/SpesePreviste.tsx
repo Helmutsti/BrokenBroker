@@ -41,7 +41,7 @@ export function SpesePreviste() {
   const visibili = dati.spese.filter((s) => (filtro === 'spente' ? !s.attiva : s.attiva)
     && (!testo || s.nome.toLowerCase().includes(testo) || (s.categoria ?? '').toLowerCase().includes(testo)));
   // In ordine di uscita: il giorno del mese in cui esce, poi il nome.
-  const giorno = (s: Spesa) => (s.prossima_scadenza && !s.senza_giorno ? Number(s.prossima_scadenza.slice(8, 10)) : 99);
+  const giorno = (s: Spesa) => (s.ogni_mesi === 1 ? s.giorno_mese ?? 99 : s.prossima_scadenza && !s.senza_giorno ? Number(s.prossima_scadenza.slice(8, 10)) : 99);
   const ogniMese = visibili.filter((s) => s.ogni_mesi === 1).sort((a, b) => giorno(a) - giorno(b) || a.nome.localeCompare(b.nome));
   const periodiche = visibili.filter((s) => s.ogni_mesi !== 1);
   const gruppiMese: [string, Spesa[]][] = [
@@ -128,7 +128,6 @@ export function SpesePreviste() {
 }
 
 const OPZIONI_MESE = [{ valore: '', testo: '—' }, ...Array.from({ length: 12 }, (_, i) => ({ valore: String(i + 1), testo: nomeMese(`2000-${String(i + 1).padStart(2, '0')}`, false) }))];
-const giorniDel = (anno: number, mese: number) => new Date(Date.UTC(anno, mese, 0)).getUTCDate();
 
 // La data intera che si salva (l'anno non si chiede e non si mostra): la prima occorrenza di giorno e mese da oggi in poi,
 // contando per mesi personali (il mese personale in corso è ancora buono). Senza giorno vale tutto il mese personale: si salva il giorno 1.
@@ -181,7 +180,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   useEffect(() => {
     if (!aperta) return;
     const s = spesa;
-    setNome(s?.nome ?? ''); setImporto(importoInTesto(s?.importo)); setGiornoMese(s?.prossima_scadenza && !s.senza_giorno ? String(Number(s.prossima_scadenza.slice(8, 10))) : '');
+    setNome(s?.nome ?? ''); setImporto(importoInTesto(s?.importo)); setGiornoMese(s?.ogni_mesi === 1 ? (s.giorno_mese ? String(s.giorno_mese) : '') : s?.prossima_scadenza && !s.senza_giorno ? String(Number(s.prossima_scadenza.slice(8, 10))) : '');
     // Il mese si chiede solo se la spesa non esce ogni mese; l'anno non si mostra mai.
     setMeseScad(s?.prossima_scadenza && s.ogni_mesi !== 1 ? String(Number((proxSpesa(s, oggiIso(), rif.profilo?.inizio_mese ?? 1) ?? s.prossima_scadenza).slice(5, 7))) : '');
     setDataUna(s && s.ogni_mesi === null ? dataInTesto(s.prossima_scadenza) : '');
@@ -225,24 +224,20 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     }
     const valore = serve(leggiImporto(importo), 'Scrivi l’importo, es. 117,80', 'importo');
     const ogni = tipo === 'budget' || frequenza === 'mese' ? 1 : frequenza === 'anno' ? 12 : frequenza === 'biennale' ? 24 : frequenza === 'una' ? null : Number(ogniN);
-    // Ogni mese basta il giorno (la serie parte dal mese già salvato, o da questo); altrimenti servono almeno il mese, e l'anno lo sceglie l'app.
+    // Ogni mese basta il giorno del mese (giorno_mese, nessuna data: decisione 44); altrimenti servono almeno il mese, e l'anno lo sceglie l'app.
     let prima: string | null = null;
     let senzaGiorno = false;
     const g = giornoMese ? Number(giornoMese) : null;
     if (ogni !== null && (!Number.isInteger(ogni) || ogni < 1)) serve(null, 'Scrivi ogni quanti mesi, es. 6', 'ogniN');
     if (tipo === 'budget') prima = null;
     else if (ogni === null) prima = serve(leggiData(dataUna), 'Scegli il giorno in cui esce', 'scadenza');
-    else if (ogni === 1) {
-      if (g !== null) {
-        const [a, m] = (spesa?.prossima_scadenza ?? oggiIso()).slice(0, 7).split('-').map(Number);
-        prima = `${a}-${String(m).padStart(2, '0')}-${String(Math.min(g, giorniDel(a, m))).padStart(2, '0')}`;
-      }
-    } else if (meseScad) {
+    else if (ogni === 1) prima = null;
+    else if (meseScad) {
       prima = primaOccorrenza(g, Number(meseScad), oggiIso(), rif.profilo?.inizio_mese ?? 1);
       senzaGiorno = g === null;
     } else if (g !== null) serve(null, 'Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese', 'scadenza');
     else serve(null, 'Scegli almeno il mese in cui esce: da lì si ripete', 'scadenza');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, tipo, conto_id: conto, categoria_id: categoria,
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 && tipo !== 'budget' ? g : null, tipo, conto_id: conto, categoria_id: categoria,
       ...(scollega ? { obiettivo_id: null } : {}), note: note.trim() || null, attiva };
     if (salv === 'crea' && !spesa?.obiettivo_id) {
       if (doveEff === 'sotto' && !padreEff) serve(null, 'Scegli sotto quale salvadanaio metterlo', 'padre');
@@ -290,7 +285,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const aiutoScadenza = frequenza === 'una'
     ? (isoUna ? `Esce il ${Number(isoUna.slice(8, 10))} ${nomeM}, una volta sola.` : 'Scegli il giorno in cui esce.')
     : frequenza === 'mese'
-    ? (giornoMese ? `Esce il ${giornoMese} di ogni mese.` : 'Facoltativo: serve a metterla in ordine nella lista del mese.')
+    ? (giornoMese ? `Esce il ${giornoMese} di ogni mese.` : 'Facoltativo: senza giorno vale per tutto il mese. Il giorno serve a metterla in ordine nella lista.')
     : nomeM && giornoMese ? `Esce il ${giornoMese} ${nomeM}${poi}.`
       : nomeM ? `Esce a ${nomeM}, senza un giorno preciso${poi}.`
         : giornoMese ? 'Scegli anche il mese.' : 'Scegli almeno il mese; il giorno è facoltativo. L’anno lo sceglie l’app.';

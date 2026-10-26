@@ -85,12 +85,18 @@ export function dataNelMese(mese: string, giorno: number, inizio: number): strin
   return `${base}-${String(Math.min(giorno, giorniNelMese(a, m - 1))).padStart(2, '0')}`;
 }
 
+// Una spesa MENSILE (ogni = 1) non ha una data ma solo il giorno del mese (`giornoMese`, 1-31, facoltativo;
+// decisione 44): c'è in ogni mese personale, alla data di quel giorno dentro il mese personale (ferma all'ultimo
+// giorno se il mese è più corto); senza giorno vale tutto il mese (data = inizio del periodo).
+// Le altre (ogni N mesi, una volta sola) hanno `prima`, una data salvata.
+//
 // Prima scadenza che cade nel periodo per una voce che si ripete ogni `ogni` mesi personali
 // a partire dal mese personale di `prima` (ogni = null: una volta sola). Nessuna scadenza: null.
 // Senza giorno la scadenza è l'inizio del periodo (vale tutto il mese).
-export function scadenzaNelPeriodo(prima: string | null, ogni: number | null, p: Periodo, senzaGiorno = false): string | null {
-  if (!prima) return ogni === 1 ? p.dal : null;
+export function scadenzaNelPeriodo(prima: string | null, ogni: number | null, p: Periodo, senzaGiorno = false, giornoMese: number | null = null): string | null {
   const inizio = Number(p.dal.slice(8, 10));
+  if (ogni === 1) return giornoMese === null ? p.dal : dataNelMese(p.mese, giornoMese, inizio);
+  if (!prima) return null;
   const d = mesiTra(`${meseDiVoce(prima, senzaGiorno, inizio)}-01`, `${p.mese}-01`);
   if (d < 0 || (ogni === null ? d !== 0 : d % ogni !== 0)) return null;
   return senzaGiorno ? p.dal : dataNelMese(p.mese, Number(prima.slice(8, 10)), inizio);
@@ -99,9 +105,12 @@ export function scadenzaNelPeriodo(prima: string | null, ogni: number | null, p:
 // Prossima uscita da `da` (il mese personale di `da` conta ancora) di una voce che parte da `prima` e si ripete
 // ogni `ogni` mesi personali (null: una volta sola). Con giorno: la data di quel giorno nel mese; senza giorno:
 // l'ultimo giorno del mese personale. Passa alla successiva solo a mese personale finito.
-export function prossimaUscita(prima: string | null, ogni: number | null, da: string, senzaGiorno: boolean, inizio: number): string {
+// Mensile (ogni = 1): sempre il mese personale di `da`, col giorno del mese (`giornoMese`) se c'è.
+export function prossimaUscita(prima: string | null, ogni: number | null, da: string, senzaGiorno: boolean, inizio: number, giornoMese: number | null = null): string {
+  const ora = meseDi(da, inizio);
+  if (ogni === 1) return giornoMese === null ? fineMese(ora, inizio) : dataNelMese(ora, giornoMese, inizio);
   if (!prima) return da;
-  const primo = meseDiVoce(prima, senzaGiorno, inizio), ora = meseDi(da, inizio);
+  const primo = meseDiVoce(prima, senzaGiorno, inizio);
   const arretrati = mesiTra(`${primo}-01`, `${ora}-01`);
   const k = ogni === null || arretrati <= 0 ? 0 : Math.ceil(arretrati / ogni);
   const mese = spostaMese(primo, k * (ogni ?? 0));

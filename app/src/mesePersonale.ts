@@ -48,12 +48,18 @@ export function dataNelMese(mese: string, giorno: number, inizio: number): strin
   return `${base}-${pad(Math.min(giorno, giorniNelMese(a, m - 1)))}`;
 }
 
-type VoceDatata = { prossima_scadenza: string | null; ogni_mesi: number | null; senza_giorno: boolean };
+// Una spesa mensile (ogni_mesi = 1) ha solo `giorno_mese` (1-31 o null = senza giorno) e nessuna data (decisione 44).
+type VoceDatata = { prossima_scadenza: string | null; ogni_mesi: number | null; senza_giorno: boolean; giorno_mese: number | null };
 
 // Prossima occorrenza da `da` (il mese personale di `da` conta ancora, anche se il giorno è già passato).
 // Con giorno: la data di quel giorno nel mese; senza giorno: l'inizio del mese personale (vale tutto il mese).
 // Passa alla successiva solo a mese personale finito. Una volta sola e già passata: null.
 export function proxOccorrenza(s: VoceDatata, da: string, inizio: number): string | null {
+  // Mensile: sempre il mese personale di `da`, col giorno del mese (ferma all'ultimo giorno se il mese è corto).
+  if (s.ogni_mesi === 1) {
+    const ora = meseDi(da, inizio);
+    return s.giorno_mese === null ? periodoDi(ora, inizio).dal : dataNelMese(ora, s.giorno_mese, inizio);
+  }
   if (!s.prossima_scadenza) return null;
   const primo = meseDiVoce(s.prossima_scadenza, s.senza_giorno, inizio), ora = meseDi(da, inizio);
   const arretrati = mesiTraChiavi(primo, ora);

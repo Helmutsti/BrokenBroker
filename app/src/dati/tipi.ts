@@ -12,7 +12,7 @@ export type Categoria = { id: string; proprietario_id: string; padre_id: string 
 export type Blocco = { tipo: 'spesa' | 'salvadanaio'; id: string; nome: string; campi: string[] };
 export type TipoSpesa = 'fissa' | 'budget' | 'investimento';
 export type Spesa = {
-  id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; conto_id: string | null; conto: string | null;
+  id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; conto_id: string | null; conto: string | null;
   categoria_id: string | null; categoria: string | null; categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: TipoSpesa; attiva: boolean; note: string | null; obiettivo_id: string | null; mia: boolean; condivisa: boolean;
   nuova: boolean; creata_da: string | null; // ricevuta e non ancora aperta né categorizzata (decisione 43); chi l'ha creata

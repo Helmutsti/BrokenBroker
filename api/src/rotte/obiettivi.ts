@@ -44,15 +44,15 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
   const traguardi = (await db.query(
     `select id, obiettivo_id, nome, importo::text as importo, ordine from traguardi_copertura order by ordine, importo`)).rows;
   const collegate = (await db.query<{ id: string; nome: string; obiettivo_id: string | null; alimenta_obiettivo_id: string | null; ogni_mesi: number | null;
-    prossima_scadenza: string | null; senza_giorno: boolean; importo: string; conto_id: string | null }>(
-    `select id, nome, obiettivo_id, alimenta_obiettivo_id, ogni_mesi, prossima_scadenza, senza_giorno, importo::text as importo, conto_id from spese_previste
+    prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; importo: string; conto_id: string | null }>(
+    `select id, nome, obiettivo_id, alimenta_obiettivo_id, ogni_mesi, prossima_scadenza, senza_giorno, giorno_mese, importo::text as importo, conto_id from spese_previste
       where attiva and (alimenta_obiettivo_id is not null or (obiettivo_id is not null and ogni_mesi > 1 and tipo <> 'budget'))`)).rows;
   const oggiQui = oggi(), inizio = await inizioMese(db);
   const perId = new Map(nodi.map((n) => {
     const paga = collegate.find((s) => s.obiettivo_id === n.id && s.ogni_mesi && s.ogni_mesi > 1);
     const alim = collegate.find((s) => s.alimenta_obiettivo_id === n.id);
     const nodo: Nodo = { ...n, figli: [],
-      paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui, paga.senza_giorno, inizio), senza_giorno: paga.senza_giorno } : null,
+      paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui, paga.senza_giorno, inizio, paga.giorno_mese), senza_giorno: paga.senza_giorno } : null,
       alimentato_da: alim ? { id: alim.id, importo: alim.importo, ogni_mesi: alim.ogni_mesi, conto_id: alim.conto_id } : null };
     // Un salvadanaio di una spesa annuale si prepara per la prossima uscita, del suo importo.
     if (nodo.paga_spesa) { nodo.scadenza = nodo.paga_spesa.prossima; if (nodo.traguardo === null) nodo.traguardo = nodo.paga_spesa.importo; }
@@ -222,9 +222,10 @@ rotteObiettivi.put('/:id/promemoria', async (req, res) => {
     // Il promemoria vale per tutto il mese personale (decisione 41): ogni N mesi, a partire da quello in corso, senza giorno.
     const meseQui = `${meseDi(oggi(), await inizioMese(db))}-01`;
     const spesaId = esistente
-      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = $4, conto_id = $5, tipo = 'investimento',
-            prossima_scadenza = case when $4 = 1 then null else coalesce(prossima_scadenza, $6::date) end,
-            senza_giorno = case when $4 = 1 then false when prossima_scadenza is null then true else senza_giorno end
+      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = $4::smallint, conto_id = $5, tipo = 'investimento',
+            giorno_mese = null,
+            prossima_scadenza = case when $4::smallint = 1 then null else coalesce(prossima_scadenza, $6::date) end,
+            senza_giorno = case when $4::smallint = 1 then false when prossima_scadenza is null then true else senza_giorno end
           where id = $1 returning id`,
           [esistente.id, nome, importo, ogni, conto, meseQui])).rows[0].id
       : (await db.query<{ id: string }>(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, senza_giorno, tipo, alimenta_obiettivo_id, conto_id)
@@ -318,7 +319,8 @@ export async function creaSalvadanaioDaSpesa(db: PoolClient, spesaId: string, do
     padre = await inserisciSalvadanaio(db, { nome: dove.contenitore });
   }
   const periodica = s.tipo !== 'budget' && s.ogni_mesi !== 1;
-  const prossima = s.prossima_scadenza ? prossimaUscita(s.prossima_scadenza, s.ogni_mesi, oggi(), s.senza_giorno, (await periodoRichiesto(db, undefined)).inizio) : null;
+  // Le mensili non hanno traguardo né scadenza (periodica è falso): la prossima uscita serve solo alle altre.
+  const prossima = periodica && s.prossima_scadenza ? prossimaUscita(s.prossima_scadenza, s.ogni_mesi, oggi(), s.senza_giorno, (await periodoRichiesto(db, undefined)).inizio, s.giorno_mese) : null;
   const id = await inserisciSalvadanaio(db, { nome: s.nome, padre_id: padre, traguardo: periodica ? s.mia_quota : null,
     scadenza: periodica ? prossima : null, icona: s.icona, da_spesa: true });
   await db.query('update spese_previste set obiettivo_id = $2 where id = $1', [spesaId, id]);

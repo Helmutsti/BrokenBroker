@@ -12,7 +12,7 @@ import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, nomeM
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { ombre } from '../tema/token.ts';
 import { meseDi } from '../mesePersonale.ts';
-import { Caricamento, divisioneTraSotto, importoDelMese, proxSpesa, quando, rateDelMese, tuttiGliObiettivi, vociDelMese } from './comuni.tsx';
+import { Caricamento, divisioneTraSotto, importoDelMese, mensileSenzaGiorno, proxSpesa, quando, rateDelMese, tuttiGliObiettivi, vociDelMese } from './comuni.tsx';
 import { DaGirareAiConti } from './DaGirare.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
@@ -69,7 +69,7 @@ export function Panoramica() {
   const p = el.periodo;
   // In ordine di uscita: la data nel mese, poi il nome.
   const perUscita = (a: Spesa, b: Spesa) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome);
-  const conGiorno = (s: Spesa) => [s.scadenza ? (s.senza_giorno ? nomeMeseMinuscolo(s.scadenza.slice(0, 7)) : `il ${Number(s.scadenza.slice(8, 10))}`) : null, s.conto].filter(Boolean).join(' · ') || '—';
+  const conGiorno = (s: Spesa) => [s.scadenza && !mensileSenzaGiorno(s) ? (s.senza_giorno ? nomeMeseMinuscolo(s.scadenza.slice(0, 7)) : `il ${Number(s.scadenza.slice(8, 10))}`) : null, s.conto].filter(Boolean).join(' · ') || '—';
   const { fisse, budget, investimenti, salvadanai, annuali } = vociDelMese(el, perUscita);
   // Annuali (e biennali ecc.): contano ogni mese con la quota mensile, in ordine di prossima uscita.
   const prossima = (s: Spesa) => (s.nel_mese && s.scadenza ? s.scadenza : proxSpesa(s, p.dal, inizio) ?? '9999');

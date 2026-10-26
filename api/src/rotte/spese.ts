@@ -69,6 +69,7 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     ogni_mesi: v.annullabile(c, 'ogni_mesi', () => v.intero(c, 'ogni_mesi', 1, 120)),
     prossima_scadenza: v.annullabile(c, 'prossima_scadenza', () => v.data(c, 'prossima_scadenza')),
     senza_giorno: v.booleano(c, 'senza_giorno'),
+    giorno_mese: v.annullabile(c, 'giorno_mese', () => v.intero(c, 'giorno_mese', 1, 31)),
     conto_id: v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')),
     categoria_id: v.annullabile(c, 'categoria_id', () => v.id(c, 'categoria_id')),
     tipo: v.scelta(c, 'tipo', TIPI),
@@ -81,12 +82,33 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
   };
 }
 
+type Campi = ReturnType<typeof leggi>;
+
+// Decisione 44: una spesa mensile ha solo il giorno del mese, non una data. `prossima_scadenza` con ogni_mesi = 1
+// non si rifiuta (compatibilità coi vecchi client): diventa il giorno di quella data (a meno che `giorno_mese` non
+// sia già scritto) e non si salva. Le altre cadenze non hanno giorno_mese. `ogniPrima` = cadenza attuale (PATCH).
+function normalizzaMensile(campi: Campi, ogniPrima: number | null | undefined): void {
+  const ogni = campi.ogni_mesi !== undefined ? campi.ogni_mesi : ogniPrima;
+  if (ogni === 1) {
+    if (campi.giorno_mese === undefined) {
+      if (campi.prossima_scadenza && !campi.senza_giorno) campi.giorno_mese = Number(campi.prossima_scadenza.slice(8, 10));
+      else if (campi.prossima_scadenza !== undefined || campi.senza_giorno || ogniPrima !== 1) campi.giorno_mese = null;
+    }
+    if (campi.prossima_scadenza !== undefined || ogniPrima !== 1) campi.prossima_scadenza = null;
+    if (campi.senza_giorno !== undefined || ogniPrima !== 1) campi.senza_giorno = false;
+  } else {
+    if (campi.giorno_mese !== undefined && campi.giorno_mese !== null) throw new ErroreApi(400, 'Il giorno del mese vale solo per le spese mensili');
+    if (campi.ogni_mesi !== undefined && ogniPrima === 1) campi.giorno_mese = null;
+  }
+}
+
 rotteSpese.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const campi = leggi(c, true);
   const nuovo = leggiNuovoSalvadanaio(c);
   // ogni_mesi assente = ogni mese; null esplicito = una volta sola.
   if (!('ogni_mesi' in c)) campi.ogni_mesi = 1;
+  normalizzaMensile(campi, undefined);
   if (campi.senza_giorno && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa senza giorno ha bisogno almeno del mese');
   if (campi.ogni_mesi === null && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa una tantum ha bisogno della data');
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
@@ -114,6 +136,12 @@ rotteSpese.patch('/:id', async (req, res) => {
     if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
     const sua = (await db.query<{ mia: boolean }>('select proprietario_id = fp_me() as mia from spese_previste where id = $1', [id])).rows[0];
     if (!sua) return undefined;
+    const prima = (await db.query<{ ogni_mesi: number | null; prossima_scadenza: string | null }>('select ogni_mesi, prossima_scadenza from spese_previste where id = $1', [id])).rows[0];
+    normalizzaMensile(campi, prima.ogni_mesi);
+    // Da mensile a periodica serve la data (il mese): niente più «mensile» da cui ricavarla.
+    if (prima.ogni_mesi === 1 && campi.ogni_mesi !== undefined && campi.ogni_mesi !== 1 && !campi.prossima_scadenza) {
+      throw new ErroreApi(400, campi.ogni_mesi === null ? 'Una spesa una tantum ha bisogno della data' : 'Una spesa non mensile ha bisogno almeno del mese');
+    }
     await categoriaMia(db, campi.categoria_id);
     // Chi riceve la spesa cambia solo la SUA categoria, senza toccare quella del creatore.
     const categoriaRicevuta = sua.mia ? undefined : campi.categoria_id;
