@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
+import { Esito, Interruttore, Pulsante, SceltaSegmenti, type Tono } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina, TendinaGiorni } from '../componenti/campi.tsx';
 import { CalendarioAnnuali, Intestazione, NumeroChiave, RigaNumeri, RigaSpesa, Scheda, TitoloGruppo, Vuoto } from '../componenti/composti.tsx';
 import { cancella, modifica, crea, sostituisci, useDati } from '../dati/api.ts';
@@ -59,7 +59,7 @@ export function SpesePreviste() {
   const vediMese = filtro !== 'periodiche', vediAnnuali = filtro !== 'mese';
   const riga = (s: Spesa, alMese?: string) => (
     <RigaSpesa key={s.id} nome={s.nome} categoria={s.categoria_padre ? `${s.categoria_padre} › ${s.categoria}` : s.categoria ?? '—'} conto={s.conto ?? '—'}
-      quando={quando(s, inizio)} totale={euro(s.importo)} quota={alMese ?? euro(s.mia_quota) + segnoQuota(s)} icona={s.icona ?? 'ellipsis'} onApri={() => setAperta(s)} />
+      quando={quando(s, inizio)} totale={euro(s.importo)} quota={alMese ?? euro(s.mia_quota) + segnoQuota(s)} icona={s.icona ?? 'ellipsis'} avviso={avvisoSpesa(s)} onApri={() => setAperta(s)} />
   );
   const nuova = <Pulsante tipo="primario" etichetta="Nuova spesa prevista" icona="plus" onPress={() => setAperta('nuova')} />;
 
@@ -134,6 +134,11 @@ const giorniDel = (anno: number, mese: number) => new Date(Date.UTC(anno, mese, 
 // contando per mesi personali (il mese personale in corso è ancora buono). Senza giorno vale tutto il mese personale: si salva il giorno 1.
 export const primaOccorrenza = primaOccorrenzaPersonale;
 
+// Etichetta di una riga: «Nuova · da {nome}» per una spesa ricevuta non ancora aperta; «Da categorizzare» se la categoria (la tua) manca.
+const avvisoSpesa = (s: Spesa): { testo: string; tono: Tono } | undefined =>
+  s.nuova ? { testo: `Nuova · da ${s.creata_da ?? 'un’altra persona'}`, tono: 'accento' }
+  : !s.categoria_id && s.attiva ? { testo: 'Da categorizzare', tono: 'attenzione' } : undefined;
+
 const NON_SPECIFICATO = 'non-specificato';
 // SC-03 Aggiungi o modifica una spesa prevista (finestra al centro, variante B).
 export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void }) {
@@ -167,6 +172,11 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const [scollega, setScollega] = useState(false);
   const [note, setNote] = useState('');
   const [attiva, setAttiva] = useState(true);
+
+  // Aprire una spesa ricevuta la segna come vista: sparisce l'etichetta «Nuova».
+  useEffect(() => {
+    if (aperta && spesa?.nuova) crea(`/spese-previste/${spesa.id}/vista`).catch(() => {});
+  }, [aperta, spesa?.id]);
 
   useEffect(() => {
     if (!aperta) return;
@@ -320,6 +330,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
           </View>
           <View style={{ flex: 1.5, minWidth: 0 }}>
             <Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" />
+            {spesa && !spesa.mia ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`La categoria è solo tua: ${spesa.creata_da ?? 'chi l’ha creata'} ha la sua.`}</Testo> : null}
           </View>
         </View>
       </Riquadro>

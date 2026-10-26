@@ -90,6 +90,7 @@ verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [
 await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '40' }] });
 verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.mia_quota === '420.00', 'quota 60%');
 verifica((await r('DELETE', `/spese-previste/${affitto.j.id}`, Bt)).s === 403, "l'altro non cancella la spesa");
+
 const cond = (await r('GET', '/condivisioni', Bt)).j;
 verifica(cond.length === 1 && cond[0].nome === 'Affitto' && cond[0].mia === false, 'elenco condivisioni', cond);
 verifica((await r('DELETE', `/condivisioni/${cond[0].id}`, Bt)).s === 403, "l'altro non toglie la condivisione");
@@ -294,6 +295,53 @@ const pat = (await r('GET', '/analisi/patrimonio', A)).j;
 verifica(pat.investimenti === '2600.00', 'patrimonio', pat);
 const pro = (await r('GET', '/analisi/proiezione', A)).j;
 verifica(pro.punti.length >= 3 && pro.punti.at(-1).mesi === 60, 'proiezione', pro.punti.at(-1));
+// Categoria per persona (decisione 43): chi riceve ha la SUA categoria, proposta dal percorso di nomi.
+{
+  const catB = (await r('GET', '/categorie?formato=elenco', Bt)).j;
+  const casaB = catB.find((c) => c.nome === 'Casa' && !c.padre_id);
+  const ciboB = catB.find((c) => c.nome === 'Cibo' && !c.padre_id);
+  const sA = (await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j;
+  let sB = (await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, Bt)).j;
+  verifica(sA.categoria_id === casa.id && sA.nuova === false && sA.creata_da === null, 'creatore: la sua categoria, non «nuova»', sA);
+  verifica(sB.categoria_id === casaB.id && sB.categoria === 'Casa' && sB.nuova === true && sB.creata_da === 'Anna', 'ricevente: categoria proposta (percorso) e «nuova»', sB);
+  // Modifica separata: B cambia la sua categoria, quella di A resta.
+  const mB = await r('PATCH', `/spese-previste/${affitto.j.id}`, Bt, { categoria_id: ciboB.id });
+  verifica(mB.s === 200 && mB.j.categoria_id === ciboB.id && mB.j.nuova === false, 'ricevente cambia la sua categoria (e non è più nuova)', mB);
+  verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.categoria_id === casa.id, 'la categoria del creatore non cambia');
+  verifica((await r('PATCH', `/spese-previste/${affitto.j.id}`, Bt, { categoria_id: casa.id })).s === 404, 'non si sceglie la categoria di un altro');
+  verifica((await r('PATCH', `/spese-previste/${affitto.j.id}`, A, { categoria_id: ciboB.id })).s === 404, 'nemmeno il creatore sceglie quella di un altro');
+  const catSpeseB = (await r('GET', '/categorie/spese?mese=2026-10', Bt)).j;
+  verifica(catSpeseB.some((x) => x.categoria_id === ciboB.id) && !catSpeseB.some((x) => x.categoria_id === casa.id), 'pesi per categoria: quella del ricevente', catSpeseB);
+  // Altri campi: B li modifica per entrambi, senza toccare la categoria di A.
+  verifica((await r('PATCH', `/spese-previste/${affitto.j.id}`, Bt, { note: 'da B' })).j.categoria_id === ciboB.id, 'modifica di altri campi dal ricevente');
+  verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.note === 'da B', 'la nota di B vale per entrambi');
+  // Eliminare la categoria del ricevente in uso: serve dove spostare, e le spese ricevute vengono spostate.
+  verifica((await r('DELETE', `/categorie/${ciboB.id}`, Bt)).s === 409, 'categoria del ricevente in uso: 409');
+  verifica((await r('DELETE', `/categorie/${ciboB.id}?sposta_su=${casaB.id}`, Bt)).s === 204, 'eliminata spostando');
+  verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, Bt)).j.categoria_id === casaB.id, 'la spesa ricevuta è passata alla destinazione');
+  verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.categoria_id === casa.id, 'e quella di A è intatta');
+  // Nome della categoria finale uguale in un altro ramo; nessuna corrispondenza = «Da categorizzare»; «vista» a mano.
+  const extra = (await r('POST', '/categorie', A, { nome: 'Extra' })).j;
+  const giardinoA = (await r('POST', '/categorie', A, { nome: 'Giardino', padre_id: extra.id })).j;
+  const raraA = (await r('POST', '/categorie', A, { nome: 'Rarissima' })).j;
+  const altroB = (await r('POST', '/categorie', Bt, { nome: 'Altro B' })).j;
+  const giardinoB = (await r('POST', '/categorie', Bt, { nome: 'giardino', padre_id: altroB.id })).j;
+  const sg = (await r('POST', '/spese-previste', A, { nome: 'Siepe', importo: '30', categoria_id: giardinoA.id, prossima_scadenza: '2026-10-20' })).j;
+  const sr = (await r('POST', '/spese-previste', A, { nome: 'Rara', importo: '30', categoria_id: raraA.id, prossima_scadenza: '2026-10-20' })).j;
+  const sn = (await r('POST', '/spese-previste', A, { nome: 'Senza', importo: '30', prossima_scadenza: '2026-10-20' })).j;
+  for (const x of [sg, sr, sn]) await r('POST', '/condivisioni', A, { voce: 'spesa', id: x.id, utente_id: b.utente_id });
+  const leggiB = async (id) => (await r('GET', `/spese-previste/${id}?mese=2026-10`, Bt)).j;
+  verifica((await leggiB(sg.id)).categoria_id === giardinoB.id, 'proposta per nome della categoria finale');
+  verifica((await leggiB(sr.id)).categoria_id === null && (await leggiB(sn.id)).categoria_id === null, 'nessuna corrispondenza: Da categorizzare');
+  verifica((await leggiB(sr.id)).nuova === true, 'ricevuta: nuova');
+  verifica((await r('POST', `/spese-previste/${sr.id}/vista`, Bt)).s === 204 && (await leggiB(sr.id)).nuova === false, 'POST /vista toglie «nuova»');
+  verifica((await r('POST', `/spese-previste/${sr.id}/vista`, A)).s === 204 && (await r('POST', '/spese-previste/00000000-0000-4000-8000-000000000001/vista', Bt)).s === 404, 'vista: no-op per il creatore, 404 se non esiste');
+  // Smettere di condividere toglie la riga; condividere di nuovo propone di nuovo.
+  const cn = (await r('GET', '/condivisioni', A)).j.find((x) => x.voce_id === sg.id);
+  verifica((await r('DELETE', `/condivisioni/${cn.id}`, A)).s === 204 && (await leggiB(sg.id)).id === undefined, 'condivisione tolta: B non la vede più');
+}
+
+
 const ctrl = (await r('GET', '/analisi/rate', A)).j;
 verifica(ctrl.controlli.length === 2 && ctrl.controlli[0].rispettata === true, 'controllo rate', ctrl);
 const posso = (await r('POST', '/analisi/posso-permettermelo', A, { prezzo: '1200', a_rate: true, numero_rate: 12 })).j;

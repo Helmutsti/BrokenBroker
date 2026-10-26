@@ -108,8 +108,8 @@ rotteCategorie.patch('/:id', async (req, res) => {
   res.json(categoria);
 });
 
-// Cancellare una categoria in uso richiede ?sposta_su=<id>: spese,
-// rate e sottocategorie passano a quella categoria.
+// Cancellare una categoria in uso richiede ?sposta_su=<id>: spese (anche quelle condivise
+// ricevute), rate e sottocategorie passano a quella categoria.
 rotteCategorie.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const destinazione = typeof req.query.sposta_su === 'string' ? v.idPercorso(req.query.sposta_su) : undefined;
@@ -126,10 +126,13 @@ rotteCategorie.delete('/:id', async (req, res) => {
       for (const tabella of ['spese_previste', 'rate']) {
         await db.query(`update ${tabella} set categoria_id = $2 where categoria_id = $1`, [id, destinazione]);
       }
+      // Anche le spese condivise ricevute, che hanno la categoria in spese_dati_utente (decisione 43).
+      await db.query('update spese_dati_utente set categoria_id = $2 where categoria_id = $1 and utente_id = fp_me()', [id, destinazione]);
     } else {
       const { rows } = await db.query<{ in_uso: boolean }>(
         `select exists (select 1 from categorie where padre_id = $1)
              or exists (select 1 from spese_previste where categoria_id = $1)
+             or exists (select 1 from spese_dati_utente where categoria_id = $1)
              or exists (select 1 from rate where categoria_id = $1) as in_uso`, [id]);
       if (rows[0].in_uso) throw new ErroreApi(409, 'La categoria è in uso: indica dove spostare le voci con ?sposta_su=<id>');
     }

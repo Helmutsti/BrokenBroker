@@ -15,6 +15,7 @@ export type Spesa = {
   id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; conto_id: string | null; conto: string | null;
   categoria_id: string | null; categoria: string | null; categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: TipoSpesa; attiva: boolean; note: string | null; obiettivo_id: string | null; mia: boolean; condivisa: boolean;
+  nuova: boolean; creata_da: string | null; // ricevuta e non ancora aperta né categorizzata (decisione 43); chi l'ha creata
   alimenta_obiettivo_id: string | null; // "mettici da parte": spuntata, versa in questo salvadanaio
   bloccato_da: Blocco | null; // nasce da un salvadanaio: promemoria o spesa creata al raggiungimento
   scadenza: string | null; nel_mese: boolean; uscita: boolean;

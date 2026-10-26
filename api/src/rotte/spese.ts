@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { PoolClient } from 'pg';
 import { bloccoSpesa, erroreSpesaBloccata, vietaCampi, vietaPromemoria } from '../collegamenti.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
@@ -53,6 +54,12 @@ function leggiNuovoSalvadanaio(c: Record<string, unknown>): { padre_id?: string 
   return { padre_id: n.padre_id === undefined ? undefined : v.annullabile(n, 'padre_id', () => v.id(n, 'padre_id')), contenitore };
 }
 
+// Le categorie non si condividono (decisione 43): su una spesa si sceglie solo una categoria propria.
+async function categoriaMia(db: PoolClient, id: string | null | undefined) {
+  if (!id) return;
+  if (!(await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id])).rowCount) throw nonTrovato('Categoria');
+}
+
 function leggi(c: Record<string, unknown>, nuova: boolean) {
   const importo = v.importo(c, 'importo', nuova);
   if (importo !== undefined && Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
@@ -84,6 +91,7 @@ rotteSpese.post('/', async (req, res) => {
   if (campi.ogni_mesi === null && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa una tantum ha bisogno della data');
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
+    await categoriaMia(db, campi.categoria_id);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
       `insert into spese_previste (proprietario_id, ${voci.map(([k]) => k).join(', ')})
@@ -100,11 +108,25 @@ rotteSpese.patch('/:id', async (req, res) => {
   const c = v.corpo(req.body);
   const campi = leggi(c, false);
   const nuovo = leggiNuovoSalvadanaio(c);
-  const set = nuovo && Object.values(campi).every((x) => x === undefined) ? null : v.setParziale(campi, 2);
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     const blocco = await bloccoSpesa(db, id);
     vietaCampi(blocco, nuovo ? [...Object.keys(c), 'obiettivo_id'] : Object.keys(c), erroreSpesaBloccata);
     if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
+    const sua = (await db.query<{ mia: boolean }>('select proprietario_id = fp_me() as mia from spese_previste where id = $1', [id])).rows[0];
+    if (!sua) return undefined;
+    await categoriaMia(db, campi.categoria_id);
+    // Chi riceve la spesa cambia solo la SUA categoria, senza toccare quella del creatore.
+    const categoriaRicevuta = sua.mia ? undefined : campi.categoria_id;
+    const modifiche = sua.mia ? campi : { ...campi, categoria_id: undefined };
+    const vuote = Object.values(modifiche).every((x) => x === undefined);
+    if (vuote && !nuovo && categoriaRicevuta === undefined) throw new ErroreApi(400, 'Nessun campo da modificare');
+    const set = vuote ? null : v.setParziale(modifiche, 2);
+    if (categoriaRicevuta !== undefined) {
+      await db.query(
+        `insert into spese_dati_utente (spesa_prevista_id, utente_id, categoria_id, vista_il) values ($1, fp_me(), $2, now())
+         on conflict (spesa_prevista_id, utente_id) do update set categoria_id = $2, vista_il = coalesce(spese_dati_utente.vista_il, now())`,
+        [id, categoriaRicevuta]);
+    }
     if (campi.obiettivo_id === null) {
       const g = (await db.query<{ nome: string }>('select o.nome from spese_previste s join obiettivi o on o.id = s.obiettivo_id where s.id = $1 and o.da_spesa', [id])).rows[0];
       if (g) throw new ErroreApi(409, `Il salvadanaio «${g.nome}» è stato creato da questa spesa: non si scollega.`);
@@ -119,6 +141,16 @@ rotteSpese.patch('/:id', async (req, res) => {
   });
   if (!spesa) throw nonTrovato('Spesa prevista');
   res.json(spesa);
+});
+
+// Chi riceve una spesa condivisa la segna come vista aprendola: l'etichetta «Nuova» sparisce. Per gli altri non fa nulla.
+rotteSpese.post('/:id/vista', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  await conUtente(res.locals.utenteId, async (db) => {
+    if (!(await db.query('select 1 from spese_previste where id = $1', [id])).rowCount) throw nonTrovato('Spesa prevista');
+    await db.query('update spese_dati_utente set vista_il = coalesce(vista_il, now()) where spesa_prevista_id = $1 and utente_id = fp_me()', [id]);
+  });
+  res.status(204).end();
 });
 
 rotteSpese.delete('/:id', async (req, res) => {
