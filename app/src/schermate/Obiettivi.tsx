@@ -9,7 +9,7 @@ import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImp
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import { meseDi, meseDiVoce } from '../mesePersonale.ts';
-import { Caricamento, fraMesi, proposta, prossimeAnnuali, sommaSuConto, suQuelConto } from './comuni.tsx';
+import { Caricamento, fraMesi, proposta, ordinaPerScadenza, prossimeAnnuali, sommaSuConto, suQuelConto } from './comuni.tsx';
 import { Affiancati, ConErrore, FinestraModulo, Meta, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
@@ -135,8 +135,8 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
     );
   };
 
-  // In ordine di scadenza, poi quelli senza scadenza per nome.
-  const ordinati = dati.filter((o) => filtro === 'tutti' || tuttiGliObiettivi([o]).some((x) => suQuelConto(x, filtro))).sort((a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it'));
+  // In ordine di prossima scadenza nel mese personale (anche i sotto-salvadanai), poi senza scadenza per nome.
+  const ordinati = ordinaPerScadenza(dati, oggiIso(), inizio).filter((o) => filtro === 'tutti' || tuttiGliObiettivi([o]).some((x) => suQuelConto(x, filtro)));
   // Stima dell'altezza di un riquadro (sotto-salvadanai nell'albero + traguardi visibili, max 3, + avviso):
   // ogni riquadro va, in ordine, nella colonna più leggera finora (due colonne indipendenti, senza righe).
   const contaFigli = (x: Obiettivo): number => x.figli.reduce((t, f) => t + 1 + contaFigli(f), 0);
@@ -326,12 +326,10 @@ type ModoCifra = 'cifra' | 'aggiungi' | 'togli';
 export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | null; onChiudi: () => void }) {
   const [modo, setModo] = useState<ModoCifra>('cifra');
   const [importo, setImporto] = useState('');
-  const [giorno, setGiorno] = useState('');
   const dettaglio = useDati<Obiettivo>(obiettivo ? `/obiettivi/${obiettivo.id}` : null).dati;
   // Con sotto-salvadanai la cifra è la somma: si cambia solo la parte messa nel padre.
   const attuale = Number(obiettivo?.saldo ?? 0), propria = Number(obiettivo?.versato ?? 0);
-  useEffect(() => { if (obiettivo) { setModo('cifra'); setImporto(importoInTesto(obiettivo.saldo)); setGiorno(dataInTesto(oggiIso())); } }, [obiettivo]);
-  const cambiaModo = (m: ModoCifra) => { setModo(m); setImporto(m === 'cifra' ? importoInTesto(attuale) : ''); };
+  useEffect(() => { if (obiettivo) { setModo('cifra'); setImporto(importoInTesto(obiettivo.saldo)); } }, [obiettivo]);
   const v = leggiImporto(importo);
   const differenza = v === null ? null : modo === 'cifra' ? Number(v) - attuale : modo === 'aggiungi' ? Number(v) : -Number(v);
   const salva = async () => {
@@ -340,18 +338,15 @@ export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | 
     if (modo === 'cifra' && Number(v) < 0) throw new Error('La cifra non può essere sotto zero');
     if (Math.abs(differenza!) < 0.005) return;
     if (propria + differenza! < -0.005) throw new Error(`Puoi togliere al massimo ${euro(propria)}: il resto è nei sotto-salvadanai`);
-    await crea(`/obiettivi/${obiettivo!.id}/versamenti`, { importo: differenza!.toFixed(2), data: serve(leggiData(giorno), 'Scegli la data'), dividi: !!obiettivo?.figli.length });
+    await crea(`/obiettivi/${obiettivo!.id}/versamenti`, { importo: differenza!.toFixed(2), data: oggiIso(), dividi: !!obiettivo?.figli.length });
   };
   return (
     <FinestraModulo titolo={obiettivo ? obiettivo.nome : ''} icona="piggy-bank" aperta={!!obiettivo} onChiudi={onChiudi} onSalva={salva}>
       <Testo colore="testo-secondario">{`Oggi ci sono ${euro(attuale)}${obiettivo?.traguardo_effettivo ? ` su ${euro(obiettivo.traguardo_effettivo)}` : ''}.${obiettivo?.figli.length ? ' Quello che aggiungi si divide tra i sotto-salvadanai, secondo quanto serve a ciascuno; puoi togliere solo la parte che non è nei sotto-salvadanai.' : ''}`}</Testo>
-      <SceltaSegmenti etichetta="Come cambiare la cifra" larghezzaPiena valore={modo} onCambia={cambiaModo}
+      <SceltaSegmenti etichetta="Come cambiare la cifra" larghezzaPiena valore={modo} onCambia={setModo}
         opzioni={[{ valore: 'cifra', testo: 'Scrivi la cifra' }, { valore: 'aggiungi', testo: 'Aggiungi' }, { valore: 'togli', testo: 'Togli' }]} />
-      <Affiancati>
-        <Meta><Campo etichetta={modo === 'cifra' ? 'Cifra di oggi' : modo === 'aggiungi' ? 'Quanto aggiungi' : 'Quanto togli'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus
-          aiuto={differenza !== null && modo === 'cifra' && Math.abs(differenza) >= 0.005 ? `${differenza > 0 ? 'Aggiungi' : 'Togli'} ${euro(Math.abs(differenza))}` : modo !== 'cifra' && differenza !== null ? `Diventano ${euro(attuale + differenza)}` : undefined} /></Meta>
-        <Meta><CampoData etichetta="Data" valore={giorno} onCambia={setGiorno} /></Meta>
-      </Affiancati>
+      <Campo etichetta={modo === 'cifra' ? 'Cifra di oggi' : modo === 'aggiungi' ? 'Quanto aggiungi' : 'Quanto togli'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus
+        aiuto={differenza !== null && modo === 'cifra' && Math.abs(differenza) >= 0.005 ? `${differenza > 0 ? 'Aggiungi' : 'Togli'} ${euro(Math.abs(differenza))}` : modo !== 'cifra' && differenza !== null ? `Diventano ${euro(attuale + differenza)}` : undefined} />
       {dettaglio?.versamenti?.length ? (
         <Voce etichetta="Ultimi versamenti">
           {dettaglio.versamenti.slice(0, 5).map((x) => (

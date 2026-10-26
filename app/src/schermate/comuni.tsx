@@ -3,7 +3,7 @@ import { Esito } from '../componenti/base.tsx';
 import type { Tono } from '../componenti/base.tsx';
 import type { ElencoSpese, Obiettivo, Profilo, Rata, Spesa } from '../dati/tipi.ts';
 import { dataSpesa, euro, oggiIso } from '../formato.ts';
-import { aggiungiMesi, mesiFinoScadenza, meseDi, mesiTraChiavi, periodoDi, proxOccorrenza, spostaChiave } from '../mesePersonale.ts';
+import { aggiungiMesi, mesiFinoScadenza, meseDi, meseDiVoce, mesiTraChiavi, periodoDi, proxOccorrenza, spostaChiave } from '../mesePersonale.ts';
 import { d, useTema } from '../tema/tema.tsx';
 
 // Pezzi condivisi tra le schermate.
@@ -146,6 +146,25 @@ export function calendarioAnnuali(spese: Spesa[], da = oggiIso(), inizio = 1) {
     }
   }
   return mesi;
+}
+
+// Ordine dei salvadanai per prossima scadenza nel ciclo del mese personale (come le annuali): chiave = mese
+// personale + giorno (senza giorno = inizio mese). Gli scaduti non raggiunti hanno un mese passato, quindi
+// vengono per primi (urgenti); uno scaduto già raggiunto conta come mese in corso. Senza scadenza in fondo,
+// poi per nome. Ordina anche i figli; un padre usa la scadenza più vicina tra sé e i suoi discendenti.
+export function ordinaPerScadenza(xs: Obiettivo[], da = oggiIso(), inizio = 1): Obiettivo[] {
+  const adesso = meseDi(da, inizio);
+  const propria = (o: Obiettivo): string | null => {
+    const dt = o.paga_spesa ? o.paga_spesa.prossima : o.scadenza;
+    if (!dt) return null;
+    const senza = !!o.paga_spesa?.senza_giorno, mese = meseDiVoce(dt, senza, inizio);
+    const giorno = senza ? '00' : dt.slice(8, 10);
+    return mese < adesso && o.percentuale !== null && o.percentuale >= 100 ? `${adesso}-00` : `${mese}-${giorno}`;
+  };
+  const rami = xs.map((o) => ({ ...o, figli: ordinaPerScadenza(o.figli, da, inizio) }));
+  const chiave = (o: Obiettivo): string | null => [propria(o), ...o.figli.map(chiave)].filter((k): k is string => !!k).sort()[0] ?? null;
+  const k = new Map(rami.map((o) => [o.id, chiave(o)]));
+  return rami.sort((a, b) => (k.get(a.id) ?? '9999').localeCompare(k.get(b.id) ?? '9999') || a.nome.localeCompare(b.nome, 'it'));
 }
 
 // Mesi personali da oggi alla scadenza, almeno 1: il mese della scadenza conta.
