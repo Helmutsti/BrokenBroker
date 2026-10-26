@@ -11,6 +11,7 @@ import type { Conto, ControlloRate, ElencoSpese, Obiettivo, Rata, RiepilogoMese,
 import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { ombre } from '../tema/token.ts';
+import { meseDi } from '../mesePersonale.ts';
 import { Caricamento, divisioneTraSotto, importoDelMese, proxSpesa, quando, rateDelMese, tuttiGliObiettivi, vociDelMese } from './comuni.tsx';
 import { DaGirareAiConti } from './DaGirare.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
@@ -59,6 +60,7 @@ export function Panoramica() {
   const r = riepilogo.dati, elencoCompleto = spese.dati, profilo = rif.profilo;
   if (!r || !elencoCompleto || !profilo) return <Caricamento errore={riepilogo.errore ?? spese.errore} />;
   // Un conto scelto: solo le sue spese e rate (quelle senza conto compaiono solo in «Tutti i conti») e il suo saldo.
+  const inizio = profilo.inizio_mese;
   const conti = rif.conti.filter((x) => !x.archiviato);
   const conto = conti.find((x) => x.id === contoScelto) ?? null;
   const titoloSaldo = conto ? `Su ${conto.nome} oggi` : 'Sui conti oggi';
@@ -68,9 +70,11 @@ export function Panoramica() {
   // In ordine di uscita: la data nel mese, poi il nome.
   const perUscita = (a: Spesa, b: Spesa) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome);
   const conGiorno = (s: Spesa) => [s.scadenza ? (s.senza_giorno ? nomeMeseMinuscolo(s.scadenza.slice(0, 7)) : `il ${Number(s.scadenza.slice(8, 10))}`) : null, s.conto].filter(Boolean).join(' · ') || '—';
-  const { fisse, budget, investimenti, salvadanai, annuali } = vociDelMese(el, profilo, perUscita);
+  const { fisse, budget, investimenti, salvadanai, annuali } = vociDelMese(el, perUscita);
   // Annuali (e biennali ecc.): contano ogni mese con la quota mensile, in ordine di prossima uscita.
-  const prossima = (s: Spesa) => (s.nel_mese && s.scadenza ? s.scadenza : proxSpesa(s, p.dal) ?? '9999');
+  const prossima = (s: Spesa) => (s.nel_mese && s.scadenza ? s.scadenza : proxSpesa(s, p.dal, inizio) ?? '9999');
+  // Il mese personale in cui esce (non il mese di calendario della data).
+  const meseProssima = (s: Spesa) => { const x = prossima(s); return x === '9999' ? x : meseDi(x, inizio); };
   const annualiTutte = annuali.sort((a, b) => prossima(a).localeCompare(prossima(b)) || a.nome.localeCompare(b.nome, 'it'));
   const annoAnnuali = annualiTutte.reduce((t, s) => t + Number(s.quota_mensile) * 12, 0);
   const rateMese = rateDelMese(rate, p.dal, p.al);
@@ -115,7 +119,7 @@ export function Panoramica() {
   const dettaglioSalvadanaio = (s: Spesa) => {
     const o = tuttiObiettivi.find((x) => x.id === s.alimenta_obiettivo_id);
     if (!o?.figli.length) return undefined;
-    const { parti, resto } = divisioneTraSotto(o, Number(s.mia_quota));
+    const { parti, resto } = divisioneTraSotto(o, Number(s.mia_quota), inizio);
     return { etichetta: `${o.figli.length} ${o.figli.length === 1 ? 'voce' : 'voci'} dentro`, righe: parti.map((p) => ({ nome: p.obiettivo.nome, importo: euro(p.importo) })),
       nota: `Si spunta solo la riga sopra: ${euro(s.mia_quota)} si dividono da soli secondo quanto serve a ciascuno${resto > 0.005 ? `, ${euro(resto)} restano nel salvadanaio` : ''}.` };
   };
@@ -125,8 +129,8 @@ export function Panoramica() {
   type Riga = { chiave: string; nome: string; scadenza: string | null; tipo: Tipo; categoria: string | null; importo: number; vista: (conIcona: boolean) => ReactNode };
   // Un'annuale: in grande la quota del mese (la spunta vuol dire "messa da parte"), sotto quando esce davvero.
   const rigaAnnuale = (s: Spesa): Riga => ({ chiave: s.id, nome: s.nome, scadenza: s.scadenza, tipo: 'annuali', categoria: s.categoria_id, importo: Number(s.quota_mensile), vista: () => (
-    <VoceDaSpuntare key={s.id} nome={s.nome} conto={s.nel_mese ? conGiorno(s) : quando(s)} importo={euro(s.quota_mensile)}
-      sottoImporto={s.nel_mese ? `esce questo mese: ${euro(s.mia_quota)}` : `esce a ${nomeMeseMinuscolo(prossima(s).slice(0, 7))}`}
+    <VoceDaSpuntare key={s.id} nome={s.nome} conto={s.nel_mese ? conGiorno(s) : quando(s, inizio)} importo={euro(s.quota_mensile)}
+      sottoImporto={s.nel_mese ? `esce questo mese: ${euro(s.mia_quota)}` : `esce a ${nomeMeseMinuscolo(meseProssima(s))}`}
       icona={s.icona ?? 'calendar'} salvadanaio={colSalvadanaio(s)} fatta={s.uscita} onSpunta={() => spunta(s)} onApri={() => setSpesa(s)} />) });
   const righe: Riga[] = [
     ...fisse.map((s) => ({ s, tipo: 'fisse' as const, vista: (i: boolean) => voce(s, i) })),
@@ -147,7 +151,7 @@ export function Panoramica() {
   // Per tipo, le annuali sono un gruppo sempre presente con tutte le annuali attive, a rotazione:
   // dal mese in corso in avanti, un mese dopo l'altro (richiesta di Manuel).
   const rotazione = () => annualiTutte.flatMap((s, i) => {
-    const m = prossima(s).slice(0, 7), primo = i === 0 || prossima(annualiTutte[i - 1]).slice(0, 7) !== m;
+    const m = meseProssima(s), primo = i === 0 || meseProssima(annualiTutte[i - 1]) !== m;
     const etichetta: Riga[] = primo && m !== '9999' ? [{ chiave: `mese-${m}`, nome: '', scadenza: null, tipo: 'annuali', categoria: null, importo: 0, vista: () => (
       <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ paddingHorizontal: d['margine-voce-h'], paddingTop: d['spazio-icona'] }}>{m === mese ? `${nomeMese(m)} · questo mese` : nomeMese(m)}</Testo>) }] : [];
     return [...etichetta, rigaAnnuale(s)];

@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useContext, useMemo, useState } from 'react';
 import { oggiIso } from '../formato.ts';
+import { meseDi } from '../mesePersonale.ts';
 import { useDati } from './api.ts';
 import type { Categoria, Conto, Profilo } from './tipi.ts';
 
@@ -18,13 +19,7 @@ type Riferimenti = {
 const Contesto = createContext<Riferimenti | null>(null);
 
 // Mese dell'app in corso, secondo il giorno di inizio del profilo.
-export function meseInCorso(inizio: number): string {
-  const o = oggiIso();
-  const m = o.slice(0, 7);
-  if (Number(o.slice(8, 10)) >= inizio) return m;
-  const [a, mm] = m.split('-').map(Number);
-  return mm === 1 ? `${a - 1}-12` : `${a}-${String(mm - 1).padStart(2, '0')}`;
-}
+export const meseInCorso = (inizio: number): string => meseDi(oggiIso(), inizio);
 
 export function FornitoreRiferimenti({ children }: { children: ReactNode }) {
   const profilo = useDati<Profilo>('/profilo').dati;

@@ -8,6 +8,7 @@ import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Condivisione, ElencoSpese, Obiettivo, PersonaSistema, Spesa, TipoSpesa } from '../dati/tipi.ts';
 import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { d, Testo } from '../tema/tema.tsx';
+import { meseDi, primaOccorrenzaPersonale } from '../mesePersonale.ts';
 import { Caricamento, calendarioAnnuali, eAnnuale, proxSpesa, prossimeAnnuali, quando, segnoQuota } from './comuni.tsx';
 import { ConErrore, FinestraModulo, Riquadro, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
@@ -29,6 +30,7 @@ export function SpesePreviste() {
   const [aperta, setAperta] = useState<Spesa | 'nuova' | null>(null);
   if (!dati) return <Caricamento errore={errore} />;
 
+  const inizio = rif.profilo?.inizio_mese ?? 1;
   const attive = dati.spese.filter((s) => s.attiva);
   const mensili = attive.filter((s) => s.ogni_mesi === 1);
   const somma = (xs: Spesa[]) => xs.reduce((t, s) => t + Number(s.mia_quota), 0);
@@ -48,16 +50,16 @@ export function SpesePreviste() {
     ['Investimenti · ogni mese', ogniMese.filter((s) => s.tipo === 'investimento')],
   ];
   // Annuali in ordine di prossima uscita; le "una volta sola" in fondo.
-  const prossima = (s: Spesa) => proxSpesa(s) ?? '9999';
+  const prossima = (s: Spesa) => proxSpesa(s, oggiIso(), inizio) ?? '9999';
   const annuali = periodiche.filter((s) => s.ogni_mesi !== null).sort((x, y) => prossima(x).localeCompare(prossima(y)));
   const unaVolta = periodiche.filter((s) => s.ogni_mesi === null);
-  const copertura = prossimeAnnuali(attive, obiettivi);
-  const scoperti = new Set(copertura.elenco.filter((x) => x.copertura.tono === 'attenzione').map((x) => x.quando.slice(0, 7)));
-  const calendario = calendarioAnnuali(attive);
+  const copertura = prossimeAnnuali(attive, obiettivi, 3, oggiIso(), inizio);
+  const scoperti = new Set(copertura.elenco.filter((x) => x.copertura.tono === 'attenzione').map((x) => meseDi(x.quando, inizio)));
+  const calendario = calendarioAnnuali(attive, oggiIso(), inizio);
   const vediMese = filtro !== 'periodiche', vediAnnuali = filtro !== 'mese';
   const riga = (s: Spesa, alMese?: string) => (
     <RigaSpesa key={s.id} nome={s.nome} categoria={s.categoria_padre ? `${s.categoria_padre} › ${s.categoria}` : s.categoria ?? '—'} conto={s.conto ?? '—'}
-      quando={quando(s)} totale={euro(s.importo)} quota={alMese ?? euro(s.mia_quota) + segnoQuota(s)} icona={s.icona ?? 'ellipsis'} onApri={() => setAperta(s)} />
+      quando={quando(s, inizio)} totale={euro(s.importo)} quota={alMese ?? euro(s.mia_quota) + segnoQuota(s)} icona={s.icona ?? 'ellipsis'} onApri={() => setAperta(s)} />
   );
   const nuova = <Pulsante tipo="primario" etichetta="Nuova spesa prevista" icona="plus" onPress={() => setAperta('nuova')} />;
 
@@ -128,14 +130,9 @@ export function SpesePreviste() {
 const OPZIONI_MESE = [{ valore: '', testo: '—' }, ...Array.from({ length: 12 }, (_, i) => ({ valore: String(i + 1), testo: nomeMese(`2000-${String(i + 1).padStart(2, '0')}`, false) }))];
 const giorniDel = (anno: number, mese: number) => new Date(Date.UTC(anno, mese, 0)).getUTCDate();
 
-// La data intera che si salva (l'anno non si chiede e non si mostra): la prima occorrenza di giorno e mese da oggi in poi.
-// Senza giorno vale tutto il mese: si salva il giorno 1 e il mese in corso è ancora buono.
-export function primaOccorrenza(giorno: number | null, mese: number, oggi = oggiIso()): string {
-  const [a, m, g] = oggi.split('-').map(Number);
-  const iso = (anno: number) => `${anno}-${String(mese).padStart(2, '0')}-${String(Math.min(giorno ?? 1, giorniDel(anno, mese))).padStart(2, '0')}`;
-  const passata = giorno === null ? mese < m : mese < m || (mese === m && Math.min(giorno, giorniDel(a, mese)) < g);
-  return iso(passata ? a + 1 : a);
-}
+// La data intera che si salva (l'anno non si chiede e non si mostra): la prima occorrenza di giorno e mese da oggi in poi,
+// contando per mesi personali (il mese personale in corso è ancora buono). Senza giorno vale tutto il mese personale: si salva il giorno 1.
+export const primaOccorrenza = primaOccorrenzaPersonale;
 
 const NON_SPECIFICATO = 'non-specificato';
 // SC-03 Aggiungi o modifica una spesa prevista (finestra al centro, variante B).
@@ -176,7 +173,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     const s = spesa;
     setNome(s?.nome ?? ''); setImporto(importoInTesto(s?.importo)); setGiornoMese(s?.prossima_scadenza && !s.senza_giorno ? String(Number(s.prossima_scadenza.slice(8, 10))) : '');
     // Il mese si chiede solo se la spesa non esce ogni mese; l'anno non si mostra mai.
-    setMeseScad(s?.prossima_scadenza && s.ogni_mesi !== 1 ? String(Number((proxSpesa(s) ?? s.prossima_scadenza).slice(5, 7))) : '');
+    setMeseScad(s?.prossima_scadenza && s.ogni_mesi !== 1 ? String(Number((proxSpesa(s, oggiIso(), rif.profilo?.inizio_mese ?? 1) ?? s.prossima_scadenza).slice(5, 7))) : '');
     setDataUna(s && s.ogni_mesi === null ? dataInTesto(s.prossima_scadenza) : '');
     setDiviso(!!s && (s.condivisa || (s.mia && s.mia_percentuale < 100))); setCondiviso(s?.condivisa ?? false); setCon(null); setDivisione(!s || s.mia_percentuale === 50 || s.mia_percentuale === 100 ? 'meta' : 'altra'); setMiaQuota(String(s?.mia_percentuale ?? 50));
     setFrequenza(!s || s.ogni_mesi === 1 ? 'mese' : s.ogni_mesi === null ? 'una' : s.ogni_mesi === 12 ? 'anno' : s.ogni_mesi === 24 ? 'biennale' : 'n'); setOgniN(String(s?.ogni_mesi && s.ogni_mesi > 1 ? s.ogni_mesi : 6));
@@ -200,10 +197,9 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   }, [obiettivi]);
   const collegato = spesa?.obiettivo_id ? tuttiObiettivi.find((o) => o.id === spesa.obiettivo_id) ?? null : null;
   const generato = !!collegato?.bloccato_da; // nato da questa spesa
-  const annualiId = rif.profilo?.obiettivo_annuali && opzioniPadri.some((o) => o.valore === rif.profilo!.obiettivo_annuali) ? rif.profilo.obiettivo_annuali : null;
   const eAnnualeForm = tipo !== 'budget' && frequenza !== 'mese';
-  const doveEff = dove ?? (eAnnualeForm && frequenza !== 'una' && annualiId ? 'sotto' : 'solo');
-  const padreEff = padre ?? annualiId;
+  const doveEff = dove ?? 'solo';
+  const padreEff = padre;
 
   // Decisione 37: una spesa nata da un salvadanaio si cambia da lì; restano libere categoria, note, attiva e divisione.
   const bloc = spesa?.bloccato_da ?? null;
@@ -232,7 +228,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
         prima = `${a}-${String(m).padStart(2, '0')}-${String(Math.min(g, giorniDel(a, m))).padStart(2, '0')}`;
       }
     } else if (meseScad) {
-      prima = primaOccorrenza(g, Number(meseScad));
+      prima = primaOccorrenza(g, Number(meseScad), oggiIso(), rif.profilo?.inizio_mese ?? 1);
       senzaGiorno = g === null;
     } else if (g !== null) serve(null, 'Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese', 'scadenza');
     else serve(null, 'Scegli almeno il mese in cui esce: da lì si ripete', 'scadenza');

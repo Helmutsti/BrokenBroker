@@ -16,7 +16,7 @@ export function DaGirareAiConti() {
   const rate = useDati<Rata[]>(`/rate?mese=${mese}`).dati ?? [];
   if (!spese || !profilo) return null;
 
-  const { delConto } = vociDelMese(spese, profilo);
+  const { delConto } = vociDelMese(spese);
   const rateMese = rateDelMese(rate, spese.periodo.dal, spese.periodo.al);
   const perConto = new Map<string, { daUscire: number; inTutto: number }>();
   const aggiungi = (nome: string | null, importo: number, spuntata: boolean) => {

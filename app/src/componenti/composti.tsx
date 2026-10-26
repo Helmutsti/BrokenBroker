@@ -152,7 +152,7 @@ export function Intestazione({ titolo, sottotitolo, azioni }: { titolo: string; 
 }
 
 // ---- CMP-22 Scheda ----
-export function Scheda({ titolo, nota, icona, children, azione, style }: { titolo?: string; nota?: string; icona?: string; children: ReactNode; azione?: ReactNode; style?: object }) {
+export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, style }: { titolo?: string; nota?: string; icona?: string; children: ReactNode; azione?: ReactNode; dopoTitolo?: ReactNode; style?: object }) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
@@ -160,7 +160,8 @@ export function Scheda({ titolo, nota, icona, children, azione, style }: { titol
       {titolo ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: compatto ? 'wrap' : 'nowrap', gap: d['spazio-icona'] }}>
           {icona ? <Tessera icona={icona} misura="piccola" /> : null}
-          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1, minWidth: compatto ? 120 : undefined }}>{titolo}</Testo>
+          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={dopoTitolo ? { flexShrink: 1 } : { flex: 1, minWidth: compatto ? 120 : undefined }}>{titolo}</Testo>
+          {dopoTitolo ? <>{dopoTitolo}<View style={{ flex: 1 }} /></> : null}
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
           {azione}
         </View>
@@ -765,6 +766,72 @@ export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string
         backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent' }, anelloFocus(c, s.focused)]}>
       <Testo stile="numero-grande">{cifra}</Testo>
     </Pressable>
+  );
+}
+
+// ---- Riga salvadanaio ----
+// Schizzo di Manuel: icona, nome, barra, «X su Y» (si preme per cambiare la cifra) e la matita.
+// Variante «testata»: titolo del riquadro (testo più forte, matita dopo il nome, visibile in hover).
+// Variante «sotto»: riga di un sotto-salvadanaio (matita in fondo alla riga).
+export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
+  nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
+}) {
+  const { c } = useTema();
+  const stretto = useCompatto();
+  const testata = variante === 'testata';
+  const matita = <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} fantasma nascosto={matitaNascosta || propria} onPress={onModifica} />;
+  const titolo = <Testo stile={testata ? 'titolo-scheda' : 'corpo-normale'} accessibilityRole={testata ? 'header' : undefined} aria-level={testata ? 2 : undefined} numberOfLines={stretto ? 2 : 1} style={{ flexShrink: 1 }}>{nome}</Testo>;
+  const cifraPremibile = (
+    <Pressable accessibilityRole="button" accessibilityLabel={`Cambia la cifra di ${nome}: ${cifra.replace('/', ' di ')}${percentuale ? `, ${percentuale}` : ''}`} onPress={onCifra}
+      style={(s: StatoPressione) => [{ flexShrink: 0, minHeight: stretto ? 44 : ALTEZZA_CONTROLLO, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
+        backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent', cursor: 'pointer' } as object, anelloFocus(c, s.focused)]}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: d['spazio-icona'] }}>
+        <Testo stile="corpo-forte" numberOfLines={1}>{cifra}</Testo>
+        {percentuale ? <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{percentuale}</Testo> : null}
+      </View>
+    </Pressable>
+  );
+  const dettaglio = nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null;
+  if (stretto) return (
+    // Telefono: in colonna, nome e cifra sopra, barra sotto.
+    <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+        <Tessera icona={icona} misura="piccola" />
+        <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' }}>{titolo}</View>
+        {cifraPremibile}
+        {propria ? null : matita}
+      </View>
+      {propria ? null : <View style={{ flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
+      {dettaglio}
+    </View>
+  );
+  if (!testata) return (
+    // «sotto»: icona, nome, cifra e matita sulla riga; barra sotto a tutta larghezza (come sul telefono).
+    <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+        <Tessera icona={icona} misura="piccola" />
+        <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' }}>{titolo}</View>
+        {cifraPremibile}
+        {propria ? null : matita}
+      </View>
+      {propria ? null : <View style={{ flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
+      {dettaglio}
+    </View>
+  );
+  return (
+    // «testata»: nome con matita, barra in mezzo, cifra.
+    <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+        <View style={{ flexGrow: 0, flexShrink: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+          <Tessera icona={icona} misura="piccola" />
+          {titolo}
+          {propria ? null : matita}
+        </View>
+        {propria ? null : <View style={{ flex: 1, minWidth: 0, flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
+        <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>{cifraPremibile}</View>
+      </View>
+      {dettaglio}
+    </View>
   );
 }
 

@@ -3,7 +3,7 @@ import type { PoolClient } from 'pg';
 import { bloccoObiettivo, erroreObiettivoBloccato, vietaCampi, vietaPromemoria, sqlBloccoObiettivo, type Blocco } from '../collegamenti.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { aggiungiMesi, mesiTra, oggi, periodoRichiesto } from '../periodo.ts';
+import { inizioMese, meseDi, mesiFino, oggi, periodoRichiesto, prossimaUscita } from '../periodo.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
 
@@ -21,23 +21,10 @@ type Nodo = {
   paga_spesa?: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string; senza_giorno: boolean } | null;
   // La spesa "mettici da parte" che riempie l'obiettivo.
   alimentato_da?: { id: string; importo: string; ogni_mesi: number | null; conto_id: string | null } | null;
-  // Se il salvadanaio nasce da una spesa (Dividi per spesa): quali campi si cambiano solo da lì.
+  // Se il salvadanaio nasce da una spesa (modulo della spesa): quali campi si cambiano solo da lì.
   bloccato_da: Blocco | null;
-  // È il salvadanaio delle spese annuali: non ha un promemoria suo.
-  contenitore_annuali: boolean;
   figli: Nodo[];
 };
-
-// Prossima uscita da `da` di una voce che parte da `prima` e si ripete ogni `ogni` mesi.
-export function prossimaUscita(prima: string | null, ogni: number, da: string, senzaGiorno = false): string {
-  // Una spesa senza giorno cade nel mese: tutto il mese conta, anche se il giorno 1 è già passato.
-  if (senzaGiorno) da = `${da.slice(0, 7)}-01`;
-  let q = prima ?? da;
-  for (let k = 1; q < da && k < 2400; k++) q = aggiungiMesi(prima ?? da, k * ogni);
-  return q;
-}
-// Mesi da oggi alla scadenza, almeno 1: il mese della scadenza conta.
-const mesiFino = (scadenza: string, da: string) => Math.max(1, mesiTra(da, scadenza) + 1);
 
 const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 const percento = (parte: number, tutto: number) => Math.min(100, Math.round((parte / tutto) * 100));
@@ -52,7 +39,6 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
             o.proprietario_id = fp_me() as mio,
             exists (select 1 from condivisioni s where s.obiettivo_id = o.id) as condiviso,
             ${sqlBloccoObiettivo('o')} as bloccato_da,
-            exists (select 1 from utenti u where u.obiettivo_annuali = o.id) as contenitore_annuali,
             coalesce((select sum(x.importo) from versamenti x where x.obiettivo_id = o.id), 0)::text as versato
        from obiettivi o order by o.nome`)).rows;
   const traguardi = (await db.query(
@@ -61,12 +47,12 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
     prossima_scadenza: string | null; senza_giorno: boolean; importo: string; conto_id: string | null }>(
     `select id, nome, obiettivo_id, alimenta_obiettivo_id, ogni_mesi, prossima_scadenza, senza_giorno, importo::text as importo, conto_id from spese_previste
       where attiva and (alimenta_obiettivo_id is not null or (obiettivo_id is not null and ogni_mesi > 1 and tipo <> 'budget'))`)).rows;
-  const oggiQui = oggi();
+  const oggiQui = oggi(), inizio = await inizioMese(db);
   const perId = new Map(nodi.map((n) => {
     const paga = collegate.find((s) => s.obiettivo_id === n.id && s.ogni_mesi && s.ogni_mesi > 1);
     const alim = collegate.find((s) => s.alimenta_obiettivo_id === n.id);
     const nodo: Nodo = { ...n, figli: [],
-      paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui, paga.senza_giorno), senza_giorno: paga.senza_giorno } : null,
+      paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui, paga.senza_giorno, inizio), senza_giorno: paga.senza_giorno } : null,
       alimentato_da: alim ? { id: alim.id, importo: alim.importo, ogni_mesi: alim.ogni_mesi, conto_id: alim.conto_id } : null };
     // Un salvadanaio di una spesa annuale si prepara per la prossima uscita, del suo importo.
     if (nodo.paga_spesa) { nodo.scadenza = nodo.paga_spesa.prossima; if (nodo.traguardo === null) nodo.traguardo = nodo.paga_spesa.importo; }
@@ -95,9 +81,9 @@ export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
 
 // Quanto serve ogni mese a un obiettivo per arrivare al traguardo in tempo
 // (senza scadenza: tutto quello che manca, come peso).
-function bisogno(n: Nodo, da: string): number {
+function bisogno(n: Nodo, da: string, inizio: number): number {
   const manca = n.traguardo_effettivo === null ? 0 : Math.max(0, Number(n.traguardo_effettivo) - Number(n.saldo));
-  return n.scadenza && n.scadenza >= da ? manca / mesiFino(n.scadenza, da) : manca;
+  return n.scadenza && meseDi(n.scadenza, inizio) >= meseDi(da, inizio) ? manca / mesiFino(n.scadenza, da, inizio) : manca;
 }
 
 // Un versamento in un obiettivo con sotto-obiettivi si divide tra loro in
@@ -106,8 +92,8 @@ function bisogno(n: Nodo, da: string): number {
 export async function dividiVersamento(db: PoolClient, id: string, importo: number): Promise<{ obiettivo_id: string; importo: string }[]> {
   const n = trova(await alberoObiettivi(db), id);
   if (!n || !n.figli.length || importo <= 0) return [{ obiettivo_id: id, importo: cent(importo) }];
-  const da = oggi();
-  const pesi = n.figli.map((f) => ({ f, peso: bisogno(f, da), manca: f.traguardo_effettivo === null ? 0 : Math.max(0, Number(f.traguardo_effettivo) - Number(f.saldo)) }));
+  const da = oggi(), inizio = await inizioMese(db);
+  const pesi = n.figli.map((f) => ({ f, peso: bisogno(f, da, inizio), manca: f.traguardo_effettivo === null ? 0 : Math.max(0, Number(f.traguardo_effettivo) - Number(f.saldo)) }));
   const totale = pesi.reduce((t, x) => t + x.peso, 0);
   const parti: { obiettivo_id: string; importo: string }[] = [];
   let resto = Math.round(importo * 100);
@@ -233,11 +219,16 @@ rotteObiettivi.put('/:id/promemoria', async (req, res) => {
     if (!nome) throw nonTrovato('Obiettivo');
     await vietaPromemoria(db, id);
     const esistente = (await db.query<{ id: string }>('select id from spese_previste where alimenta_obiettivo_id = $1 limit 1', [id])).rows[0];
+    // Il promemoria vale per tutto il mese personale (decisione 41): ogni N mesi, a partire da quello in corso, senza giorno.
+    const meseQui = `${meseDi(oggi(), await inizioMese(db))}-01`;
     const spesaId = esistente
-      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = $4, conto_id = $5, tipo = 'investimento' where id = $1 returning id`,
-          [esistente.id, nome, importo, ogni, conto])).rows[0].id
-      : (await db.query<{ id: string }>(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, tipo, alimenta_obiettivo_id, conto_id)
-          values (fp_me(), $1, $2, $3, $4, 'investimento', $5, $6) returning id`, [nome, importo, ogni, ogni === 1 ? null : oggi(), id, conto])).rows[0].id;
+      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = $4, conto_id = $5, tipo = 'investimento',
+            prossima_scadenza = case when $4 = 1 then null else coalesce(prossima_scadenza, $6::date) end,
+            senza_giorno = case when $4 = 1 then false when prossima_scadenza is null then true else senza_giorno end
+          where id = $1 returning id`,
+          [esistente.id, nome, importo, ogni, conto, meseQui])).rows[0].id
+      : (await db.query<{ id: string }>(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, senza_giorno, tipo, alimenta_obiettivo_id, conto_id)
+          values (fp_me(), $1, $2, $3, $4, $7, 'investimento', $5, $6) returning id`, [nome, importo, ogni, ogni === 1 ? null : meseQui, id, conto, ogni !== 1])).rows[0].id;
     return (await speseDelMese(db, await periodoRichiesto(db, undefined), spesaId))[0];
   });
   res.json(spesa);
@@ -296,7 +287,7 @@ rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// Inserisce un salvadanaio (usato da "Dividi per spesa" e dal modulo della spesa).
+// Inserisce un salvadanaio (usato dal modulo della spesa).
 // da_spesa = true: nasce da una spesa e resta bloccato finché una spesa lo paga (decisione 37).
 export async function inserisciSalvadanaio(db: PoolClient, o: { nome: string; padre_id?: string | null; traguardo?: string | null; scadenza?: string | null; icona?: string | null; da_spesa?: boolean }): Promise<string> {
   return (await db.query<{ id: string }>(
@@ -327,57 +318,12 @@ export async function creaSalvadanaioDaSpesa(db: PoolClient, spesaId: string, do
     padre = await inserisciSalvadanaio(db, { nome: dove.contenitore });
   }
   const periodica = s.tipo !== 'budget' && s.ogni_mesi !== 1;
-  const prossima = s.prossima_scadenza && !s.senza_giorno ? (s.ogni_mesi === null ? s.prossima_scadenza : prossimaUscita(s.prossima_scadenza, s.ogni_mesi, oggi())) : null;
+  const prossima = s.prossima_scadenza ? prossimaUscita(s.prossima_scadenza, s.ogni_mesi, oggi(), s.senza_giorno, (await periodoRichiesto(db, undefined)).inizio) : null;
   const id = await inserisciSalvadanaio(db, { nome: s.nome, padre_id: padre, traguardo: periodica ? s.mia_quota : null,
     scadenza: periodica ? prossima : null, icona: s.icona, da_spesa: true });
   await db.query('update spese_previste set obiettivo_id = $2 where id = $1', [spesaId, id]);
   return id;
 }
-
-// Il salvadanaio delle spese annuali diviso per spesa: per ogni spesa annuale o
-// periodica pagata dal salvadanaio stesso nasce un sotto-obiettivo che la paga (le
-// annuali pagate da un altro salvadanaio restano lì) (traguardo e scadenza vengono
-// dalla spesa). I soldi già messi da parte vanno ai sotto-obiettivi come se si fossero
-// riempiti di un dodicesimo al mese, prima le scadenze più vicine.
-// Non nasce nessuna voce mensile per il contenitore: la quota di ogni annuale conta da sola.
-async function dividiAnnuali(db: PoolClient, id: string) {
-  const padre = trova(await alberoObiettivi(db), id);
-  if (!padre) throw nonTrovato('Obiettivo');
-  if (!padre.mio) throw new ErroreApi(403, "Solo chi ha creato l'obiettivo può dividerlo");
-  const da = oggi();
-  const spese = (await speseDelMese(db, await periodoRichiesto(db, undefined)))
-    .filter((s) => s.attiva && s.mia && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1 && s.obiettivo_id === id);
-  const nuove: { figlio: string; quando: string; dovrebbe: number }[] = [];
-  for (const s of spese) {
-    const figlio = await inserisciSalvadanaio(db, { nome: s.nome, padre_id: id, traguardo: s.mia_quota, da_spesa: true });
-    await db.query('update spese_previste set obiettivo_id = $2 where id = $1', [s.id, figlio]);
-    const quando = prossimaUscita(s.prossima_scadenza, s.ogni_mesi!, da, s.senza_giorno);
-    const passati = Math.max(0, Math.min(s.ogni_mesi!, mesiTra(aggiungiMesi(quando, -s.ogni_mesi!), da) - (Number(da.slice(8)) < Number(quando.slice(8)) ? 1 : 0)));
-    nuove.push({ figlio, quando, dovrebbe: Math.round(Number(s.mia_quota) * passati / s.ogni_mesi! * 100) / 100 });
-  }
-  let resto = Math.max(0, Number(padre.versato));
-  for (const x of nuove.sort((a, b) => a.quando.localeCompare(b.quando))) {
-    const parte = Math.min(resto, x.dovrebbe);
-    if (parte <= 0) continue;
-    await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo) values ($1, fp_me(), $2, $3), ($4, fp_me(), $2, $5)',
-      [id, da, (-parte).toFixed(2), x.figlio, parte.toFixed(2)]);
-    resto -= parte;
-  }
-  await db.query('update utenti set obiettivo_annuali = $1 where id = fp_me()', [id]);
-}
-
-rotteObiettivi.post('/:id/annuali', async (req, res) => {
-  const id = v.idPercorso(req.params.id);
-  const tutte = v.booleano(v.corpo(req.body ?? {}), 'tutte');
-  const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
-    // "Aggiungi tutte le annuali": prima prende le annuali senza salvadanaio (quelle pagate da un altro non si toccano).
-    if (tutte) await db.query(`update spese_previste set obiettivo_id = $1
-                               where proprietario_id = fp_me() and attiva and tipo <> 'budget' and alimenta_obiettivo_id is null and ogni_mesi > 1 and obiettivo_id is null`, [id]);
-    await dividiAnnuali(db, id);
-    return trova(await alberoObiettivi(db), id);
-  });
-  res.json(obiettivo);
-});
 
 // Traguardi di copertura.
 rotteObiettivi.post('/:id/traguardi', async (req, res) => {

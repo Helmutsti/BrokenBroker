@@ -47,7 +47,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
     [p.dal, p.al, soloId ?? null]);
 
   return rows.map((s) => {
-    const scadenza = s.tipo === 'budget' ? p.dal : scadenzaNelPeriodo(s.prossima_scadenza, s.ogni_mesi, p);
+    const scadenza = s.tipo === 'budget' ? p.dal : scadenzaNelPeriodo(s.prossima_scadenza, s.ogni_mesi, p, s.senza_giorno);
     const pct = s.percentuale_scritta !== null ? Number(s.percentuale_scritta) : s.condivisa ? 50 : s.mia ? 100 : 0;
     const importo = Number(s.importo);
     return {

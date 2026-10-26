@@ -72,14 +72,14 @@ export function Pulsante({ etichetta, icona, tipo = 'secondario', onPress, disat
 
 // ---- CMP-04 Pulsante solo icona ----
 // Quadrato alto come gli altri controlli; "lato" più piccolo quando sta dentro un altro contorno.
-export function PulsanteIcona({ icona, etichetta, onPress, fantasma, disattivato, lato: latoBase = ALTEZZA_CONTROLLO }: { icona: string; etichetta: string; onPress?: () => void; fantasma?: boolean; disattivato?: boolean; lato?: number }) {
+export function PulsanteIcona({ icona, etichetta, onPress, fantasma, disattivato, lato: latoBase = ALTEZZA_CONTROLLO, nascosto }: { icona: string; etichetta: string; onPress?: () => void; fantasma?: boolean; disattivato?: boolean; lato?: number; nascosto?: boolean }) {
   const { c } = useTema();
   const lato = useCompatto() ? Math.max(latoBase, 44) : latoBase;
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={etichetta} onPress={onPress} disabled={disattivato}
       style={(s: StatoPressione) => [{
         width: lato, height: lato, alignItems: 'center', justifyContent: 'center', borderRadius: d['raggio-controllo'],
-        borderWidth: d['misura-bordo'], borderColor: fantasma ? 'transparent' : c['bordo-controllo'], opacity: disattivato ? d['opacita-disattivato'] : 1,
+        borderWidth: d['misura-bordo'], borderColor: fantasma ? 'transparent' : c['bordo-controllo'], opacity: nascosto && !s.focused ? 0 : disattivato ? d['opacita-disattivato'] : 1,
         backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent',
       }, anelloFocus(c, s.focused)]}>
       <Icona nome={icona} misura={16} />

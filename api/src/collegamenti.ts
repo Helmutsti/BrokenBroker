@@ -44,14 +44,11 @@ export async function bloccoSpesa(db: PoolClient, id: string): Promise<Blocco | 
   return rows[0]?.b ?? null;
 }
 
-// Il promemoria "ricordami" non si crea su un salvadanaio generato da una spesa né
-// sul contenitore delle annuali: la quota arriva già dalle spese (niente cicli).
+// Il promemoria "ricordami" non si crea su un salvadanaio generato da una spesa:
+// la quota arriva già dalla spesa (niente cicli).
 export async function vietaPromemoria(db: PoolClient, obiettivoId: string): Promise<void> {
   const b = await bloccoObiettivo(db, obiettivoId);
   if (b) throw erroreObiettivoBloccato(b);
-  if ((await db.query('select 1 from utenti where obiettivo_annuali = $1', [obiettivoId])).rowCount) {
-    throw new ErroreApi(409, 'Il salvadanaio delle spese annuali non ha un promemoria: la quota mensile è la somma delle spese annuali che contiene.');
-  }
 }
 
 // Rifiuta con 409 se tra i campi inviati ce n'è uno bloccato.

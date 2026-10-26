@@ -1,7 +1,7 @@
 // Forme delle risposte dell'API (importi come testo decimale, date AAAA-MM-GG).
 
 export type Profilo = { id: string; email: string; nome: string; stipendio_netto: string | null; giorno_paga: number | null; inizio_mese: number; creato_il: string;
-  sul_conto: string | null; sul_conto_al: string | null; obiettivo_annuali: string | null };
+  sul_conto: string | null; sul_conto_al: string | null };
 
 // I conti sono un elenco di nomi con un'icona; il saldo («Sul conto oggi», scritto a mano) è quello di chi guarda.
 export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; mio: boolean; condiviso: boolean; saldo: string | null; saldo_al: string | null };
@@ -26,8 +26,7 @@ export type ElencoSpese = { periodo: Periodo; spese: Spesa[] };
 export type Traguardo = { id: string; nome: string; importo: string; ordine: number; percentuale: number };
 export type Obiettivo = {
   id: string; padre_id: string | null; nome: string; traguardo: string | null; scadenza: string | null; crea_spesa: boolean; spesa_creata_id: string | null; icona: string | null; nascosto: boolean;
-  bloccato_da: Blocco | null; // nasce da una spesa (Dividi per spesa)
-  contenitore_annuali: boolean; // il salvadanaio delle spese annuali
+  bloccato_da: Blocco | null; // nasce da una spesa
   mio: boolean; condiviso: boolean; versato: string; saldo: string; traguardo_effettivo: string | null; percentuale: number | null;
   traguardi: Traguardo[]; figli: Obiettivo[];
   paga_spesa: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string; senza_giorno: boolean } | null;

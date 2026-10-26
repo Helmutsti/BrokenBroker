@@ -195,5 +195,35 @@ verifica(posso.esito === 'no' && posso.regole.some((x) => !x.rispettata), 'posso
 const posso2 = (await r('POST', '/analisi/posso-permettermelo', A, { prezzo: '300', vita_utile_mesi: 36 })).j;
 verifica(posso2.esito === 'si', 'posso permettermelo: sì', posso2);
 
+// Mese personale per tutte le voci (decisione 41), con inizio_mese = 10: il mese personale di marzo va dal 10 marzo al 9 aprile.
+{
+  const mp = async (m) => (await r('GET', `/spese-previste?mese=${m}`, A)).j;
+  const bollo = (await r('POST', '/spese-previste', A, { nome: 'Bollo', importo: '120', ogni_mesi: 12, prossima_scadenza: '2027-03-01', senza_giorno: true })).j;
+  const quindici = (await r('POST', '/spese-previste', A, { nome: 'Assicurazione 15 marzo', importo: '300', ogni_mesi: 12, prossima_scadenza: '2027-03-15' })).j;
+  const cinqueApr = (await r('POST', '/spese-previste', A, { nome: 'Revisione 5 aprile', importo: '80', ogni_mesi: 12, prossima_scadenza: '2027-04-05' })).j;
+  const trovata = (el, nome) => el.spese.find((x) => x.nome === nome);
+  const feb = await mp('2027-02'), mar = await mp('2027-03'), apr = await mp('2027-04');
+  verifica(trovata(mar, 'Bollo').nel_mese && trovata(mar, 'Bollo').scadenza === '2027-03-10', 'senza giorno: vale per tutto il mese personale di marzo', trovata(mar, 'Bollo'));
+  verifica(!trovata(feb, 'Bollo').nel_mese && !trovata(apr, 'Bollo').nel_mese, 'senza giorno: non nei mesi personali vicini');
+  verifica(trovata(mar, 'Assicurazione 15 marzo').scadenza === '2027-03-15' && trovata(mar, 'Revisione 5 aprile').scadenza === '2027-04-05', 'il 5 aprile cade nel mese personale di marzo, come il 15 marzo');
+  verifica(!trovata(apr, 'Revisione 5 aprile').nel_mese && !trovata(feb, 'Assicurazione 15 marzo').nel_mese, 'una volta l\'anno, non nel mese personale accanto');
+  // La spunta conta nel mese personale: senza giorno, spuntata fuori dal periodo, prende l'inizio del mese.
+  const sp = await r('POST', `/spese-previste/${bollo.id}/spunta`, A, { mese: '2027-03' });
+  verifica(sp.s === 201 && sp.j.data === '2027-03-10', 'spunta del mese personale', sp);
+  verifica(trovata(await mp('2027-03'), 'Bollo').uscita && !trovata(await mp('2027-02'), 'Bollo').uscita, 'la spunta conta solo nel suo mese personale');
+  // Salvadanaio della spesa senza giorno: scade alla fine del mese personale (9 aprile), non il 1° o il 31 marzo.
+  await r('PATCH', `/spese-previste/${bollo.id}`, A, { nuovo_salvadanaio: {} });
+  const alb = (await r('GET', '/obiettivi', A)).j;
+  const sal = alb.find((o) => o.nome === 'Bollo');
+  verifica(sal && /^\d{4}-04-09$/.test(sal.scadenza) && sal.paga_spesa.senza_giorno === true, 'salvadanaio senza giorno: scadenza a fine mese personale', sal && [sal.scadenza, sal.paga_spesa]);
+  // Il «Ricordamelo» ogni 3 mesi vale per il mese personale in corso e poi ogni 3 mesi personali, senza giorno.
+  const vacanze = (await r('POST', '/obiettivi', A, { nome: 'Vacanze' })).j;
+  const pro = await r('PUT', `/obiettivi/${vacanze.id}/promemoria`, A, { importo: '50', ogni_mesi: 3 });
+  verifica(pro.s === 200 && pro.j.senza_giorno === true && pro.j.nel_mese === true, 'promemoria ogni 3 mesi: senza giorno, nel mese personale in corso', pro.j);
+  const pro1 = await r('PUT', `/obiettivi/${vacanze.id}/promemoria`, A, { importo: '50', ogni_mesi: 1 });
+  const pro6 = await r('PUT', `/obiettivi/${vacanze.id}/promemoria`, A, { importo: '50', ogni_mesi: 6 });
+  verifica(pro1.j.nel_mese === true && pro6.j.nel_mese === true && pro6.j.senza_giorno === true, 'promemoria cambiato da 1 a 6 mesi non sparisce', [pro1.j, pro6.j]);
+}
+
 console.log(`prove: ${ok} passate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);
