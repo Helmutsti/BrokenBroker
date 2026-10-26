@@ -319,11 +319,11 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
         <Voce etichetta="Tipo" aiuto={tipo === 'budget' ? 'Una cifra da tenere da parte per le spese del mese di questa categoria: si spunta quando l’hai usata.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
           <SceltaSegmenti etichetta="Tipo di spesa" larghezzaPiena valore={tipo} onCambia={fisso('tipo') ? () => {} : setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'budget', testo: 'Budget del mese' }, ...(spesa?.tipo === 'investimento' ? [{ valore: 'investimento' as const, testo: 'Investimento' }] : [])]} />
         </Voce>
-        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'] }}>
-          <View style={{ flex: 1, minWidth: 0 }}>
+        <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-start', gap: compatto ? d['spazio-blocco'] : d['spazio-icona'] }}>
+          <View style={{ flex: compatto ? undefined : 1, minWidth: 0 }}>
             <ConErrore campo="importo"><Campo etichetta={tipo === 'budget' ? 'Tetto del mese' : 'Importo totale'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" disattivato={fisso('importo')} /></ConErrore>
           </View>
-          <View style={{ flex: 1.5, minWidth: 0 }}>
+          <View style={{ flex: compatto ? undefined : 1.5, minWidth: 0 }}>
             <Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" />
             {spesa && !spesa.mia ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`La categoria è solo tua: ${spesa.creata_da ?? 'chi l’ha creata'} ha la sua.`}</Testo> : null}
           </View>
