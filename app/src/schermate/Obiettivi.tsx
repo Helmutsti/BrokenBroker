@@ -56,6 +56,7 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
   const [spesaAperta, setSpesaAperta] = useState<Spesa | null>(null);
   const [traguardo, setTraguardo] = useState<{ obiettivo: Obiettivo; traguardo: Traguardo | null } | null>(null);
   const [aperti, setAperti] = useState<Set<string>>(new Set());
+  const [apertiFigli, setApertiFigli] = useState<Set<string>>(new Set());
   const { c } = useTema();
   const rif = useRiferimenti();
   const compatto = useCompatto();
@@ -71,9 +72,11 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
   const apriChiudi = (id: string) => setAperti((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   // Sotto-salvadanai annidati: ogni livello ha un rientro con una linea a sinistra e il suo "Aggiungi dentro".
-  const albero = (figli: Obiettivo[], padreConto: string | null, livello = 0): ReactNode => (
+  const apriChiudiFigli = (id: string) => setApertiFigli((x) => { const n = new Set(x); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const MAX = 4;
+  const albero = (figli: Obiettivo[], padreConto: string | null, padreId: string, livello = 0): ReactNode => (
     <View style={{ gap: d['spazio-pillole'] }}>
-      {figli.map((f) => (
+      {(apertiFigli.has(padreId) ? figli : figli.slice(0, MAX)).map((f) => (
         <View key={f.id} style={{ gap: d['spazio-pillole'] }}>
           <RigaSalvadanaio variante="sotto" nome={f.nome} icona={iconaDi(f)} valore={f.percentuale ?? 0} tono={tonoDi(f.percentuale)} cifra={cifraDi(f)} percentuale={pctDi(f)} scadenza={scadenzaDi(f, inizio)}
             conto={f.conto && !f.conto_ereditato && f.conto_id !== padreConto ? { nome: f.conto, icona: f.conto_icona } : undefined}
@@ -82,12 +85,17 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
           {f.figli.length ? (
             <View style={{ gap: d['spazio-pillole'], paddingLeft: d['margine-voce-h'], borderLeftWidth: d['misura-bordo-forte'], borderLeftColor: c['bordo-separatore'] }}>
               {rigaPropria(f, () => setVersa(f))}
-              {albero(f.figli, f.conto_id, livello + 1)}
+              {albero(f.figli, f.conto_id, f.id, livello + 1)}
               <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta={`Aggiungi dentro ${f.nome}`} icona="plus" onPress={() => setModifica({ obiettivo: null, padre: f.id })} /></View>
             </View>
           ) : null}
         </View>
       ))}
+      {figli.length > MAX ? (
+        <View style={{ alignItems: 'flex-start' }}>
+          <Pulsante tipo="testo" etichetta={apertiFigli.has(padreId) ? 'Mostra meno' : `Mostra tutti (${figli.length})`} icona={apertiFigli.has(padreId) ? 'chevron-up' : 'chevron-down'} onPress={() => apriChiudiFigli(padreId)} />
+        </View>
+      ) : null}
     </View>
   );
 
@@ -96,7 +104,7 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
     const primo = o.traguardi.find((x) => x.percentuale < 100);
     const coperti = o.traguardi.filter((x) => x.percentuale >= 100).length;
     const ordinatiTr = [...o.traguardi].sort((a, b) => Number(a.importo) - Number(b.importo));
-    const visibili = aperti.has(o.id) ? ordinatiTr : ordinatiTr.slice(0, 3);
+    const visibili = aperti.has(o.id) ? ordinatiTr : ordinatiTr.slice(0, MAX);
     const nota = o.alimentato_da ? `promemoria in Spese ${euro(o.alimentato_da.importo)} ${o.alimentato_da.ogni_mesi === 12 ? "all'anno" : o.alimentato_da.ogni_mesi && o.alimentato_da.ogni_mesi > 1 ? `ogni ${o.alimentato_da.ogni_mesi} mesi` : 'al mese'}` : '';
     // Con un conto scelto in alto: quanto di questo salvadanaio sta su quel conto (il resto è su altri conti).
     const notaFiltro = filtro === 'tutti' ? '' : `${filtro === 'senza' ? 'Senza conto' : `Su ${rif.conti.find((x) => x.id === filtro)?.nome ?? 'questo conto'}`}: ${euro(sommaSuConto([o], filtro))}`;
@@ -107,7 +115,7 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
             <RigaSalvadanaio variante="testata" nome={o.nome} icona={iconaDi(o)} valore={o.percentuale ?? 0} tono={mancaPer(o) ? 'attenzione' : tonoDi(o.percentuale)} cifra={cifraDi(o)} percentuale={pctDi(o)} scadenza={scadenzaDi(o, inizio)} nota={[nota, notaFiltro].filter(Boolean).join(' · ') || undefined}
               conto={o.conto ? { nome: o.conto, icona: o.conto_icona } : undefined}
               matitaNascosta={!compatto && sopra !== o.id} onCifra={() => setVersa(o)} onModifica={() => setModifica({ obiettivo: o })} />
-            {o.figli.length ? <View style={{ gap: d['spazio-pillole'] }}>{rigaPropria(o, () => setVersa(o))}{albero(o.figli, o.conto_id)}</View> : null}
+            {o.figli.length ? <View style={{ gap: d['spazio-pillole'] }}>{rigaPropria(o, () => setVersa(o))}{albero(o.figli, o.conto_id, o.id)}</View> : null}
             {o.traguardi.length ? (
               <View style={{ gap: d['spazio-pillole'] }}>
                 <Esito tono={primo ? 'attenzione' : 'ok'} testo={primo
@@ -118,9 +126,9 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
                     cifra={euro(t.importo)} percentuale={percento(t.percentuale)}
                     onCifra={() => setTraguardo({ obiettivo: o, traguardo: t })} onModifica={() => setTraguardo({ obiettivo: o, traguardo: t })} />
                 ))}
-                {ordinatiTr.length > 3 ? (
+                {ordinatiTr.length > MAX ? (
                   <View style={{ alignItems: 'flex-start' }}>
-                    <Pulsante tipo="testo" etichetta={aperti.has(o.id) ? 'Mostra meno' : `Mostra tutti i traguardi (${ordinatiTr.length})`} icona={aperti.has(o.id) ? 'chevron-up' : 'chevron-down'} onPress={() => apriChiudi(o.id)} />
+                    <Pulsante tipo="testo" etichetta={aperti.has(o.id) ? 'Mostra meno' : `Mostra tutti (${ordinatiTr.length})`} icona={aperti.has(o.id) ? 'chevron-up' : 'chevron-down'} onPress={() => apriChiudi(o.id)} />
                   </View>
                 ) : null}
               </View>
@@ -137,10 +145,13 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
 
   // In ordine di prossima scadenza nel mese personale (anche i sotto-salvadanai), poi senza scadenza per nome.
   const ordinati = ordinaPerScadenza(dati, oggiIso(), inizio).filter((o) => filtro === 'tutti' || tuttiGliObiettivi([o]).some((x) => suQuelConto(x, filtro)));
-  // Stima dell'altezza di un riquadro (sotto-salvadanai nell'albero + traguardi visibili, max 3, + avviso):
+  // Stima dell'altezza di un riquadro (sotto-salvadanai nell'albero + traguardi visibili, max 4 + pulsante, + avviso):
   // ogni riquadro va, in ordine, nella colonna più leggera finora (due colonne indipendenti, senza righe).
-  const contaFigli = (x: Obiettivo): number => x.figli.reduce((t, f) => t + 1 + contaFigli(f), 0);
-  const pesoDi = (o: Obiettivo) => 1 + contaFigli(o) + Math.min(o.traguardi.length, 3) + (mancaPer(o) ? 1 : 0);
+  const contaFigli = (x: Obiettivo): number => {
+    const vis = apertiFigli.has(x.id) ? x.figli : x.figli.slice(0, MAX);
+    return vis.reduce((t, f) => t + 1 + contaFigli(f), 0) + (x.figli.length > MAX ? 1 : 0);
+  };
+  const pesoDi = (o: Obiettivo) => 1 + contaFigli(o) + (aperti.has(o.id) ? o.traguardi.length : Math.min(o.traguardi.length, MAX)) + (o.traguardi.length > MAX ? 1 : 0) + (mancaPer(o) ? 1 : 0);
   const colonne: Obiettivo[][] = compatto ? [ordinati] : [[], []];
   if (!compatto) {
     const pesi = [0, 0];
