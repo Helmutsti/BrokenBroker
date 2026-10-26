@@ -166,13 +166,22 @@ La versione per iPhone usa lo stesso codice (`app/index.js`); il progetto iOS va
 | GET, POST | `/rate` | elenco con rate pagate, rimanenti e debito; nuova rata (numero di rate oppure ultima scadenza) |
 | GET, PATCH, DELETE | `/rate/:id` | dettaglio, modifica, cancellazione |
 | GET, PUT | `/regole` | regole sulle rate (massimo aperte, tetto in % dello stipendio, mensilità di debito) |
-| GET | `/investimenti/portafoglio` | posizioni con prezzo medio di carico, valore, guadagno, peso |
-| GET | `/investimenti/andamento?mesi=` | valore e soldi messi dentro a fine mese |
+| GET | `/investimenti/portafoglio` | posizioni (lotti sommati, prezzo medio di carico), beni, valore, guadagno, peso, titoli senza prezzo; solo i portafogli che contano nel patrimonio (`?portafoglio_id=` per uno solo) |
+| GET | `/investimenti/andamento?mesi=` | valore e soldi messi dentro a fine mese (`?settimane=`, `?portafoglio_id=`) |
 | GET | `/investimenti/esposizione` | distribuzione per tipo, area, settore |
 | GET, POST | `/investimenti/titoli` | cerca (`?cerca=`) o aggiunge un titolo (ISIN) |
 | PUT | `/investimenti/titoli/:id/prezzi` | prezzo di un giorno, inserito a mano |
+| POST | `/investimenti/titoli/:id/prezzi/leggi` | «Leggi dalla borsa»: scarta il prezzo di oggi e rilegge da Yahoo (502 se non risponde) |
 | PUT | `/investimenti/titoli/:id/esposizioni` | composizione per tipo, area o settore |
-| GET, POST, PATCH, DELETE | `/investimenti/operazioni` | acquisti e vendite |
+| GET, POST | `/investimenti/portafogli` | elenco con totali; nuovo portafoglio |
+| GET, PATCH, DELETE | `/investimenti/portafogli/:id` | dettaglio con posizioni e beni, modifica (nome, icona, `conta_nel_patrimonio`), cancellazione (solo se vuoto, altrimenti 409) |
+| GET, POST | `/investimenti/lotti` | lotti di una posizione (`?titolo_id=&portafoglio_id=`); nuovo lotto (un acquisto, con data e ora) |
+| PATCH, DELETE | `/investimenti/lotti/:id` | modifica o cancella un lotto |
+| PATCH, DELETE | `/investimenti/posizioni` | sposta in un altro portafoglio o toglie tutti i lotti di un titolo |
+| GET, POST | `/investimenti/beni` | beni non quotati o con prezzo di mercato (voce del catalogo) |
+| PATCH, DELETE | `/investimenti/beni/:id` | modifica o cancella un bene |
+| GET | `/investimenti/catalogo` | oro, argento, platino, palladio e monete, con la quotazione spot |
+| GET | `/investimenti/metalli/quotazioni` | quotazione spot dei quattro metalli |
 | GET | `/analisi/mese?mese=` | quanto resta davvero, risparmio e semaforo, da pagare, entrate e uscite reali |
 | GET | `/analisi/storico?mesi=` | entrate e uscite mese per mese |
 | GET | `/analisi/patrimonio` | conti + investimenti − rate da pagare |

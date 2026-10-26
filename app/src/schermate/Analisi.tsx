@@ -47,7 +47,7 @@ export function Analisi() {
           <NumeroChiave etichetta={`Da ${nomeMeseMinuscolo(prossimaFine.ultima_scadenza.slice(0, 7))}`} valore={`${pctDopo > 0 ? '+' : ''}${numero(pctDopo, 0)}%`} icona="trending-up" tono={pctDopo >= 20 ? 'ok' : 'attenzione'}
             nota={`Finisce ${conLaFine.map((r) => r.oggetto).join(' e ')}: +${euroTondi(sollievo)} al mese`} />
         ) : <NumeroChiave etichetta="Rate" valore={attive.length ? `${attive.length} aperte` : 'Nessuna'} icona="credit-card" />}
-        <NumeroChiave etichetta="Patrimonio" valore={patrimonio ? euro(patrimonio.totale) : '—'} icona="landmark" nota="Investimenti − rate ancora da pagare" />
+        <NumeroChiave etichetta="Patrimonio" valore={patrimonio ? euro(patrimonio.totale) : '—'} icona="landmark" nota={`Investimenti − rate ancora da pagare${patrimonio?.investimenti_incompleti ? ' · alcuni prezzi mancano' : ''}`} />
       </RigaNumeri>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>
         <Scheda titolo="Se nulla cambia" icona="trending-up" style={{ flex: 1 }}>

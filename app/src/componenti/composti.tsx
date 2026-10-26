@@ -1,10 +1,10 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Modal, Pressable, ScrollView, View } from 'react-native';
 import Svg, { Line, Polyline } from 'react-native-svg';
-import { euro, nomeMese, spostaMese } from '../formato.ts';
+import { euro, nomeMese, numero, percento, spostaMese } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
+import { coloriCategorie, ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
 import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
 import { Icona } from './Icona.tsx';
 
@@ -152,7 +152,7 @@ export function Intestazione({ titolo, sottotitolo, azioni }: { titolo: string; 
 }
 
 // ---- CMP-22 Scheda ----
-export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, style }: { titolo?: string; nota?: string; icona?: string; children: ReactNode; azione?: ReactNode; dopoTitolo?: ReactNode; style?: object }) {
+export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, titoloScelta, style }: { titolo?: string; titoloScelta?: ReactNode; /* al posto del testo del titolo (es. titolo che è anche un selettore) */ nota?: string; icona?: string; children: ReactNode; azione?: ReactNode; dopoTitolo?: ReactNode; style?: object }) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
@@ -160,7 +160,7 @@ export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, styl
       {titolo ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: compatto ? 'wrap' : 'nowrap', gap: d['spazio-icona'] }}>
           {icona ? <Tessera icona={icona} misura="piccola" /> : null}
-          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={dopoTitolo ? { flexShrink: 1 } : { flex: 1, minWidth: compatto ? 120 : undefined }}>{titolo}</Testo>
+          {titoloScelta ? <View style={{ flex: 1, minWidth: 0 }}>{titoloScelta}</View> : <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={dopoTitolo ? { flexShrink: 1 } : { flex: 1, minWidth: compatto ? 120 : undefined }}>{titolo}</Testo>}
           {dopoTitolo ? <>{dopoTitolo}<View style={{ flex: 1 }} /></> : null}
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
           {azione}
@@ -635,27 +635,58 @@ export function GraficoMesi({ mesi, altezza = 160 }: { mesi: { etichetta: string
   );
 }
 
+// Etichette compatte dell'asse: "800 €", "12k €", "1,5M €".
+function euroAsse(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `${numero(v / 1_000_000, a % 1_000_000 ? 1 : 0)}M €`;
+  if (a >= 1000) return `${numero(v / 1000, a % 1000 ? 1 : 0)}k €`;
+  return `${numero(v, 0)} €`;
+}
+// Tacche "tonde" (1, 2, 5 × 10^n) tra min e max, da 3 a 5 valori.
+function tacche(lo: number, hi: number): { min: number; max: number; valori: number[] } {
+  const base = lo < hi * 0.4 ? Math.min(0, lo) : lo; // linee: la base può non essere zero se i valori ne sono lontani
+  const grezzo = (hi - base || 1) / 4;
+  const pot = 10 ** Math.floor(Math.log10(grezzo));
+  const passo = ([1, 2, 5, 10].map((m) => m * pot).find((p) => p >= grezzo) ?? 10 * pot);
+  const min = Math.floor(base / passo) * passo;
+  const max = Math.ceil(hi / passo) * passo;
+  const valori: number[] = [];
+  for (let v = min; v <= max + passo / 2; v += passo) valori.push(Math.round(v * 1e6) / 1e6);
+  return { min, max: Math.max(max, min + passo), valori };
+}
+
 // ---- CMP-37 Grafico a linea ----
 export function GraficoLinea({ punti, altezza = 200 }: { punti: { etichetta: string; valore: number; messo: number }[]; altezza?: number }) {
   const { c } = useTema();
+  const compatto = useCompatto();
   const larghezza = 1000;
-  const valori = punti.flatMap((p) => [p.valore, p.messo]);
-  const max = Math.max(1, ...valori), min = Math.min(0, ...valori);
+  const valori = punti.flatMap((p) => [p.valore, p.messo]).filter(Number.isFinite);
+  const { min, max, valori: ticks } = tacche(valori.length ? Math.min(...valori) : 0, Math.max(1, ...valori));
+  const etichetteY = ticks.map(euroAsse);
+  const largAsse = Math.max(...etichetteY.map((t) => t.length)) * (compatto ? 6.5 : 7.5) + 8;
   const x = (i: number) => (punti.length < 2 ? 0 : (i / (punti.length - 1)) * larghezza);
   const y = (v: number) => altezza - ((v - min) / (max - min || 1)) * (altezza - 8) - 4;
   const linea = (k: 'valore' | 'messo') => punti.map((p, i) => `${x(i)},${y(p[k])}`).join(' ');
-  // Al massimo 12 etichette, distribuite in modo uniforme dal primo all'ultimo punto.
-  const quante = Math.min(punti.length, 12);
+  // Al massimo 12 etichette (6 su telefono), distribuite in modo uniforme dal primo all'ultimo punto.
+  const quante = Math.min(punti.length, compatto ? 6 : 12);
   const etichette = quante < 2 ? punti.map((_, i) => i) : [...new Set(Array.from({ length: quante }, (_, k) => Math.round((k * (punti.length - 1)) / (quante - 1))))];
   return (
     <View style={{ gap: d['spazio-blocco'] }}>
       <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}><VoceLegenda testo="Valore" colore="avanzamento-accento" /><VoceLegenda testo="Investiti" colore="testo-terziario" tratteggio /></View>
-      <Svg width="100%" height={altezza} viewBox={`0 0 ${larghezza} ${altezza}`} preserveAspectRatio="none" aria-hidden>
-        {[0, 1, 2, 3, 4].map((i) => <Line key={i} x1={0} x2={larghezza} y1={(i * altezza) / 4} y2={(i * altezza) / 4} stroke={c['bordo-separatore']} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
-        <Polyline points={linea('messo')} fill="none" stroke={c['testo-terziario']} strokeWidth={d['misura-bordo-forte']} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
-        <Polyline points={linea('valore')} fill="none" stroke={c['avanzamento-accento']} strokeWidth={d['misura-bordo-forte']} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-      </Svg>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{etichette.map((i) => <Testo key={i} stile="dettaglio-normale" colore="testo-secondario">{punti[i].etichetta}</Testo>)}</View>
+      <View style={{ flexDirection: 'row', gap: d['spazio-testo'] }}>
+        <View style={{ width: largAsse, height: altezza }} aria-hidden>
+          {ticks.map((t, i) => <Testo key={i} stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}
+            style={{ position: 'absolute', right: 0, top: Math.min(Math.max(y(t) - 9, 0), altezza - 18), textAlign: 'right' }}>{etichetteY[i]}</Testo>)}
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: d['spazio-blocco'] }}>
+          <Svg width="100%" height={altezza} viewBox={`0 0 ${larghezza} ${altezza}`} preserveAspectRatio="none" aria-hidden>
+            {ticks.map((t, i) => <Line key={i} x1={0} x2={larghezza} y1={y(t)} y2={y(t)} stroke={c['bordo-separatore']} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
+            <Polyline points={linea('messo')} fill="none" stroke={c['testo-terziario']} strokeWidth={d['misura-bordo-forte']} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+            <Polyline points={linea('valore')} fill="none" stroke={c['avanzamento-accento']} strokeWidth={d['misura-bordo-forte']} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          </Svg>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{etichette.map((i) => <Testo key={i} stile="dettaglio-normale" colore="testo-secondario">{punti[i].etichetta}</Testo>)}</View>
+        </View>
+      </View>
     </View>
   );
 }
@@ -773,8 +804,8 @@ export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string
 // Schizzo di Manuel: icona, nome, barra, «X su Y» (si preme per cambiare la cifra) e la matita.
 // Variante «testata»: titolo del riquadro (testo più forte, matita dopo il nome, visibile in hover).
 // Variante «sotto»: riga di un sotto-salvadanaio (matita in fondo alla riga).
-export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
-  nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
+export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, scadenza, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
+  scadenza?: { testo: string; tono: 'secondario' | 'attenzione' | 'errore' }; nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();
   const stretto = useCompatto();
@@ -782,7 +813,7 @@ export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, 
   const matita = <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} fantasma nascosto={matitaNascosta || propria} onPress={onModifica} />;
   const titolo = <Testo stile={testata ? 'titolo-scheda' : 'corpo-normale'} accessibilityRole={testata ? 'header' : undefined} aria-level={testata ? 2 : undefined} numberOfLines={stretto ? 2 : 1} style={{ flexShrink: 1 }}>{nome}</Testo>;
   const cifraPremibile = (
-    <Pressable accessibilityRole="button" accessibilityLabel={`Cambia la cifra di ${nome}: ${cifra.replace('/', ' di ')}${percentuale ? `, ${percentuale}` : ''}`} onPress={onCifra}
+    <Pressable accessibilityRole="button" accessibilityLabel={`Cambia la cifra di ${nome}: ${cifra.replace('/', ' di ')}${percentuale ? `, ${percentuale}` : ''}${scadenza ? `, ${scadenza.testo}` : ''}`} onPress={onCifra}
       style={(s: StatoPressione) => [{ flexShrink: 0, minHeight: stretto ? 44 : ALTEZZA_CONTROLLO, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
         backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent', cursor: 'pointer' } as object, anelloFocus(c, s.focused)]}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: d['spazio-icona'] }}>
@@ -792,6 +823,25 @@ export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, 
     </Pressable>
   );
   const dettaglio = nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null;
+  const dataScad = scadenza ? (
+    <Testo stile="dettaglio-normale" colore={scadenza.tono === 'secondario' ? 'testo-secondario' : `testo-${scadenza.tono}`} numberOfLines={1} style={{ textAlign: 'right', flexShrink: 0 }}>{scadenza.testo}</Testo>
+  ) : null;
+  // Barra con la scadenza a destra (le date delle righe formano una colonna).
+  const barraConData = <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}><View style={{ flex: 1, minWidth: 0, flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>{dataScad}</View>;
+  // Cifra con la scadenza in piccolo sotto (testata).
+  const cifraConData = <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>{cifraPremibile}{dataScad ? <View style={{ paddingHorizontal: d['margine-etichetta-h'] }}>{dataScad}</View> : null}</View>;
+  if (stretto && testata) return (
+    <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'] }}>
+        <Tessera icona={icona} misura="piccola" />
+        <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', minHeight: 44 }}>{titolo}</View>
+        {cifraConData}
+        {propria ? null : matita}
+      </View>
+      {propria ? null : <View style={{ flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
+      {dettaglio}
+    </View>
+  );
   if (stretto) return (
     // Telefono: in colonna, nome e cifra sopra, barra sotto.
     <View style={{ gap: d['spazio-testo'], minWidth: 0 }}>
@@ -801,7 +851,7 @@ export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, 
         {cifraPremibile}
         {propria ? null : matita}
       </View>
-      {propria ? null : <View style={{ flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
+      {propria ? null : barraConData}
       {dettaglio}
     </View>
   );
@@ -814,7 +864,7 @@ export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, 
         {cifraPremibile}
         {propria ? null : matita}
       </View>
-      {propria ? null : <View style={{ flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
+      {propria ? null : barraConData}
       {dettaglio}
     </View>
   );
@@ -828,7 +878,7 @@ export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, 
           {propria ? null : matita}
         </View>
         {propria ? null : <View style={{ flex: 1, minWidth: 0, flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
-        <View style={{ alignItems: 'flex-end', flexShrink: 0 }}>{cifraPremibile}</View>
+        {cifraConData}
       </View>
       {dettaglio}
     </View>
@@ -895,9 +945,18 @@ export function RigaObiettivo({ nome, scadenza, messo, cifra, avanzamento, tonoB
 // ---- Tabella di un portafoglio (proposta v4) ----
 // Tabella arrotondata: prima la voce (nome in evidenza, dettaglio piccolo sotto),
 // poi i numeri allineati a destra.
-export type RigaTabellaPortafoglio = { chiave: string; nome: string; dettaglio: string; prezzo: string; valore: string; guadagno: string; positivo: boolean; onApri?: () => void };
-export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe: RigaTabellaPortafoglio[]; titoloColonna?: string }) {
+// `avviso`: riga piccola sotto il nome (prezzo vecchio o mancante); `azione`: testo premibile accanto (es. «Scrivi il prezzo»).
+export type RigaTabellaPortafoglio = { chiave: string; nome: string; dettaglio: string; prezzo: string; valore: string; guadagno: string; peso: string; positivo: boolean | null; onApri?: () => void;
+  avviso?: { testo: string; tono: 'attenzione' | 'errore' }; azione?: { etichetta: string; onPress: () => void } };
+export function TabellaPortafoglio({ righe, titoloColonna = 'Voce', titoloPrezzo = 'Prezzo' }: { righe: RigaTabellaPortafoglio[]; titoloColonna?: string; titoloPrezzo?: string }) {
   const { c } = useTema();
+  const coloreGuadagno = (r: RigaTabellaPortafoglio): NomeColore => (r.positivo === null ? 'testo-secondario' : r.positivo ? 'testo-ok' : 'testo-errore');
+  const sotto = (r: RigaTabellaPortafoglio) => (r.avviso || r.azione ? (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: d['spazio-icona'] }}>
+      {r.avviso ? <Testo stile="dettaglio-forte" colore={`testo-${r.avviso.tono}`}>{r.avviso.testo}</Testo> : null}
+      {r.azione ? <Pulsante tipo="testo" compatto etichetta={r.azione.etichetta} onPress={r.azione.onPress} /> : null}
+    </View>
+  ) : null);
   const num = (testo: string, w: number, stile: 'dettaglio-forte' | 'corpo-normale' | 'corpo-forte', colore: NomeColore) => (
     <View style={{ width: w, alignItems: 'flex-end' }}><Testo stile={stile} colore={colore}>{testo}</Testo></View>
   );
@@ -913,11 +972,12 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe:
             borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], backgroundColor: c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <Testo stile="corpo-forte" numberOfLines={2}>{r.nome}</Testo>
-            <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{`${r.dettaglio} · ${r.prezzo}`}</Testo>
+            <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={2}>{[r.dettaglio, r.prezzo !== '—' ? r.prezzo : null, r.peso !== '—' ? `peso ${r.peso}` : null].filter(Boolean).join(' · ')}</Testo>
+            {sotto(r)}
           </View>
           <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
             <Testo stile="corpo-forte">{r.valore}</Testo>
-            <Testo stile="dettaglio-forte" colore={r.positivo ? 'testo-ok' : 'testo-errore'}>{r.guadagno}</Testo>
+            <Testo stile="dettaglio-forte" colore={coloreGuadagno(r)}>{r.guadagno}</Testo>
           </View>
         </Pressable>
       ))}
@@ -927,7 +987,7 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe:
     <View style={{ borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-controllo'], overflow: 'hidden' }}>
       <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], backgroundColor: c['sfondo-tenue'] }}>
         <View style={{ flex: 1 }}><Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo></View>
-        {num('Prezzo oggi', 120, 'dettaglio-forte', 'testo-secondario')}{num('Valore', 130, 'dettaglio-forte', 'testo-secondario')}{num('Guadagno', 170, 'dettaglio-forte', 'testo-secondario')}
+        {num(titoloPrezzo, 120, 'dettaglio-forte', 'testo-secondario')}{num('Valore', 130, 'dettaglio-forte', 'testo-secondario')}{num('Guadagno', 170, 'dettaglio-forte', 'testo-secondario')}{num('Peso', 60, 'dettaglio-forte', 'testo-secondario')}
       </View>
       {righe.map((r, i) => (
         <Pressable key={r.chiave} accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
@@ -936,12 +996,51 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Titolo' }: { righe:
           <View style={{ flex: 1, gap: d['spazio-testo'] }}>
             <Testo stile="corpo-forte" numberOfLines={1}>{r.nome}</Testo>
             <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{r.dettaglio}</Testo>
+            {sotto(r)}
           </View>
           {num(r.prezzo, 120, 'corpo-normale', 'testo-secondario')}
           {num(r.valore, 130, 'corpo-forte', 'testo-primario')}
-          {num(r.guadagno, 170, 'corpo-forte', r.positivo ? 'testo-ok' : 'testo-errore')}
+          {num(r.guadagno, 170, 'corpo-forte', coloreGuadagno(r))}
+          {num(r.peso, 60, 'corpo-normale', 'testo-secondario')}
         </Pressable>
       ))}
+    </View>
+  );
+}
+
+// ---- Composizione: una barra segmentata + legenda ----
+const ORDINE_TINTE = ['Blu', 'Arancio', 'Verde', 'Viola', 'Turchese', 'Rosa', 'Lime', 'Indaco', 'Ambra', 'Rosso'];
+const tinteComposizione = ORDINE_TINTE.map((n) => coloriCategorie.find((x) => x.nome === n)!.codice as string);
+export function BarraComposizione({ voci }: { voci: { voce: string; peso: number }[] }) {
+  const { c } = useTema();
+  const nonInd = (v: string) => v.trim().toLowerCase() === 'non indicato';
+  const ordinate = [...voci].filter((v) => v.peso > 0).sort((a, b) => Number(nonInd(a.voce)) - Number(nonInd(b.voce)) || b.peso - a.peso);
+  let k = 0;
+  const righe = ordinate.map((v) => {
+    const piccola = v.peso < 1 && !nonInd(v.voce);
+    const colore = nonInd(v.voce) ? c['testo-terziario'] : piccola ? c['bordo-controllo'] : tinteComposizione[k++ % tinteComposizione.length];
+    return { ...v, colore, piccola };
+  });
+  if (righe.length === 0) return null;
+  const grandi = righe.filter((r) => !r.piccola);
+  const pesoAltro = righe.filter((r) => r.piccola).reduce((t, r) => t + r.peso, 0);
+  const segmenti = pesoAltro > 0 ? [...grandi, { voce: 'Altro', peso: pesoAltro, colore: c['bordo-controllo'], piccola: true }] : grandi;
+  const totale = segmenti.reduce((t, s) => t + s.peso, 0) || 1;
+  const etichetta = `Composizione: ${righe.map((r) => `${r.voce} ${percento(r.peso)}`).join(', ')}`;
+  return (
+    <View style={{ gap: d['spazio-blocco'] }}>
+      <View accessible accessibilityRole="image" accessibilityLabel={etichetta} style={{ flexDirection: 'row', height: d['misura-avanzamento'], gap: d['misura-bordo-forte'], borderRadius: d['raggio-pillola'], overflow: 'hidden', backgroundColor: c['sfondo-scheda'] }}>
+        {segmenti.map((s) => <View key={s.voce} style={{ flexGrow: s.peso / totale, flexShrink: 1, flexBasis: 0, height: '100%', backgroundColor: s.colore }} />)}
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: d['spazio-gruppo'], rowGap: d['spazio-elenco'] }}>
+        {righe.map((r) => (
+          <View key={r.voce} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], width: '100%' }}>
+            <View style={{ width: 10, height: 10, borderRadius: d['raggio-pillola'], backgroundColor: r.colore }} />
+            <Testo style={{ flex: 1 }} numberOfLines={1}>{r.voce}</Testo>
+            <Testo stile="corpo-forte" colore="testo-secondario">{percento(r.peso)}</Testo>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }

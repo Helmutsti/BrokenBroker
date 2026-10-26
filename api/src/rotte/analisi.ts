@@ -6,7 +6,7 @@ import { type Periodo, periodo, periodoRichiesto, spostaMese } from '../periodo.
 import { leggiRate, scadenzaRata } from '../rate.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
-import { portafoglio } from './investimenti.ts';
+import { portafoglio } from '../investimenti.ts';
 
 // Analisi (F18-F22): quanto resta davvero, risparmio, proiezione, patrimonio,
 // "posso permettermelo?" e riepilogo delle rate.
@@ -80,9 +80,12 @@ rotteAnalisi.get('/mese', async (req, res) => {
 });
 
 export async function patrimonio(db: PoolClient) {
-  const investimenti = Number((await portafoglio(db)).valore);
+  // Solo i portafogli che contano nel patrimonio (non quelli di prova). Titoli e beni senza prezzo non valgono 0 in silenzio: sono contati.
+  const p = await portafoglio(db);
+  const investimenti = Number(p.valore);
   const debito = somma(await leggiRate(db), (r) => Number(r.residuo));
-  return { investimenti: cent(investimenti), debito_rate: cent(debito), totale: cent(investimenti - debito) };
+  return { investimenti: cent(investimenti), debito_rate: cent(debito), totale: cent(investimenti - debito),
+    investimenti_senza_prezzo: p.titoli_senza_prezzo + p.beni_senza_prezzo, investimenti_incompleti: p.incompleto };
 }
 
 rotteAnalisi.get('/patrimonio', async (_req, res) => {

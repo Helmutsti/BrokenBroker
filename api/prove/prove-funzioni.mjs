@@ -163,19 +163,125 @@ verifica(reg.max_rate_contemporanee === 2 && reg.max_mensilita_debito === undefi
 // Investimenti
 const vwce = (await r('POST', '/investimenti/titoli', A, { isin: 'IE00BK5BQT80', ticker: 'VWCE', nome: 'Vanguard FTSE All-World' })).j;
 verifica((await r('POST', '/investimenti/titoli', A, { isin: 'XX', nome: 'X' })).s === 400, 'isin non valido');
-await r('POST', '/investimenti/operazioni', A, { titolo_id: vwce.id, data: '2026-03-01', verso: 'acquisto', quantita: '10', prezzo: '100', commissioni: '1' });
-await r('POST', '/investimenti/operazioni', A, { titolo_id: vwce.id, data: '2026-06-01', verso: 'acquisto', quantita: '10', prezzo: '120', commissioni: '1' });
-await r('POST', '/investimenti/operazioni', A, { titolo_id: vwce.id, data: '2026-08-01', verso: 'vendita', quantita: '5', prezzo: '125' });
+// Portafogli, posizioni (una riga per titolo e portafoglio), beni
+const pf = (await r('POST', '/investimenti/portafogli', A, { nome: 'Trade Republic', icona: 'trending-up' })).j;
+verifica(pf.id && pf.conta_nel_patrimonio === true && pf.vuoto === true && pf.valore === '0.00', 'portafoglio creato', pf);
+const prova = (await r('POST', '/investimenti/portafogli', A, { nome: 'Idee', conta_nel_patrimonio: false })).j;
+verifica((await r('POST', '/investimenti/portafogli', A, { nome: '' })).s === 400, 'nome del portafoglio obbligatorio');
+const l1 = await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '10', prezzo: '100', data: '2026-03-01' });
+verifica(l1.s === 201 && l1.j.data === '2026-03-01' && l1.j.ora === '12:00', 'primo acquisto: riga nuova (201)', l1);
+// Secondo acquisto dello stesso titolo nello stesso portafoglio: si unisce (200), stessa riga.
+const l2 = await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '10', prezzo: '120', data: '2026-06-01', ora: '09:30' });
+const riga = l2.j;
+verifica(l2.s === 200 && riga.id === l1.j.id && riga.quantita === '20.000000' && riga.prezzo === '110.0000' && riga.controvalore === '2200.00' && riga.data === '2026-06-01' && riga.ora === '09:30', 'secondo acquisto: unito (quantità sommata, PCM pesato, data dell\'ultimo)', l2);
+// Senza data vale adesso e si unisce ancora.
+const l3 = await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '1', prezzo: '125' });
+verifica(l3.s === 200 && l3.j.id === riga.id && l3.j.quantita === '21.000000' && l3.j.prezzo === '110.7143' && l3.j.data === new Date().toLocaleDateString('en-CA'), 'senza data vale adesso e si unisce', l3.j);
+// Un acquisto con data passata non sposta indietro la data dell'ultimo.
+const l4 = await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '1', prezzo: '125', data: '2026-01-02' });
+verifica(l4.s === 200 && l4.j.data === l3.j.data && l4.j.quantita === '22.000000', 'acquisto con data più vecchia: la data resta quella dell\'ultimo', l4.j);
+// Il campo verso è ignorato.
+verifica((await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, verso: 'vendita', quantita: '5', prezzo: '125', data: '2026-01-02' })).j.quantita === '27.000000', 'il campo verso è ignorato: resta un acquisto');
+verifica((await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '1', prezzo: '1', data: '2099-01-01' })).s === 400, 'acquisto nel futuro rifiutato');
+verifica((await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '0', prezzo: '1' })).s === 400, 'quantità zero rifiutata');
+const righe = (await r('GET', `/investimenti/lotti?titolo_id=${vwce.id}&portafoglio_id=${pf.id}`, A)).j;
+verifica(righe.length === 1 && righe[0].quantita === '27.000000', 'una sola riga per titolo e portafoglio (e l\'acquisto nel futuro non ha lasciato tracce)', righe);
+// Correzione diretta della riga: si torna a 20 quote a PCM 110, ultimo acquisto il 2026-06-01 alle 09:30.
+const corretta = (await r('PATCH', `/investimenti/lotti/${riga.id}`, A, { quantita: '20', prezzo: '110', data: '2026-06-01', ora: '09:30' })).j;
+verifica(corretta.quantita === '20.000000' && corretta.prezzo === '110.0000' && corretta.data === '2026-06-01' && corretta.ora === '09:30', 'riga corretta direttamente', corretta);
+
+verifica((await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: '00000000-0000-4000-8000-000000000000', quantita: '1', prezzo: '1' })).s === 404, 'portafoglio inesistente');
+verifica((await r('POST', '/investimenti/lotti', Bt, { titolo_id: vwce.id, portafoglio_id: pf.id, quantita: '1', prezzo: '1' })).s === 404, 'il portafoglio di un altro non si usa');
 await r('PUT', `/investimenti/titoli/${vwce.id}/prezzi`, A, { prezzo: '130' });
 await r('PUT', `/investimenti/titoli/${vwce.id}/esposizioni`, A, { dimensione: 'area', voci: [{ voce: 'Stati Uniti', peso: '62' }, { voce: 'Europa', peso: '16' }] });
-const port = (await r('GET', '/investimenti/portafoglio', A)).j;
-verifica(port.posizioni[0].quote === '15' && port.posizioni[0].prezzo_medio === '110.1000' && port.valore === '1950.00', 'portafoglio con prezzo medio', port);
-verifica(port.guadagno === '298.50', 'guadagno', port.guadagno);
+let port = (await r('GET', '/investimenti/portafoglio', A)).j;
+const pos = port.posizioni[0];
+verifica(port.posizioni.length === 1 && pos.quantita === '20' && pos.lotti === undefined && pos.prezzo_medio === '110.0000' && pos.valore === '2600.00' && pos.stato === 'ok', 'una posizione dai due acquisti, prezzo medio pesato', pos);
+verifica(port.valore === '2600.00' && port.costo === '2200.00' && port.guadagno === '400.00' && port.titoli_senza_prezzo === 0, 'totali del portafoglio', port);
+const patch = (await r('PATCH', `/investimenti/lotti/${riga.id}`, A, { quantita: '40', prezzo: '107.5', ora: '10:15' })).j;
+verifica(patch.quantita === '40.000000' && patch.ora === '10:15' && patch.data === '2026-06-01', 'modifica della posizione', patch);
+port = (await r('GET', '/investimenti/portafoglio', A)).j;
+verifica(port.posizioni[0].quantita === '40' && port.posizioni[0].prezzo_medio === '107.5000', 'prezzo medio dopo la modifica', port.posizioni[0]);
+await r('PATCH', `/investimenti/lotti/${riga.id}`, A, { quantita: '20', prezzo: '110' });
+// Portafoglio di prova: fuori dai totali generali, ma con i suoi totali.
+await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: prova.id, quantita: '5', prezzo: '100' });
+await r('POST', '/investimenti/lotti', A, { titolo_id: vwce.id, portafoglio_id: prova.id, quantita: '5', prezzo: '100' });
+verifica((await r('GET', `/investimenti/lotti?portafoglio_id=${prova.id}`, A)).j.length === 1, 'portafoglio di prova: una riga anche dopo due acquisti');
+await r('PATCH', `/investimenti/lotti/${(await r('GET', `/investimenti/lotti?portafoglio_id=${prova.id}`, A)).j[0].id}`, A, { quantita: '5' });
+port = (await r('GET', '/investimenti/portafoglio', A)).j;
+verifica(port.valore === '2600.00' && port.posizioni.length === 1, 'il portafoglio di prova non conta', port.valore);
+const dettaglioProva = (await r('GET', `/investimenti/portafoglio?portafoglio_id=${prova.id}`, A)).j;
+verifica(dettaglioProva.valore === '650.00', 'ma ha i suoi totali', dettaglioProva.valore);
+const elenco = (await r('GET', '/investimenti/portafogli', A)).j;
+verifica(elenco.length === 2 && elenco.find((x) => x.id === prova.id).valore === '650.00' && elenco.find((x) => x.id === pf.id).guadagno === '400.00', 'elenco portafogli con totali', elenco);
+verifica((await r('GET', '/analisi/patrimonio', A)).j.investimenti === '2600.00', 'il patrimonio esclude il portafoglio di prova');
+verifica((await r('DELETE', `/investimenti/portafogli/${prova.id}`, A)).s === 409, 'portafoglio non vuoto: non si cancella');
+const rinominato = (await r('PATCH', `/investimenti/portafogli/${prova.id}`, A, { nome: 'Idee 2' })).j;
+verifica(rinominato.nome === 'Idee 2', 'portafoglio modificato', rinominato);
+verifica((await r('DELETE', `/investimenti/posizioni?titolo_id=${vwce.id}&portafoglio_id=${prova.id}`, A)).s === 204, 'posizione tolta');
+verifica((await r('DELETE', `/investimenti/portafogli/${prova.id}`, A)).s === 204, 'portafoglio vuoto cancellato');
+// Titolo senza prezzo: non vale 0 in silenzio.
+const senza = (await r('POST', '/investimenti/titoli', A, { simbolo: `PROVA${n}.XX`, nome: 'Titolo senza prezzo' })).j;
+await r('POST', '/investimenti/lotti', A, { titolo_id: senza.id, portafoglio_id: pf.id, quantita: '3', prezzo: '10' });
+port = (await r('GET', '/investimenti/portafoglio', A)).j;
+const ps = port.posizioni.find((x) => x.titolo_id === senza.id);
+verifica(ps.valore === null && ps.stato === 'mancante' && ps.prezzo === null && ps.prezzo_al === null && port.titoli_senza_prezzo === 1 && port.incompleto === true && port.valore === '2600.00', 'titolo senza prezzo: valore null e segnalato', ps);
+verifica((await r('GET', '/analisi/patrimonio', A)).j.investimenti_senza_prezzo === 1, 'il patrimonio segnala i titoli senza prezzo');
+await r('PUT', `/investimenti/titoli/${senza.id}/prezzi`, A, { prezzo: '11', data: '2026-01-05' });
+port = (await r('GET', '/investimenti/portafoglio', A)).j;
+verifica(port.posizioni.find((x) => x.titolo_id === senza.id).stato === 'vecchio', 'prezzo vecchio', port.posizioni.find((x) => x.titolo_id === senza.id));
+// «Leggi dalla borsa»: la fonte non conosce PROVA.XX, quindi 502 leggibile e il prezzo scritto a mano resta.
+await r('PUT', `/investimenti/titoli/${vwce.id}/prezzi`, A, { prezzo: '130' });
+const leggi = await r('POST', `/investimenti/titoli/${senza.id}/prezzi/leggi`, A);
+verifica(leggi.s === 502 && typeof leggi.j.errore === 'string', 'leggi dalla borsa: fonte che non risponde = errore leggibile', leggi);
+verifica((await r('POST', `/investimenti/titoli/00000000-0000-4000-8000-000000000000/prezzi/leggi`, A)).s === 404, 'leggi dalla borsa: titolo inesistente');
+verifica((await r('GET', '/investimenti/portafoglio', A)).j.posizioni.find((x) => x.titolo_id === vwce.id).prezzo === '130.0000', 'il prezzo scritto a mano resta se la lettura fallisce');
+const conOra = (await r('GET', '/investimenti/portafoglio', A)).j.posizioni.find((x) => x.titolo_id === vwce.id);
+verifica(conOra.prezzo_fonte === 'mano' && conOra.prezzo_aggiornato_il, 'prezzo scritto a mano: fonte e ora');
+verifica((await r('PATCH', '/investimenti/posizioni', A, { titolo_id: senza.id, portafoglio_id: pf.id, nuovo_portafoglio_id: pf.id })).s === 204, 'sposta posizione');
+// Spostare in un portafoglio dove il titolo c'è già: una sola riga, unita.
+const altro = (await r('POST', '/investimenti/portafogli', A, { nome: 'Altro' })).j;
+await r('POST', '/investimenti/lotti', A, { titolo_id: senza.id, portafoglio_id: altro.id, quantita: '1', prezzo: '16' });
+verifica((await r('PATCH', '/investimenti/posizioni', A, { titolo_id: senza.id, portafoglio_id: pf.id, nuovo_portafoglio_id: altro.id })).s === 204, 'sposta in un portafoglio che ha già il titolo');
+const unita = (await r('GET', `/investimenti/lotti?titolo_id=${senza.id}`, A)).j;
+verifica(unita.length === 1 && unita[0].portafoglio_id === altro.id && unita[0].quantita === '4.000000' && unita[0].prezzo === '11.5000', 'spostamento con unione: una riga, PCM pesato', unita);
+await r('PATCH', '/investimenti/posizioni', A, { titolo_id: senza.id, portafoglio_id: altro.id, nuovo_portafoglio_id: pf.id });
+await r('DELETE', `/investimenti/portafogli/${altro.id}`, A);
+await r('DELETE', `/investimenti/posizioni?titolo_id=${senza.id}&portafoglio_id=${pf.id}`, A);
+// Beni non quotati e beni con prezzo di mercato
+const catalogo = (await r('GET', '/investimenti/catalogo', A)).j;
+verifica(['oro', 'argento', 'platino', 'palladio', 'marengo', 'sterlina', 'krugerrand', 'maple-leaf-oro', 'philharmoniker-oro', 'napoleone'].every((c) => catalogo.some((x) => x.codice === c)), 'catalogo', catalogo.map((x) => x.codice));
+const casa2 = (await r('POST', '/investimenti/beni', A, { portafoglio_id: pf.id, nome: 'Fondo pensione', tipo: 'fondo_pensione', costo: '5000', valore: '5400', dove: 'Cometa' })).j;
+verifica(casa2.valore === '5400.00' && casa2.catalogo === null && casa2.stato === 'ok' && casa2.guadagno === '400.00', 'bene non quotato', casa2);
+const mar = (await r('POST', '/investimenti/beni', A, { portafoglio_id: pf.id, catalogo: 'marengo', quantita: '3', costo: '600', dove: 'Cassetta di sicurezza' })).j;
+verifica(mar.quantita === '3' && mar.grammi_fini === '17.4180' && mar.nome === 'Marengo' && mar.catalogo.metallo === 'XAU' && ['ok', 'vecchio', 'mancante'].includes(mar.stato), 'bene di mercato a pezzi', mar);
+if (mar.euro_grammo) verifica(Math.abs(Number(mar.valore) - 17.418 * Number(mar.euro_grammo)) < 0.01, 'valore = grammi fini × spot', mar);
+else verifica(mar.valore === null && mar.stato === 'mancante', 'senza quotazione il valore è null', mar);
+const arg = (await r('POST', '/investimenti/beni', A, { portafoglio_id: pf.id, catalogo: 'argento', quantita: '100', purezza: '925', costo: '60' })).j;
+verifica(arg.purezza === '925.0' && arg.grammi_fini === '92.5000', 'argento a grammi con purezza', arg);
+const oro = (await r('POST', '/investimenti/beni', A, { portafoglio_id: pf.id, catalogo: 'oro', quantita: '10', costo: '700' })).j;
+verifica(oro.purezza === '999.9', 'purezza proposta', oro);
+verifica((await r('POST', '/investimenti/beni', A, { portafoglio_id: pf.id, catalogo: 'marengo', quantita: '1.5', costo: '100' })).s === 400, 'le monete sono pezzi interi');
+verifica((await r('POST', '/investimenti/beni', A, { portafoglio_id: pf.id, catalogo: 'inesistente', quantita: '1', costo: '1' })).s === 400, 'voce di catalogo sconosciuta');
+verifica((await r('PATCH', `/investimenti/beni/${mar.id}`, A, { valore: '999' })).s === 400, 'il valore di un bene di mercato non si scrive');
+verifica((await r('PATCH', `/investimenti/beni/${mar.id}`, A, { quantita: '4' })).j.quantita === '4', 'modifica quantità bene');
+verifica((await r('PATCH', `/investimenti/beni/${casa2.id}`, A, { valore: '5500' })).j.valore_al === new Date().toLocaleDateString('en-CA'), 'nuovo valore = valore di oggi');
+const quot = (await r('GET', '/investimenti/metalli/quotazioni', A)).j;
+verifica(quot.length === 4 && quot.map((x) => x.metallo).join() === 'XAU,XAG,XPT,XPD', 'quotazioni dei quattro metalli', quot);
+const beni = (await r('GET', `/investimenti/beni?portafoglio_id=${pf.id}`, A)).j;
+verifica(beni.length === 4, 'elenco beni del portafoglio', beni.length);
+const det = (await r('GET', `/investimenti/portafogli/${pf.id}`, A)).j;
+verifica(det.beni.length === 4 && det.posizioni.length === 1, 'dettaglio del portafoglio', [det.beni.length, det.posizioni.length]);
+verifica((await r('DELETE', `/investimenti/portafogli/${pf.id}`, A)).s === 409, 'portafoglio con posizioni e beni: 409');
+for (const b of [casa2, mar, arg, oro]) await r('DELETE', `/investimenti/beni/${b.id}`, A);
 const esp = (await r('GET', '/investimenti/esposizione', A)).j;
 verifica(esp.area[0].voce === 'Stati Uniti' && esp.area[0].peso === 62 && esp.area.some((x) => x.voce === 'Non indicato'), 'esposizione', esp.area);
 const and = (await r('GET', '/investimenti/andamento?mesi=12', A)).j;
-verifica(and.length === 12 && and[11].valore === '1950.00', 'andamento', and.at(-1));
-verifica((await r('GET', '/investimenti/portafoglio', Bt)).j.posizioni.length === 0, 'investimenti privati');
+verifica(and.length === 12 && and[11].valore === '2600.00' && and[11].messo_dentro === '2200.00', 'andamento', and.at(-1));
+verifica((await r('GET', `/investimenti/andamento?mesi=3&portafoglio_id=${pf.id}`, A)).j.length === 3, 'andamento di un portafoglio');
+verifica((await r('GET', '/investimenti/portafoglio', Bt)).j.posizioni.length === 0 && (await r('GET', '/investimenti/portafogli', Bt)).j.length === 0, 'investimenti privati');
+verifica((await r('GET', `/investimenti/portafogli/${pf.id}`, Bt)).s === 404, 'il portafoglio di un altro non si vede');
+verifica((await r('POST', '/investimenti/operazioni', A, { titolo_id: vwce.id, data: '2026-03-01', verso: 'acquisto', quantita: '10', prezzo: '100' })).s === 404, 'le operazioni non esistono più');
 
 // Analisi
 const mese = (await r('GET', '/analisi/mese?mese=2026-10', A)).j;
@@ -185,7 +291,7 @@ verifica(mese.voci.rate === '150.00' && mese.resta === '980.00' && mese.semaforo
 const st = (await r('GET', '/analisi/storico?mesi=3&mese=2026-10', A)).j;
 verifica(st.length === 3 && st[2].mese === '2026-10' && st[2].uscite === '65.30', 'storico: solo i movimenti veri, non le spunte', st[2]);
 const pat = (await r('GET', '/analisi/patrimonio', A)).j;
-verifica(pat.investimenti === '1950.00', 'patrimonio', pat);
+verifica(pat.investimenti === '2600.00', 'patrimonio', pat);
 const pro = (await r('GET', '/analisi/proiezione', A)).j;
 verifica(pro.punti.length >= 3 && pro.punti.at(-1).mesi === 60, 'proiezione', pro.punti.at(-1));
 const ctrl = (await r('GET', '/analisi/rate', A)).j;

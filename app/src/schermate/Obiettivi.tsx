@@ -5,10 +5,10 @@ import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx'
 import { RigaAvanzamento, RigaSalvadanaio, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
 import type { Condivisione, ElencoSpese, Obiettivo, Spesa, Traguardo } from '../dati/tipi.ts';
-import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso, percento } from '../formato.ts';
+import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso, percento } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { useRiferimenti } from '../dati/contesto.tsx';
-import { meseDi } from '../mesePersonale.ts';
+import { meseDi, meseDiVoce } from '../mesePersonale.ts';
 import { Caricamento, fraMesi, proposta, prossimeAnnuali } from './comuni.tsx';
 import { Affiancati, ConErrore, FinestraModulo, Meta, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
@@ -25,6 +25,21 @@ const tonoDi = (pct: number | null) => (pct !== null && pct >= 100 ? 'ok' as con
 const rigaPropria = (o: Obiettivo, apri: () => void) => (
   <RigaSalvadanaio variante="sotto" propria nome="Liberi nel salvadanaio" icona="wallet" valore={0} cifra={euro(o.versato)} onCifra={apri} onModifica={apri} />
 );
+// Scadenza in piccolo: «entro»/«esce», solo mese e anno se la spesa non ha il giorno. Colore per urgenza.
+const scadenzaDi = (o: Obiettivo, inizio: number): { testo: string; tono: 'secondario' | 'attenzione' | 'errore' } | undefined => {
+  const dt = o.paga_spesa ? o.paga_spesa.prossima : o.scadenza;
+  if (!dt) return undefined;
+  const senza = !!o.paga_spesa?.senza_giorno;
+  const mese = meseDiVoce(dt, senza, inizio);
+  // L'anno si mostra solo se non è quello di oggi.
+  const anno = senza ? mese.slice(0, 4) : dt.slice(0, 4);
+  const giornoMese = senza ? meseCorto(mese) : `${Number(dt.slice(8, 10))} ${meseCorto(dt)}`;
+  const forma = anno === oggiIso().slice(0, 4) ? giornoMese : `${giornoMese} ${anno}`;
+  const raggiunto = o.percentuale !== null && o.percentuale >= 100;
+  const adesso = meseDi(oggiIso(), inizio);
+  if (!raggiunto && (senza ? mese < adesso : dt < oggiIso())) return { testo: `scaduto ${forma}`, tono: 'errore' };
+  return { testo: `${o.paga_spesa ? 'esce' : 'entro'} ${forma}`, tono: !raggiunto && mese === adesso ? 'attenzione' : 'secondario' };
+};
 const cifraDi = (o: Obiettivo) => (o.traguardo_effettivo ? `${euro(o.saldo)}/${euro(o.traguardo_effettivo)}` : euro(o.saldo));
 const pctDi = (o: Obiettivo) => (o.traguardo_effettivo && o.percentuale !== null ? percento(o.percentuale) : undefined);
 
@@ -60,7 +75,7 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
     <View style={{ gap: d['spazio-pillole'] }}>
       {figli.map((f) => (
         <View key={f.id} style={{ gap: d['spazio-pillole'] }}>
-          <RigaSalvadanaio variante="sotto" nome={f.nome} icona={iconaDi(f)} valore={f.percentuale ?? 0} tono={tonoDi(f.percentuale)} cifra={cifraDi(f)} percentuale={pctDi(f)}
+          <RigaSalvadanaio variante="sotto" nome={f.nome} icona={iconaDi(f)} valore={f.percentuale ?? 0} tono={tonoDi(f.percentuale)} cifra={cifraDi(f)} percentuale={pctDi(f)} scadenza={scadenzaDi(f, inizio)}
             nota={f.paga_spesa ? `Esce a ${nomeMese(meseDi(f.paga_spesa.prossima, inizio)).toLowerCase()} · ${euro(Number(f.paga_spesa.importo) / f.paga_spesa.ogni_mesi)} al mese` : undefined}
             onCifra={() => setVersa(f)} onModifica={() => setModifica({ obiettivo: f })} />
           {f.figli.length ? (
@@ -86,7 +101,7 @@ export function Obiettivi({ nuovo = 0 }: { nuovo?: number }) {
       <View key={o.id} {...{ onMouseEnter: () => setSopra(o.id), onMouseLeave: () => setSopra(null) }} style={{ width: '100%' }}>
         <Scheda style={{ width: '100%' }}>
           <View style={{ gap: d['spazio-blocco'] }}>
-            <RigaSalvadanaio variante="testata" nome={o.nome} icona={iconaDi(o)} valore={o.percentuale ?? 0} tono={mancaPer(o) ? 'attenzione' : tonoDi(o.percentuale)} cifra={cifraDi(o)} percentuale={pctDi(o)} nota={nota || undefined}
+            <RigaSalvadanaio variante="testata" nome={o.nome} icona={iconaDi(o)} valore={o.percentuale ?? 0} tono={mancaPer(o) ? 'attenzione' : tonoDi(o.percentuale)} cifra={cifraDi(o)} percentuale={pctDi(o)} scadenza={scadenzaDi(o, inizio)} nota={nota || undefined}
               matitaNascosta={!compatto && sopra !== o.id} onCifra={() => setVersa(o)} onModifica={() => setModifica({ obiettivo: o })} />
             {o.figli.length ? <View style={{ gap: d['spazio-pillole'] }}>{rigaPropria(o, () => setVersa(o))}{albero(o.figli)}</View> : null}
             {o.traguardi.length ? (

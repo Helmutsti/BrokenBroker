@@ -100,13 +100,19 @@ void nikon;
 // Investimenti.
 const vwce = await r('POST', '/investimenti/titoli', M, { isin: 'IE00BK5BQT80', ticker: 'VWCE', nome: 'Vanguard FTSE All-World', tipo: 'etf' });
 const eimi = await r('POST', '/investimenti/titoli', M, { isin: 'IE00BKM4GZ66', ticker: 'EIMI', nome: 'iShares Core MSCI EM IMI', tipo: 'etf' });
+// Un portafoglio vero, uno «di prova» (fuori dai totali) e un lotto per ogni acquisto.
+const portafoglio = await r('POST', '/investimenti/portafogli', M, { nome: 'Trade Republic', icona: 'trending-up' });
+await r('POST', '/investimenti/portafogli', M, { nome: 'Idee', conta_nel_patrimonio: false });
 for (let m = 11; m >= 0; m--) {
   const p = (110 + (11 - m) * 1.6).toFixed(2);
-  await r('POST', '/investimenti/operazioni', M, { titolo_id: vwce.id, conto_id: tr, data: meseFa(m, 2), verso: 'acquisto', quantita: '3.5', prezzo: p, commissioni: '1' });
+  await r('POST', '/investimenti/lotti', M, { titolo_id: vwce.id, portafoglio_id: portafoglio.id, data: meseFa(m, 2), quantita: '3.5', prezzo: p });
   await r('PUT', `/investimenti/titoli/${vwce.id}/prezzi`, M, { data: meseFa(m, 28) > iso(oggi) ? iso(oggi) : meseFa(m, 28), prezzo: (Number(p) + 1.2).toFixed(2) });
 }
-await r('POST', '/investimenti/operazioni', M, { titolo_id: eimi.id, conto_id: tr, data: meseFa(9, 2), verso: 'acquisto', quantita: '115', prezzo: '31.60', commissioni: '1' });
-await r('POST', '/investimenti/operazioni', M, { titolo_id: eimi.id, conto_id: tr, data: meseFa(3, 14), verso: 'vendita', quantita: '20', prezzo: '32.00', commissioni: '1' });
+await r('POST', '/investimenti/lotti', M, { titolo_id: eimi.id, portafoglio_id: portafoglio.id, data: meseFa(9, 2), quantita: '95', prezzo: '31.60' });
+// Beni: uno non quotato e due con prezzo di mercato (valore = grammi fini × quotazione spot).
+await r('POST', '/investimenti/beni', M, { portafoglio_id: portafoglio.id, nome: 'Fondo pensione', tipo: 'fondo_pensione', costo: '4200', valore: '4650', dove: 'Cometa' });
+await r('POST', '/investimenti/beni', M, { portafoglio_id: portafoglio.id, catalogo: 'marengo', quantita: '2', costo: '480', dove: 'Cassetta di sicurezza' });
+await r('POST', '/investimenti/beni', M, { portafoglio_id: portafoglio.id, catalogo: 'argento', quantita: '100', purezza: '999', costo: '75' });
 await r('PUT', `/investimenti/titoli/${eimi.id}/prezzi`, M, { prezzo: '30.59' });
 await r('PUT', `/investimenti/titoli/${vwce.id}/esposizioni`, M, { dimensione: 'area', voci: [{ voce: 'Stati Uniti', peso: '62' }, { voce: 'Europa', peso: '16' }, { voce: 'Giappone', peso: '6' }, { voce: 'Paesi emergenti', peso: '10' }, { voce: 'Altri', peso: '6' }] });
 await r('PUT', `/investimenti/titoli/${eimi.id}/esposizioni`, M, { dimensione: 'area', voci: [{ voce: 'Paesi emergenti', peso: '100' }] });
