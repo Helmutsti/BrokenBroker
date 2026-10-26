@@ -75,7 +75,7 @@ export function SpesePreviste() {
         <View style={{ width: compatto ? undefined : 300 }}><Campo valore={cerca} onCambia={setCerca} segnaposto="Cerca una spesa…" iconaPrima="search" /></View>
       </View>
       {dati.spese.length === 0 ? (
-        <Scheda><Vuoto testo="Ancora nessuna spesa prevista: aggiungi affitto, bollette e abbonamenti." azione={nuova} /></Scheda>
+        <Scheda><Vuoto testo="Ancora nessuna spesa prevista: aggiungi affitto, bollette e abbonamenti." /></Scheda>
       ) : null}
       {dati.spese.length && vediMese ? (
         <Scheda titolo="Ogni mese" nota="Fisse, budget e investimenti" icona="repeat">

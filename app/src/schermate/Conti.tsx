@@ -28,7 +28,7 @@ export function Conti() {
     <>
       <Intestazione titolo="Conti" sottotitolo="I conti da cui paghi le spese. Servono a dire da dove esce ogni cifra: non tengono saldi."
         azioni={<Pulsante tipo="primario" etichetta="Nuovo conto" icona="plus" onPress={() => setAperto('nuovo')} />} />
-      {attivi.length === 0 ? <Scheda><Vuoto testo="Nessun conto. Aggiungi il tuo conto corrente." azione={<Pulsante tipo="primario" etichetta="Nuovo conto" icona="plus" onPress={() => setAperto('nuovo')} />} /></Scheda> : elenco(attivi)}
+      {attivi.length === 0 ? <Scheda><Vuoto testo="Nessun conto. Aggiungi il tuo conto corrente." /></Scheda> : elenco(attivi)}
       {archiviati && vecchi.length ? (
         <View style={{ gap: d['spazio-blocco'] }}>
           <Testo stile="titolo-scheda">Archiviati</Testo>

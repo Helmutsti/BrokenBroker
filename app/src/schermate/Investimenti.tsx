@@ -121,7 +121,7 @@ export function Investimenti() {
           </View>
         </View>
       </Scheda>
-      {riquadri.length === 0 ? <Scheda><Vuoto testo="Nessun investimento. Aggiungi un titolo, un fondo pensione o l'oro che possiedi." azione={nuovo} /></Scheda> : null}
+      {riquadri.length === 0 ? <Scheda><Vuoto testo="Nessun investimento. Aggiungi un titolo, un fondo pensione o l'oro che possiedi." /></Scheda> : null}
       {riquadri.map((r) => {
         const valore = somma(r.posizioni) + somma(r.beni);
         const costo = r.posizioni.reduce((t, x) => t + Number(x.costo), 0) + r.beni.reduce((t, b) => t + Number(b.costo), 0);
