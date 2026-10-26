@@ -8,6 +8,9 @@ import { d, useTema } from '../tema/tema.tsx';
 
 // Pezzi condivisi tra le schermate.
 
+// Calcoli della finestra della cifra di un salvadanaio (puri, provati anche dalle prove dell'API).
+export { liberiDi, mancaAlTraguardo, pianoCifra, quotaMensileSalvadanaio } from '../calcoliCifra.ts';
+
 export function Caricamento({ errore }: { errore?: string | null }) {
   const { c } = useTema();
   if (errore) return <Esito tono="errore" testo={errore} />;

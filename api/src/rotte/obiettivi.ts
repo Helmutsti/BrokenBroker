@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { PoolClient } from 'pg';
 import { bloccoObiettivo, erroreObiettivoBloccato, vietaCampi, vietaPromemoria, sqlBloccoObiettivo, type Blocco } from '../collegamenti.ts';
@@ -155,8 +156,14 @@ rotteObiettivi.get('/:id', async (req, res) => {
     const n = trova(await alberoObiettivi(db), id);
     if (!n) return undefined;
     const versamenti = (await db.query(
-      `select x.id, x.data, x.importo::text as importo, x.utente_id, u.nome as utente
-         from versamenti x join utenti u on u.id = x.utente_id where x.obiettivo_id = $1 order by x.data desc`, [id])).rows;
+      `select x.id, x.data, x.importo::text as importo, x.utente_id, u.nome as utente,
+              sp.con as spostamento_con, coalesce(sp.con_padre, false) as spostamento_con_padre
+         from versamenti x join utenti u on u.id = x.utente_id
+         left join lateral (
+           select string_agg(distinct o2.nome, ', ') as con, bool_or(o2.id = (select padre_id from obiettivi where id = x.obiettivo_id)) as con_padre
+             from versamenti y join obiettivi o2 on o2.id = y.obiettivo_id
+            where x.spostamento_id is not null and y.spostamento_id = x.spostamento_id and y.id <> x.id and sign(y.importo) <> sign(x.importo)) sp on true
+        where x.obiettivo_id = $1 order by x.data desc, x.id desc`, [id])).rows;
     return { ...n, versamenti };
   });
   if (!obiettivo) throw nonTrovato('Obiettivo');
@@ -283,11 +290,35 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
         spuntaId = (await db.query<{ id: string }>('insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id', [voce.id, giorno])).rows[0].id;
       }
     }
-    // Con dividi = true un versamento positivo si divide tra i sotto-obiettivi.
-    const parti = v.booleano(c, 'dividi') && Number(importo) > 0 ? await dividiVersamento(db, id, Number(importo)) : [{ obiettivo_id: id, importo }];
-    for (const [k, x] of parti.entries()) {
-      await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4)',
-        [x.obiettivo_id, v.data(c, 'data') ?? null, x.importo, k === 0 ? spuntaId : null]);
+    const data = v.data(c, 'data') ?? null;
+    const inserisci = (obiettivoId: string, x: string, spunta: string | null, spostamento: string | null) => db.query(
+      'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id, spostamento_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4, $5)',
+      [obiettivoId, data, x, spunta, spostamento]);
+    if (v.booleano(c, 'da_liberi')) {
+      // Spostamento (decisione 46): i soldi passano tra i liberi del salvadanaio superiore e questo sotto-salvadanaio,
+      // il totale del superiore non cambia. Importo positivo = dai liberi al sotto-salvadanaio, negativo = dal sotto-salvadanaio ai liberi.
+      const padre = (await db.query<{ padre_id: string | null }>('select padre_id from obiettivi where id = $1', [id])).rows[0].padre_id;
+      if (!padre) throw new ErroreApi(400, 'Solo un sotto-salvadanaio ha i liberi di un salvadanaio superiore');
+      // Blocco le due righe (sempre nello stesso ordine) così due spostamenti insieme non spendono due volte gli stessi liberi.
+      await db.query('select id from obiettivi where id = any($1::uuid[]) order by id for update', [[id, padre]]);
+      const propri = async (oid: string) => Number((await db.query<{ t: string }>('select coalesce(sum(importo), 0)::text as t from versamenti where obiettivo_id = $1', [oid])).rows[0].t);
+      const quanto = Math.abs(Number(importo)), gruppo = randomUUID();
+      if (Number(importo) > 0) {
+        const liberi = await propri(padre);
+        if (quanto > liberi + 0.005) throw new ErroreApi(400, `Nei liberi ci sono solo ${cent(Math.max(0, liberi)).replace('.', ',')} €`);
+        const parti = v.booleano(c, 'dividi') ? await dividiVersamento(db, id, quanto) : [{ obiettivo_id: id, importo: cent(quanto) }];
+        await inserisci(padre, cent(-quanto), null, gruppo);
+        for (const [k, x] of parti.entries()) await inserisci(x.obiettivo_id, x.importo, k === 0 ? spuntaId : null, gruppo);
+      } else {
+        const proprio = await propri(id);
+        if (quanto > proprio + 0.005) throw new ErroreApi(400, `Nel sotto-salvadanaio ci sono solo ${cent(Math.max(0, proprio)).replace('.', ',')} € di suoi: il resto è nei sotto-salvadanai`);
+        await inserisci(id, cent(-quanto), null, gruppo);
+        await inserisci(padre, cent(quanto), null, gruppo);
+      }
+    } else {
+      // Con dividi = true un versamento positivo si divide tra i sotto-obiettivi.
+      const parti = v.booleano(c, 'dividi') && Number(importo) > 0 ? await dividiVersamento(db, id, Number(importo)) : [{ obiettivo_id: id, importo }];
+      for (const [k, x] of parti.entries()) await inserisci(x.obiettivo_id, x.importo, k === 0 ? spuntaId : null, null);
     }
     await creaSpeseRaggiunte(db, id);
     return trova(await alberoObiettivi(db), id);
@@ -298,9 +329,18 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
 rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    const eliminato = (await db.query<{ spunta: string | null }>('delete from versamenti where id = $1 returning promemoria_spunta_id as spunta', [id])).rows[0];
+    const eliminato = (await db.query<{ spunta: string | null; spostamento: string | null }>('delete from versamenti where id = $1 returning promemoria_spunta_id as spunta, spostamento_id as spostamento', [id])).rows[0];
     if (eliminato) {
       if (eliminato.spunta) await db.query('delete from spunte where id = $1', [eliminato.spunta]);
+      // Uno spostamento si annulla per intero: spariscono anche gli altri versamenti dello stesso spostamento.
+      if (eliminato.spostamento) {
+        const altri = await db.query<{ spunta: string | null; obiettivo_id: string }>('delete from versamenti where spostamento_id = $1 returning promemoria_spunta_id as spunta, obiettivo_id', [eliminato.spostamento]);
+        for (const x of altri.rows) if (x.spunta) await db.query('delete from spunte where id = $1', [x.spunta]);
+        // Se i soldi spostati sono già stati usati (i liberi o il sotto-salvadanaio andrebbero sotto zero) lo spostamento non si annulla.
+        const coinvolti = [...new Set(altri.rows.map((x) => x.obiettivo_id))];
+        const sotto = await db.query('select obiettivo_id from versamenti where obiettivo_id = any($1::uuid[]) group by obiettivo_id having sum(importo) < -0.005', [coinvolti]);
+        if (sotto.rowCount) throw new ErroreApi(409, 'Non si può annullare lo spostamento: i soldi spostati sono già stati usati');
+      }
       return;
     }
     const visibile = (await db.query('select 1 from versamenti where id = $1', [id])).rowCount;

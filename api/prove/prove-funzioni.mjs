@@ -456,5 +456,85 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   verifica((await r('PATCH', `/obiettivi/${nato.id}`, A, { nome: 'Altro' })).s === 409, 'salvadanaio bloccato: il nome no');
 }
 
+// Cifra di un salvadanaio (decisione 46): «Riempi», «Metti 1/12» e spostamenti da/verso i liberi del superiore.
+{
+  const { mancaAlTraguardo, quotaMensileSalvadanaio, liberiDi, pianoCifra } = await import('../../app/src/calcoliCifra.ts');
+  // Calcoli dell'app (puri).
+  verifica(mancaAlTraguardo({ saldo: '300.00', traguardo_effettivo: '1000.00' }) === 700, 'riempi: manca = traguardo - saldo');
+  verifica(mancaAlTraguardo({ saldo: '1000.00', traguardo_effettivo: '1000.00' }) === 0 && mancaAlTraguardo({ saldo: '1200', traguardo_effettivo: '1000' }) < 0, 'riempi: già pieno (zero o meno)');
+  verifica(mancaAlTraguardo({ saldo: '5', traguardo_effettivo: null }) === null, 'riempi: senza traguardo non c\'è');
+  verifica(quotaMensileSalvadanaio({ traguardo_effettivo: '499.00', paga_spesa: { importo: '499.00', ogni_mesi: 12 } }) === 41.58, '1/12: quota della spesa annuale (importo / ogni_mesi)');
+  verifica(quotaMensileSalvadanaio({ traguardo_effettivo: '600', paga_spesa: { importo: '600', ogni_mesi: 3 } }) === 200, '1/12: spesa trimestrale = importo / 3');
+  verifica(quotaMensileSalvadanaio({ traguardo_effettivo: '1200', paga_spesa: null }) === 100, '1/12: senza spesa, traguardo / 12');
+  verifica(quotaMensileSalvadanaio({ traguardo_effettivo: null, paga_spesa: null }) === null, '1/12: senza traguardo né spesa non c\'è');
+  const base = { saldo: 100, propria: 100, liberiPadre: 900 };
+  const p1 = pianoCifra({ ...base, modo: 'aggiungi', valore: 41.58, daLiberi: true });
+  verifica(p1.sposta && p1.differenza === 41.58 && p1.restanoLiberi === 858.42 && !p1.errore, 'piano: aggiungi dai liberi', p1);
+  verifica(pianoCifra({ ...base, modo: 'aggiungi', valore: 901, daLiberi: true }).errore?.tipo === 'liberi', 'piano: oltre i liberi è errore');
+  verifica(!pianoCifra({ ...base, modo: 'aggiungi', valore: 901, daLiberi: false }).errore, 'piano: soldi nuovi senza limite');
+  verifica(pianoCifra({ ...base, modo: 'cifra', valore: 150, daLiberi: true }).sposta, 'piano: scrivi la cifra più alta sposta dai liberi');
+  verifica(!pianoCifra({ ...base, modo: 'cifra', valore: 50, daLiberi: true }).sposta, 'piano: scrivi la cifra più bassa non sposta (esce)');
+  verifica(pianoCifra({ ...base, modo: 'togli', valore: 30, daLiberi: true }).restanoLiberi === 930, 'piano: togli e rimetti nei liberi');
+  verifica(pianoCifra({ ...base, modo: 'togli', valore: 101, daLiberi: false }).errore?.tipo === 'propria', 'piano: togli oltre la parte propria');
+  verifica(liberiDi({ versato: '12.50' }) === 12.5, 'liberi = versato');
+
+  // API: spostamenti. Scadenze (padre) 1000 liberi; sotto-salvadanai Assicurazione e Bollo.
+  const nodi = (xs) => xs.flatMap((o) => [o, ...nodi(o.figli)]);
+  const dammi = async (id) => nodi((await r('GET', '/obiettivi', A)).j).find((o) => o.id === id);
+  const sc = (await r('POST', '/obiettivi', A, { nome: 'Scadenze' })).j;
+  const ass = (await r('POST', '/obiettivi', A, { nome: 'Assicurazione', padre_id: sc.id, traguardo: '500' })).j;
+  const bollo = (await r('POST', '/obiettivi', A, { nome: 'Bollo', padre_id: sc.id, traguardo: '200' })).j;
+  const nip = (await r('POST', '/obiettivi', A, { nome: 'Tagliando', padre_id: ass.id, traguardo: '100' })).j;
+  await r('POST', `/obiettivi/${sc.id}/versamenti`, A, { importo: '1000', data: '2026-10-01' });
+  verifica(Number((await dammi(sc.id)).saldo) === 1000 && Number((await dammi(sc.id)).versato) === 1000, 'liberi iniziali del padre');
+  // Un salvadanaio senza padre non ha liberi da cui prendere.
+  verifica((await r('POST', `/obiettivi/${sc.id}/versamenti`, A, { importo: '10', da_liberi: true })).s === 400, 'da_liberi su un salvadanaio senza padre rifiutato');
+  // Dai liberi al figlio: il totale del padre non cambia.
+  const s1 = await r('POST', `/obiettivi/${ass.id}/versamenti`, A, { importo: '41.58', data: '2026-10-26', da_liberi: true });
+  const p = await dammi(sc.id), f = await dammi(ass.id);
+  verifica(s1.s === 201 && Number(p.saldo) === 1000 && Number(p.versato) === 958.42 && Number(f.versato) === 41.58, 'spostamento dai liberi: totale invariato', [p.saldo, p.versato, f.versato]);
+  const detF = (await r('GET', `/obiettivi/${ass.id}`, A)).j.versamenti, detP = (await r('GET', `/obiettivi/${sc.id}`, A)).j.versamenti;
+  const vF = detF.find((x) => x.spostamento_con), vP = detP.find((x) => x.spostamento_con);
+  verifica(vF?.spostamento_con === 'Scadenze' && vF.spostamento_con_padre === true && vF.importo === '41.58', 'versamento del figlio: da liberi di Scadenze', detF);
+  verifica(vP?.spostamento_con === 'Assicurazione' && vP.spostamento_con_padre === false && vP.importo === '-41.58' && vP.data === vF.data, 'versamento del padre: spostato nel figlio, stessa data', detP);
+  verifica(detP.some((x) => !x.spostamento_con && x.importo === '1000.00'), 'i versamenti normali restano senza spostamento', detP);
+  // Limite: oltre i liberi nulla cambia (transazione).
+  const troppo = await r('POST', `/obiettivi/${ass.id}/versamenti`, A, { importo: '958.43', da_liberi: true });
+  const p2 = await dammi(sc.id);
+  verifica(troppo.s === 400 && /solo 958,42/.test(troppo.j.errore ?? troppo.j.messaggio ?? JSON.stringify(troppo.j)) && Number(p2.versato) === 958.42 && Number((await dammi(ass.id)).versato) === 41.58, 'oltre i liberi: rifiutato, nulla cambia', troppo.j);
+  const tutti = await r('POST', `/obiettivi/${bollo.id}/versamenti`, A, { importo: '958.42', da_liberi: true });
+  verifica(tutti.s === 201 && Number((await dammi(sc.id)).versato) === 0 && Number((await dammi(sc.id)).saldo) === 1000, 'si possono spostare tutti i liberi fino a zero');
+  verifica((await r('POST', `/obiettivi/${bollo.id}/versamenti`, A, { importo: '0.01', da_liberi: true })).s === 400, 'liberi a zero: niente da spostare');
+  // Verso i liberi (importo negativo): dal figlio al padre; non oltre quello che il figlio ha di suo.
+  const indietro = await r('POST', `/obiettivi/${bollo.id}/versamenti`, A, { importo: '-100', da_liberi: true });
+  verifica(indietro.s === 201 && Number((await dammi(sc.id)).versato) === 100 && Number((await dammi(bollo.id)).versato) === 858.42 && Number((await dammi(sc.id)).saldo) === 1000, 'rimetti nei liberi: totale invariato');
+  const oltre = await r('POST', `/obiettivi/${bollo.id}/versamenti`, A, { importo: '-900', da_liberi: true });
+  verifica(oltre.s === 400 && Number((await dammi(sc.id)).versato) === 100, 'rimettere più di quello che c\'è: rifiutato, nulla cambia', oltre.j);
+  const dettB = (await r('GET', `/obiettivi/${bollo.id}`, A)).j.versamenti.find((x) => Number(x.importo) === -100);
+  verifica(dettB?.spostamento_con === 'Scadenze' && dettB.spostamento_con_padre === true, 'versamento negativo del figlio: nei liberi di Scadenze', dettB);
+  // Nipote: i «liberi» sono quelli del padre diretto (Assicurazione, 41,58), non del nonno.
+  verifica((await r('POST', `/obiettivi/${nip.id}/versamenti`, A, { importo: '50', da_liberi: true })).s === 400, 'nipote: liberi del padre diretto, non del nonno');
+  const nip1 = await r('POST', `/obiettivi/${nip.id}/versamenti`, A, { importo: '40', da_liberi: true });
+  verifica(nip1.s === 201 && Number((await dammi(ass.id)).versato) === 1.58 && Number((await dammi(ass.id)).saldo) === 41.58 && Number((await dammi(sc.id)).versato) === 100, 'nipote: sposta dai liberi del padre diretto', nip1.j);
+  // Aggiunta divisa: sul figlio con un nipote, lo spostamento si divide e il padre cala dell'intero.
+  const div = await r('POST', `/obiettivi/${ass.id}/versamenti`, A, { importo: '1.00', da_liberi: true, dividi: true });
+  const a2 = await dammi(ass.id);
+  verifica(div.s === 201 && Number(a2.saldo) === 42.58 && Number((await dammi(sc.id)).saldo) === 1000 && Number((await dammi(sc.id)).versato) === 99, 'spostamento con dividi: i liberi calano dell\'intero, totale del superiore invariato', [a2.saldo, a2.versato]);
+  // Annullare un vecchio spostamento quando i soldi sono già stati usati: rifiutato, nulla cambia.
+  const idVecchio = (await r('GET', `/obiettivi/${bollo.id}`, A)).j.versamenti.find((x) => Number(x.importo) === -100).id;
+  verifica((await r('DELETE', `/obiettivi/versamenti/${idVecchio}`, A)).s === 409 && Number((await dammi(sc.id)).versato) === 99 && Number((await dammi(bollo.id)).versato) === 858.42, 'annullare uno spostamento già usato: 409 e nulla cambia');
+  // Cancellare un versamento di uno spostamento annulla entrambe le metà.
+  const idDiv = (await r('GET', `/obiettivi/${nip.id}`, A)).j.versamenti.find((x) => x.spostamento_con === 'Scadenze' || Number(x.importo) === 1).id;
+  verifica((await r('DELETE', `/obiettivi/versamenti/${idDiv}`, A)).s === 204 && Number((await dammi(sc.id)).versato) === 100 && Number((await dammi(ass.id)).saldo) === 41.58, 'cancellare uno spostamento toglie entrambe le metà');
+  verifica((await r('DELETE', `/obiettivi/versamenti/${idVecchio}`, A)).s === 204 && Number((await dammi(sc.id)).versato) === 0 && Number((await dammi(bollo.id)).versato) === 958.42, 'annullare uno spostamento: tornano come prima');
+  await r('POST', `/obiettivi/${sc.id}/versamenti`, A, { importo: '500' });
+  // Un altro utente non vede né sposta.
+  verifica((await r('POST', `/obiettivi/${bollo.id}/versamenti`, Bt, { importo: '1', da_liberi: true })).s === 404, 'spostamento su un salvadanaio non visibile: 404');
+  // Due spostamenti insieme non spendono due volte gli stessi liberi.
+  const liberiOra = Number((await dammi(sc.id)).versato);
+  const coppia = await Promise.all([ass.id, bollo.id].map((x) => r('POST', `/obiettivi/${x}/versamenti`, A, { importo: String(liberiOra - 10), da_liberi: true })));
+  verifica(coppia.filter((x) => x.s === 201).length === 1 && coppia.filter((x) => x.s === 400).length === 1 && Number((await dammi(sc.id)).versato) === 10, 'spostamenti insieme: uno solo passa, i liberi non vanno sotto zero', coppia.map((x) => x.s));
+}
+
 console.log(`prove: ${ok} passate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

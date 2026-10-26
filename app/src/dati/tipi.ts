@@ -34,7 +34,8 @@ export type Obiettivo = {
   traguardi: Traguardo[]; figli: Obiettivo[];
   paga_spesa: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string; senza_giorno: boolean } | null;
   alimentato_da: { id: string; importo: string; ogni_mesi: number | null; conto_id: string | null } | null;
-  versamenti?: { id: string; data: string; importo: string; utente: string }[];
+  // Se è uno spostamento tra i liberi del superiore e un sotto-salvadanaio (decisione 46): l'altro salvadanaio e se è il superiore di questo.
+  versamenti?: { id: string; data: string; importo: string; utente: string; spostamento_con?: string | null; spostamento_con_padre?: boolean }[];
 };
 
 export type Rata = {

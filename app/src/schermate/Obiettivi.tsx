@@ -9,8 +9,8 @@ import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImp
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import { meseDi, meseDiVoce } from '../mesePersonale.ts';
-import { Caricamento, fraMesi, proposta, ordinaPerScadenza, prossimeAnnuali, sommaSuConto, suQuelConto } from './comuni.tsx';
-import { Affiancati, ConErrore, FinestraModulo, Meta, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
+import { Caricamento, fraMesi, liberiDi, mancaAlTraguardo, pianoCifra, proposta, quotaMensileSalvadanaio, ordinaPerScadenza, prossimeAnnuali, sommaSuConto, suQuelConto } from './comuni.tsx';
+import { Affiancati, ConErrore, ErroreCampo, FinestraModulo, Meta, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { FinestraSpesa } from './SpesePreviste.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
@@ -332,32 +332,76 @@ type ModoCifra = 'cifra' | 'aggiungi' | 'togli';
 export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | null; onChiudi: () => void }) {
   const [modo, setModo] = useState<ModoCifra>('cifra');
   const [importo, setImporto] = useState('');
+  // Per un sotto-salvadanaio: i soldi arrivano dai liberi del superiore (o ci tornano) invece di essere nuovi (o uscire).
+  const [daLiberi, setDaLiberi] = useState(false);
   const dettaglio = useDati<Obiettivo>(obiettivo ? `/obiettivi/${obiettivo.id}` : null).dati;
+  const tutti = useDati<Obiettivo[]>(obiettivo?.padre_id ? '/obiettivi' : null).dati;
+  // Il superiore diretto (anche se è a sua volta un sotto-salvadanaio): i suoi «liberi» sono la parte messa direttamente in lui.
+  const padre = obiettivo?.padre_id && tutti ? tuttiGliObiettivi(tutti).find((x) => x.id === obiettivo.padre_id) ?? null : null;
+  const liberi = padre ? liberiDi(padre) : null;
   // Con sotto-salvadanai la cifra è la somma: si cambia solo la parte messa nel padre.
   const attuale = Number(obiettivo?.saldo ?? 0), propria = Number(obiettivo?.versato ?? 0);
-  useEffect(() => { if (obiettivo) { setModo('cifra'); setImporto(importoInTesto(obiettivo.saldo)); } }, [obiettivo]);
+  useEffect(() => { if (obiettivo) { setModo('cifra'); setImporto(importoInTesto(obiettivo.saldo)); setDaLiberi(false); } }, [obiettivo]);
   const v = leggiImporto(importo);
-  const differenza = v === null ? null : modo === 'cifra' ? Number(v) - attuale : modo === 'aggiungi' ? Number(v) : -Number(v);
+  const piano = pianoCifra({ modo, valore: v === null ? null : Number(v), saldo: attuale, propria, daLiberi: !!padre && daLiberi, liberiPadre: liberi });
+  const { differenza } = piano;
+  // Scorciatoie: «Riempi» (quanto manca al traguardo) e «Metti 1/12» (quota mensile); impostano sempre «Aggiungi».
+  const manca = obiettivo ? mancaAlTraguardo(obiettivo) : null;
+  const mensile = obiettivo ? quotaMensileSalvadanaio(obiettivo) : null;
+  const imposta = (x: number) => { setModo('aggiungi'); setImporto(importoInTesto(x.toFixed(2))); };
   const salva = async () => {
-    serve(v, 'Scrivi l’importo');
-    if (modo !== 'cifra' && Number(v) <= 0) throw new Error("L'importo deve essere maggiore di zero");
-    if (modo === 'cifra' && Number(v) < 0) throw new Error('La cifra non può essere sotto zero');
+    serve(v, 'Scrivi l’importo', 'importo');
+    if (modo !== 'cifra' && Number(v) <= 0) throw new ErroreCampo('importo', "L'importo deve essere maggiore di zero");
+    if (modo === 'cifra' && Number(v) < 0) throw new ErroreCampo('importo', 'La cifra non può essere sotto zero');
     if (Math.abs(differenza!) < 0.005) return;
-    if (propria + differenza! < -0.005) throw new Error(`Puoi togliere al massimo ${euro(propria)}: il resto è nei sotto-salvadanai`);
-    await crea(`/obiettivi/${obiettivo!.id}/versamenti`, { importo: differenza!.toFixed(2), data: oggiIso(), dividi: !!obiettivo?.figli.length });
+    if (piano.errore) throw new Error(piano.errore.tipo === 'liberi' ? `Nei liberi ci sono solo ${euro(piano.errore.massimo)}` : `Puoi togliere al massimo ${euro(piano.errore.massimo)}: il resto è nei sotto-salvadanai`);
+    await crea(`/obiettivi/${obiettivo!.id}/versamenti`, { importo: differenza!.toFixed(2), data: oggiIso(), dividi: !!obiettivo?.figli.length, ...(piano.sposta ? { da_liberi: true } : {}) });
+  };
+  // Di dove arrivano (o dove vanno) i soldi: solo per un sotto-salvadanaio e quando la cifra entra (o esce).
+  const mostraOrigine = !!padre && (modo === 'togli' || (differenza !== null ? differenza > 0 || modo === 'aggiungi' : modo === 'aggiungi'));
+  const cosaSuccede = (): string | undefined => {
+    if (differenza === null) return undefined;
+    if (piano.sposta && padre && piano.restanoLiberi !== null) {
+      return differenza > 0 ? `Sposti ${euro(differenza)} da ${padre.nome}: restano ${euro(piano.restanoLiberi)} liberi`
+        : `Rimetti ${euro(-differenza)} nei liberi di ${padre.nome}: diventano ${euro(piano.restanoLiberi)}`;
+    }
+    if (modo === 'cifra') return Math.abs(differenza) >= 0.005 ? `${differenza > 0 ? 'Aggiungi' : 'Togli'} ${euro(Math.abs(differenza))}` : undefined;
+    return `Diventano ${euro(attuale + differenza)}`;
+  };
+  const dettaglioVersamento = (x: NonNullable<Obiettivo['versamenti']>[number]) => {
+    if (!x.spostamento_con) return '';
+    const entra = Number(x.importo) > 0;
+    return x.spostamento_con_padre ? ` · ${entra ? 'da' : 'nei'} liberi di ${x.spostamento_con}` : ` · ${entra ? 'tornati da' : 'spostati in'} ${x.spostamento_con}`;
   };
   return (
     <FinestraModulo titolo={obiettivo ? obiettivo.nome : ''} icona="piggy-bank" aperta={!!obiettivo} onChiudi={onChiudi} onSalva={salva}>
       <Testo colore="testo-secondario">{`Oggi ci sono ${euro(attuale)}${obiettivo?.traguardo_effettivo ? ` su ${euro(obiettivo.traguardo_effettivo)}` : ''}.${obiettivo?.figli.length ? ' Quello che aggiungi si divide tra i sotto-salvadanai, secondo quanto serve a ciascuno; puoi togliere solo la parte che non è nei sotto-salvadanai.' : ''}`}</Testo>
       <SceltaSegmenti etichetta="Come cambiare la cifra" larghezzaPiena valore={modo} onCambia={setModo}
         opzioni={[{ valore: 'cifra', testo: 'Scrivi la cifra' }, { valore: 'aggiungi', testo: 'Aggiungi' }, { valore: 'togli', testo: 'Togli' }]} />
-      <Campo etichetta={modo === 'cifra' ? 'Cifra di oggi' : modo === 'aggiungi' ? 'Quanto aggiungi' : 'Quanto togli'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus
-        aiuto={differenza !== null && modo === 'cifra' && Math.abs(differenza) >= 0.005 ? `${differenza > 0 ? 'Aggiungi' : 'Togli'} ${euro(Math.abs(differenza))}` : modo !== 'cifra' && differenza !== null ? `Diventano ${euro(attuale + differenza)}` : undefined} />
+      {manca !== null || mensile !== null ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: d['spazio-colonne'] }}>
+          {manca !== null ? (manca > 0.005
+            ? <Pulsante tipo="secondario" etichetta={`Riempi · ${euro(manca)}`} icona="plus" onPress={() => imposta(manca)} />
+            : <><Pulsante tipo="secondario" etichetta="Riempi" icona="plus" disattivato /><Testo stile="dettaglio-normale" colore="testo-secondario">Già pieno</Testo></>) : null}
+          {mensile !== null ? <Pulsante tipo="secondario" etichetta={`Metti 1/12 · ${euro(mensile)}`} icona="calendar" onPress={() => imposta(mensile)} /> : null}
+        </View>
+      ) : null}
+      {mostraOrigine && padre ? (
+        <SceltaSegmenti etichetta={modo === 'togli' ? 'Dove vanno i soldi' : 'Da dove arrivano i soldi'} larghezzaPiena valore={daLiberi ? 'liberi' : 'altro'} onCambia={(x) => setDaLiberi(x === 'liberi')}
+          opzioni={modo === 'togli'
+            ? [{ valore: 'altro', testo: 'Esce dal salvadanaio' }, { valore: 'liberi', testo: `Rimetti nei liberi di ${padre.nome}` }]
+            : [{ valore: 'altro', testo: 'Soldi nuovi' }, { valore: 'liberi', testo: `Dai liberi di ${padre.nome} · ${euro(liberi)}` }]} />
+      ) : null}
+      <ConErrore campo="importo">
+        <Campo etichetta={modo === 'cifra' ? 'Cifra di oggi' : modo === 'aggiungi' ? 'Quanto aggiungi' : 'Quanto togli'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus
+          errore={piano.errore ? (piano.errore.tipo === 'liberi' ? `Nei liberi ci sono solo ${euro(piano.errore.massimo)}` : `Puoi togliere al massimo ${euro(piano.errore.massimo)}: il resto è nei sotto-salvadanai`) : undefined}
+          aiuto={cosaSuccede()} />
+      </ConErrore>
       {dettaglio?.versamenti?.length ? (
         <Voce etichetta="Ultimi versamenti">
           {dettaglio.versamenti.slice(0, 5).map((x) => (
             <View key={x.id} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: d['spazio-colonne'] }}>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">{`${data(x.data)} · ${x.utente}`}</Testo>
+              <Testo stile="dettaglio-normale" colore="testo-secondario">{`${data(x.data)} · ${x.utente}${dettaglioVersamento(x)}`}</Testo>
               <Testo stile="dettaglio-forte" colore={Number(x.importo) < 0 ? 'testo-errore' : 'testo-primario'}>{euro(x.importo, { segno: true })}</Testo>
             </View>
           ))}
