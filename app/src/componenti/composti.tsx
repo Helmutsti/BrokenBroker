@@ -819,7 +819,17 @@ export function CifraModificabile({ cifra, etichetta, onPress }: { cifra: string
 // Schizzo di Manuel: icona, nome, barra, «X su Y» (si preme per cambiare la cifra) e la matita.
 // Variante «testata»: titolo del riquadro (testo più forte, matita dopo il nome, visibile in hover).
 // Variante «sotto»: riga di un sotto-salvadanaio (matita in fondo alla riga).
-export function RigaSalvadanaio({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, conto, scadenza, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
+export function RigaSalvadanaio(p: Parameters<typeof RigaSalvadanaioInterna>[0]) {
+  const { c } = useTema();
+  // Scadenza in attenzione o passata: tutta la riga (o la testata) prende lo sfondo tenue del tono e la barra ne segue il colore.
+  const t = p.scadenza && p.scadenza.tono !== 'secondario' ? p.scadenza.tono : undefined;
+  return (
+    <View style={{ paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo-interno'], backgroundColor: t ? c[`sfondo-${t}-tenue`] : 'transparent' }}>
+      <RigaSalvadanaioInterna {...p} tono={t ?? p.tono} />
+    </View>
+  );
+}
+function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, percentuale, nota, conto, scadenza, variante = 'sotto', matitaNascosta, propria, onCifra, onModifica }: {
   scadenza?: { testo: string; tono: 'secondario' | 'attenzione' | 'errore' }; conto?: { nome: string; icona: string | null }; nome: string; icona: string; valore: number; tono?: ToneAvanzamento; cifra: string; percentuale?: string; nota?: string; variante?: 'testata' | 'sotto'; matitaNascosta?: boolean; propria?: boolean; onCifra: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();

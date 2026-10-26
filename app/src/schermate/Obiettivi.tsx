@@ -1,6 +1,6 @@
 ﻿import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
+import { Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
 import { RigaAvanzamento, RigaSalvadanaio, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
@@ -101,8 +101,6 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
 
   // Ogni salvadanaio ha il suo riquadro: quanto c'è, soglie e sotto-salvadanai.
   const scheda = (o: Obiettivo) => {
-    const primo = o.traguardi.find((x) => x.percentuale < 100);
-    const coperti = o.traguardi.filter((x) => x.percentuale >= 100).length;
     const ordinatiTr = [...o.traguardi].sort((a, b) => Number(a.importo) - Number(b.importo));
     const visibili = aperti.has(o.id) ? ordinatiTr : ordinatiTr.slice(0, MAX);
     const nota = o.alimentato_da ? `promemoria in Spese ${euro(o.alimentato_da.importo)} ${o.alimentato_da.ogni_mesi === 12 ? "all'anno" : o.alimentato_da.ogni_mesi && o.alimentato_da.ogni_mesi > 1 ? `ogni ${o.alimentato_da.ogni_mesi} mesi` : 'al mese'}` : '';
@@ -118,9 +116,6 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
             {o.figli.length ? <View style={{ gap: d['spazio-pillole'] }}>{rigaPropria(o, () => setVersa(o))}{albero(o.figli, o.conto_id, o.id)}</View> : null}
             {o.traguardi.length ? (
               <View style={{ gap: d['spazio-pillole'] }}>
-                <Esito tono={primo ? 'attenzione' : 'ok'} testo={primo
-                  ? `Copre per intero ${coperti} ${coperti === 1 ? 'traguardo' : 'traguardi'} su ${o.traguardi.length}. Per coprire anche "${primo.nome}" mancano ${euro(Number(primo.importo) - Number(o.saldo))}.`
-                  : 'Copre per intero tutti i traguardi.'} />
                 {visibili.map((t) => (
                   <RigaSalvadanaio key={t.id} variante="sotto" nome={t.nome} icona="shield" valore={t.percentuale} tono={t.percentuale >= 100 ? 'ok' : 'attenzione'}
                     cifra={euro(t.importo)} percentuale={percento(t.percentuale)}
@@ -151,7 +146,7 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
     const vis = apertiFigli.has(x.id) ? x.figli : x.figli.slice(0, MAX);
     return vis.reduce((t, f) => t + 1 + contaFigli(f), 0) + (x.figli.length > MAX ? 1 : 0);
   };
-  const pesoDi = (o: Obiettivo) => 1 + contaFigli(o) + (aperti.has(o.id) ? o.traguardi.length : Math.min(o.traguardi.length, MAX)) + (o.traguardi.length > MAX ? 1 : 0) + (mancaPer(o) ? 1 : 0);
+  const pesoDi = (o: Obiettivo) => 1 + contaFigli(o) + (aperti.has(o.id) ? o.traguardi.length : Math.min(o.traguardi.length, MAX)) + (o.traguardi.length > MAX ? 1 : 0);
   const colonne: Obiettivo[][] = compatto ? [ordinati] : [[], []];
   if (!compatto) {
     const pesi = [0, 0];
