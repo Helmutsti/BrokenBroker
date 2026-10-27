@@ -150,7 +150,7 @@ La versione per iPhone usa lo stesso codice (`app/index.js`); il progetto iOS va
 | POST | `/movimenti/trasferimento` | spostamento tra due conti |
 | GET, PATCH, DELETE | `/movimenti/:id` | dettaglio, modifica, cancellazione |
 | GET | `/categorie/spese?mese=` | speso nel mese per categoria (senza sottocategorie) |
-| GET, POST | `/spese-previste` | elenco con lo stato nel mese (`?mese=AAAA-MM`, `?solo_mese=true`), nuova spesa (fissa, budget, investimento; ogni N mesi o una volta sola) |
+| GET, POST | `/spese-previste` | elenco con lo stato nel mese (`?mese=AAAA-MM`, `?solo_mese=true`), nuova spesa (fissa, investimento; ogni N mesi o una volta sola) |
 | GET, PATCH, DELETE | `/spese-previste/:id` | dettaglio con le quote, modifica, cancellazione (solo chi l'ha creata) |
 | POST, DELETE | `/spese-previste/:id/spunta` | spunta "uscito" del mese (crea o toglie il movimento collegato; se la paga un obiettivo, preleva dall'obiettivo) |
 | PUT | `/spese-previste/:id/quote` | divisione tra le persone (`[{utente_id, percentuale}]`, somma 100; vuoto = di base) |

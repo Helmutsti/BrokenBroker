@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { annullaSpunta, importoSulConto, registraMovimento, vietaMesePassato } from '../movimenti.ts';
+import { annullaSpunta, importoSulConto, NIENTE, registraMovimento, vietaMesePassato } from '../movimenti.ts';
 import { mesiTra, oggi, periodoRichiesto } from '../periodo.ts';
 import { leggiRate, scadenzaRata } from '../rate.ts';
 import * as v from '../valida.ts';
@@ -41,7 +41,7 @@ rotteRate.get('/', async (req, res) => {
   }));
 });
 
-// La spunta "pagata" muove il saldo del conto della rata (decisione 47): movimento negativo della rata (conto condiviso o no, esce la rata).
+// La spunta "pagata" muove il saldo del conto della rata (decisione 47): movimento dal conto a Niente per la rata (conto condiviso o no, esce la rata).
 // I mesi precedenti a quello in corso non si cambiano più.
 rotteRate.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
@@ -60,7 +60,7 @@ rotteRate.post('/:id/spunta', async (req, res) => {
     const spunta = (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
     if (r.conto_id) {
       const sulConto = await importoSulConto(db, r.conto_id, Number(r.importo_rata), Number(r.importo_rata));
-      await registraMovimento(db, { conto_id: r.conto_id, importo: -sulConto, causa: 'rata', spunta_id: spunta.id, descrizione: r.oggetto });
+      await registraMovimento(db, { da: r.conto_id, a: NIENTE, importo: sulConto, causa: 'rata', spunta_id: spunta.id, descrizione: r.oggetto });
     }
     return spunta;
   });

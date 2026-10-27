@@ -11,7 +11,9 @@ export const rotteCategorie = Router();
 
 const CAMPI = 'id, padre_id, nome, tipo, colore, icona, ordine';
 
-type Categoria = { id: string; padre_id: string | null; nome: string; tipo: string; colore: string | null; icona: string | null; ordine: number };
+type Categoria = { id: string; padre_id: string | null; nome: string; tipo: string; colore: string | null; icona: string | null; ordine: number;
+  // Il budget di questa categoria, se c'è (decisione 49): uno per categoria.
+  budget: { id: string; importo: string; attivo: boolean } | null };
 type Nodo = Categoria & { figli: Nodo[] };
 
 function albero(righe: Categoria[]): Nodo[] {
@@ -44,13 +46,17 @@ async function controllaPadre(db: PoolClient, id: string, padre: string) {
 // ?formato=elenco restituisce la lista piatta, altrimenti l'albero.
 rotteCategorie.get('/', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) =>
-    (await db.query<Categoria>(`select ${CAMPI} from categorie where proprietario_id = fp_me() order by ordine, nome`)).rows);
+    (await db.query<Categoria>(
+      `select ${CAMPI.split(', ').map((x) => `c.${x}`).join(', ')},
+              (select jsonb_build_object('id', b.id, 'importo', b.importo::text, 'attivo', b.attivo)
+                 from budget b where b.categoria_id = c.id) as budget
+         from categorie c where c.proprietario_id = fp_me() order by c.ordine, c.nome`)).rows);
   res.json(req.query.formato === 'elenco' ? righe : albero(righe));
 });
 
 // Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie: le spese
 // previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no.
-// I budget contano per intero, perché sono una stima e non si conosce la cifra esatta.
+// I budget (decisione 58) non contano: sono solo una lente sui movimenti di una categoria, non una spesa.
 // I promemoria dei salvadanai non sono spese. La somma sui rami la fa chi legge l'albero.
 rotteCategorie.get('/spese', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) => {
@@ -116,6 +122,7 @@ rotteCategorie.delete('/:id', async (req, res) => {
   await conUtente(res.locals.utenteId, async (db) => {
     const esiste = await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id]);
     if (!esiste.rowCount) throw nonTrovato('Categoria');
+    if ((await db.query('select 1 from budget where categoria_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Questa categoria ha un budget: eliminalo prima dalla pagina Budget');
 
     if (destinazione) {
       if (destinazione === id) throw new ErroreApi(400, 'La categoria di destinazione deve essere diversa');

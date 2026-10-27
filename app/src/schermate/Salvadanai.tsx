@@ -38,13 +38,13 @@ export function Salvadanai() {
   // Con un conto scelto: la somma dei soldi che stanno su quel conto (ogni salvadanaio conta una volta, col suo conto).
   const nei = filtro === 'tutti' ? ob.dati.reduce((t, o) => t + Number(o.saldo), 0) : sommaSuConto(ob.dati, filtro);
   const quanti = filtro === 'tutti' ? ob.dati.length : ob.dati.filter((r) => tuttiGliObiettivi([r]).some((o) => suQuelConto(o, filtro))).length;
-  // Quanto entra ogni mese dalle voci "mettici da parte" in Spese (quelle annuali contano un dodicesimo).
+  // Quanto entra ogni mese dai promemoria «Ricordamelo» in Spese (quelli annuali contano un dodicesimo).
   const alimentati = tutti.filter((o) => o.alimentato_da);
   const alMese = alimentati.reduce((t, o) => t + Number(o.alimentato_da!.importo) / (o.alimentato_da!.ogni_mesi ?? 1), 0);
 
   return (
     <>
-      <Intestazione titolo="Salvadanai" sottotitolo="Quello che metti da parte: spese annuali, emergenze e progetti."
+      <Intestazione titolo="Salvadanai" sottotitolo="Quello che metti da parte: emergenze e progetti."
         azioni={<Pulsante tipo="primario" etichetta="Nuovo salvadanaio" icona="plus" onPress={() => setNuovo((n) => n + 1)} />} />
       <RigaNumeri>
         <NumeroChiave etichetta={titoloNei} valore={euro(nei)} icona="piggy-bank" nota={`In ${quanti} ${quanti === 1 ? 'salvadanaio' : 'salvadanai'}`}

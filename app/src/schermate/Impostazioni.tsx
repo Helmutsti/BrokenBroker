@@ -11,7 +11,7 @@ import { d, Testo, useTema } from '../tema/tema.tsx';
 import { Affiancati, Meta } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
-const NOME_VOCE = { conto: 'Conto', spesa: 'Spesa prevista', obiettivo: 'Salvadanaio' } as const;
+const NOME_VOCE = { conto: 'Conto', spesa: 'Spesa prevista', obiettivo: 'Salvadanaio', budget: 'Budget' } as const;
 
 // Salvataggio di una scheda: messaggio di esito sotto il pulsante.
 function useSalva() {

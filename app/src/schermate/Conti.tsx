@@ -26,6 +26,8 @@ export function Conti() {
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-blocco'] }}>
       {conti.map((c) => <SchedaConto key={c.id} nome={c.nome} condiviso={c.condiviso || !c.mio} icona={c.icona} onApri={() => setAperto(c)}
         saldo={c.saldo !== null ? euro(c.saldo) : undefined} saldoNegativo={c.saldo !== null && Number(c.saldo) < 0}
+        liberi={c.liberi !== null && Number(c.nei_salvadanai) !== 0 ? euro(c.liberi) : undefined} liberiNegativi={c.liberi !== null && Number(c.liberi) < 0}
+        neiSalvadanai={Number(c.nei_salvadanai) !== 0 ? euro(c.nei_salvadanai) : undefined}
         nota={c.saldo !== null ? `aggiornato il ${dataOra(c.saldo_aggiornato_il)}` : 'Saldo da scrivere'} />)}
     </View>
   );
@@ -91,6 +93,10 @@ function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; apert
             ? `Scrivilo come lo vedi in banca per riallinearlo. Ora è ${euro(conto.saldo)}, aggiornato il ${dataOra(conto.saldo_aggiornato_il)}${conto.condiviso || !conto.mio ? ': è lo stesso saldo per tutti e due' : ''}.`
             : 'Scrivilo come lo vedi in banca. Da lì in poi si muove da solo con le spunte e i salvadanai.'} />
       </ConErrore>
+      {conto && conto.liberi !== null && Number(conto.nei_salvadanai) !== 0 ? (
+        <Testo stile="dettaglio-normale" colore={Number(conto.liberi) < 0 ? 'testo-errore' : 'testo-secondario'}>
+          {`Liberi ${euro(conto.liberi)}: il saldo meno ${euro(conto.nei_salvadanai)} messi da parte nei salvadanai che stanno su questo conto (conti solo quelli che vedi tu).`}</Testo>
+      ) : null}
       {!conto || conto.mio ? (
         <ConErrore campo="condivisione"><RiquadroCondivisione aperta={aperta} nome="questo conto" condiviso={condiviso} onCambia={setCondiviso} con={con ?? miaCondivisione?.condiviso_con_id ?? null} onCon={setCon}
           giaCondivisa={!!conto?.condiviso && conto.mio} testoAttivo="Lo vede e lo usa nelle spese." /></ConErrore>

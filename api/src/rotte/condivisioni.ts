@@ -9,28 +9,30 @@ import * as v from '../valida.ts';
 export const rotteCondivisioni = Router();
 export const rottePersone = Router();
 
-const COLONNA = { conto: 'conto_id', spesa: 'spesa_prevista_id', obiettivo: 'obiettivo_id' } as const;
+const COLONNA = { conto: 'conto_id', spesa: 'spesa_prevista_id', obiettivo: 'obiettivo_id', budget: 'budget_id' } as const;
 const VOCI = Object.keys(COLONNA) as (keyof typeof COLONNA)[];
 
 rotteCondivisioni.get('/', async (_req, res) => {
   const elenco = await conUtente(res.locals.utenteId, async (db) => (await db.query(
     `select s.id, s.creata_il, s.proprietario_id = fp_me() as mia,
             case when s.conto_id is not null then 'conto' when s.spesa_prevista_id is not null then 'spesa'
-                 else 'obiettivo' end as voce,
-            coalesce(s.conto_id, s.spesa_prevista_id, s.obiettivo_id) as voce_id,
-            coalesce(c.nome, sp.nome, o.nome) as nome,
+                 when s.budget_id is not null then 'budget' else 'obiettivo' end as voce,
+            coalesce(s.conto_id, s.spesa_prevista_id, s.obiettivo_id, s.budget_id) as voce_id,
+            coalesce(c.nome, sp.nome, o.nome, bc.nome) as nome,
             s.proprietario_id, up.nome as proprietario, s.condiviso_con_id, uc.nome as condiviso_con
        from condivisioni s
        left join conti c on c.id = s.conto_id
        left join spese_previste sp on sp.id = s.spesa_prevista_id
        left join obiettivi o on o.id = s.obiettivo_id
+       left join budget bu on bu.id = s.budget_id
+       left join categorie bc on bc.id = bu.categoria_id
        join utenti up on up.id = s.proprietario_id
        join utenti uc on uc.id = s.condiviso_con_id
       order by s.creata_il desc`)).rows);
   res.json(elenco);
 });
 
-// Corpo: { voce: conto|spesa|obiettivo, id, utente_id | email }
+// Corpo: { voce: conto|spesa|obiettivo|budget, id, utente_id | email }
 rotteCondivisioni.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const voce = v.scelta(c, 'voce', VOCI, true)!;
@@ -43,7 +45,7 @@ rotteCondivisioni.post('/', async (req, res) => {
       : (await db.query<{ id: string | null }>('select fp_utente_per_email($1) as id', [email])).rows[0].id;
     if (!altro) throw new ErroreApi(404, utenteId ? 'Persona non trovata' : 'Nessuna persona con questa email');
     const possiede = (await db.query<{ ok: boolean }>(
-      `select fp_possiede_voce($1, $2, $3) as ok`,
+      `select fp_possiede_voce($1, $2, $3, $4) as ok`,
       VOCI.map((k) => (k === voce ? id : null)))).rows[0].ok;
     if (!possiede) throw new ErroreApi(403, "Può condividere solo chi ha creato la voce");
     return (await db.query(

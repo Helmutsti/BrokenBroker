@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { PoolClient } from 'pg';
-import { bloccoObiettivo, erroreObiettivoBloccato, vietaCampi, vietaPromemoria, sqlBloccoObiettivo, type Blocco } from '../collegamenti.ts';
 import { conUtente } from '../db.ts';
-import { registraMovimento } from '../movimenti.ts';
+import { movimentoDelVersamento } from '../movimenti.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { inizioMese, meseDi, mesiFino, oggi, periodoRichiesto, prossimaUscita } from '../periodo.ts';
+import { alberoObiettivi, cent, type Nodo, trova } from '../albero.ts';
+import { inizioMese, meseDi, mesiFino, oggi, periodoRichiesto } from '../periodo.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
 
@@ -13,85 +13,6 @@ import * as v from '../valida.ts';
 // "crea spesa al raggiungimento" (decisione 21).
 
 export const rotteObiettivi = Router();
-
-type Nodo = {
-  id: string; padre_id: string | null; nome: string; traguardo: string | null; scadenza: string | null;
-  crea_spesa: boolean; spesa_creata_id: string | null; icona: string | null; nascosto: boolean; mio: boolean; condiviso: boolean; versato: string;
-  saldo?: string; traguardo_effettivo?: string | null; percentuale?: number | null;
-  traguardi?: { id: string; nome: string; importo: string; ordine: number; percentuale: number }[];
-  // La spesa annuale che questo obiettivo paga: traguardo e scadenza vengono da lei.
-  paga_spesa?: { id: string; nome: string; ogni_mesi: number; importo: string; prossima: string; senza_giorno: boolean } | null;
-  // La spesa "mettici da parte" che riempie l'obiettivo.
-  alimentato_da?: { id: string; importo: string; ogni_mesi: number | null; conto_id: string | null } | null;
-  // Se il salvadanaio nasce da una spesa (modulo della spesa): quali campi si cambiano solo da lì.
-  bloccato_da: Blocco | null;
-  // Il conto del salvadanaio (decisione 45): conto_proprio_id è quello scelto, conto_id quello che vale
-  // (se manca eredita dal padre); conto_ereditato dice che viene dal padre. Chi non vede il conto lo vede vuoto.
-  conto_proprio_id: string | null; conto_id: string | null; conto: string | null; conto_icona: string | null; conto_ereditato: boolean;
-  figli: Nodo[];
-};
-
-const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
-const percento = (parte: number, tutto: number) => Math.min(100, Math.round((parte / tutto) * 100));
-
-// Albero degli obiettivi visibili. Il saldo di un obiettivo è la somma dei suoi
-// versamenti e di quelli dei sotto-obiettivi; il traguardo, se manca, è la somma
-// dei traguardi dei sotto-obiettivi. Ogni traguardo di copertura si confronta
-// con tutto il saldo dell'obiettivo, al massimo 100%.
-export async function alberoObiettivi(db: PoolClient): Promise<Nodo[]> {
-  const nodi = (await db.query<Nodo>(
-    `select o.id, o.padre_id, o.nome, o.traguardo::text as traguardo, o.scadenza, o.crea_spesa, o.spesa_creata_id, o.icona, o.nascosto,
-            o.proprietario_id = fp_me() as mio,
-            exists (select 1 from condivisioni s where s.obiettivo_id = o.id) as condiviso,
-            ${sqlBloccoObiettivo('o')} as bloccato_da,
-            c.id as conto_proprio_id, c.nome as conto, c.icona as conto_icona,
-            coalesce((select sum(x.importo) from versamenti x where x.obiettivo_id = o.id), 0)::text as versato
-       from obiettivi o left join conti c on c.id = o.conto_id order by o.nome`)).rows;
-  const traguardi = (await db.query(
-    `select id, obiettivo_id, nome, importo::text as importo, ordine from traguardi_copertura order by ordine, importo`)).rows;
-  const collegate = (await db.query<{ id: string; nome: string; obiettivo_id: string | null; alimenta_obiettivo_id: string | null; ogni_mesi: number | null;
-    prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; importo: string; conto_id: string | null }>(
-    `select id, nome, obiettivo_id, alimenta_obiettivo_id, ogni_mesi, prossima_scadenza, senza_giorno, giorno_mese, importo::text as importo, conto_id from spese_previste
-      where attiva and (alimenta_obiettivo_id is not null or (obiettivo_id is not null and ogni_mesi > 1 and tipo <> 'budget'))`)).rows;
-  const oggiQui = oggi(), inizio = await inizioMese(db);
-  const perId = new Map(nodi.map((n) => {
-    const paga = collegate.find((s) => s.obiettivo_id === n.id && s.ogni_mesi && s.ogni_mesi > 1);
-    const alim = collegate.find((s) => s.alimenta_obiettivo_id === n.id);
-    const nodo: Nodo = { ...n, conto_id: n.conto_proprio_id, conto_ereditato: false, figli: [],
-      paga_spesa: paga ? { id: paga.id, nome: paga.nome, ogni_mesi: paga.ogni_mesi!, importo: paga.importo, prossima: prossimaUscita(paga.prossima_scadenza, paga.ogni_mesi!, oggiQui, paga.senza_giorno, inizio, paga.giorno_mese), senza_giorno: paga.senza_giorno } : null,
-      alimentato_da: alim ? { id: alim.id, importo: alim.importo, ogni_mesi: alim.ogni_mesi, conto_id: alim.conto_id } : null };
-    // Un salvadanaio di una spesa annuale si prepara per la prossima uscita, del suo importo.
-    if (nodo.paga_spesa) { nodo.scadenza = nodo.paga_spesa.prossima; if (nodo.traguardo === null) nodo.traguardo = nodo.paga_spesa.importo; }
-    return [n.id, nodo];
-  }));
-  const radici: Nodo[] = [];
-  for (const n of perId.values()) {
-    const padre = n.padre_id ? perId.get(n.padre_id) : undefined;
-    (padre ? padre.figli : radici).push(n);
-  }
-  // Il conto che vale: il proprio, altrimenti quello del padre (e così via verso l'alto).
-  const risolviConto = (n: Nodo, padre?: Nodo): void => {
-    if (!n.conto_proprio_id && padre?.conto_id) {
-      n.conto_id = padre.conto_id; n.conto = padre.conto; n.conto_icona = padre.conto_icona; n.conto_ereditato = true;
-    }
-    n.figli.forEach((f) => risolviConto(f, n));
-  };
-  radici.forEach((n) => risolviConto(n));
-  const calcola = (n: Nodo): void => {
-    n.figli.forEach(calcola);
-    const saldo = Number(n.versato) + n.figli.reduce((t, f) => t + Number(f.saldo), 0);
-    const daFigli = n.figli.reduce((t, f) => t + Number(f.traguardo_effettivo ?? 0), 0);
-    const traguardo = n.traguardo !== null ? Number(n.traguardo) : daFigli > 0 ? daFigli : null;
-    n.saldo = cent(saldo);
-    n.traguardo_effettivo = traguardo === null ? null : cent(traguardo);
-    n.percentuale = traguardo ? percento(saldo, traguardo) : null;
-    n.traguardi = traguardi.filter((t) => t.obiettivo_id === n.id).map(({ obiettivo_id: _, ...t }) => ({
-      ...t, percentuale: percento(Math.max(0, saldo), Number(t.importo)),
-    }));
-  };
-  radici.forEach(calcola);
-  return radici;
-}
 
 // Quanto serve ogni mese a un obiettivo per arrivare al traguardo in tempo
 // (senza scadenza: tutto quello che manca, come peso).
@@ -119,19 +40,10 @@ export async function dividiVersamento(db: PoolClient, id: string, importo: numb
   return parti;
 }
 
-function trova(radici: Nodo[], id: string): Nodo | undefined {
-  for (const n of radici) {
-    if (n.id === id) return n;
-    const f = trova(n.figli, id);
-    if (f) return f;
-  }
-  return undefined;
-}
-
 // Dopo un versamento: gli obiettivi (e gli antenati) che arrivano al traguardo con
 // "crea spesa" attiva generano la loro spesa una tantum, una volta sola.
 // Un sotto-obiettivo senza traguardo conta come non completo.
-async function creaSpeseRaggiunte(db: PoolClient, id: string) {
+export async function creaSpeseRaggiunte(db: PoolClient, id: string) {
   const radici = await alberoObiettivi(db);
   for (let n = trova(radici, id); n; n = n.padre_id ? trova(radici, n.padre_id) : undefined) {
     if (!n.crea_spesa || n.spesa_creata_id || !n.traguardo_effettivo) continue;
@@ -140,8 +52,8 @@ async function creaSpeseRaggiunte(db: PoolClient, id: string) {
     // cresce quando se ne aggiungono, e un solo figlio pieno non basta.
     if (n.traguardo === null && n.figli.some((f) => (f.percentuale ?? 0) < 100)) continue;
     const { rows } = await db.query<{ id: string }>(
-      `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, obiettivo_id)
-       select fp_me(), nome, $2, null, $3, id from obiettivi where id = $1 returning id`,
+      `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza)
+       select fp_me(), nome, $2, null, $3 from obiettivi where id = $1 returning id`,
       [n.id, n.traguardo_effettivo, n.scadenza && n.scadenza > oggi() ? n.scadenza : oggi()]);
     if (rows[0]) await db.query('update obiettivi set spesa_creata_id = $2 where id = $1', [n.id, rows[0].id]);
   }
@@ -210,7 +122,6 @@ rotteObiettivi.patch('/:id', async (req, res) => {
   const campi = leggi(c, false);
   const set = v.setParziale(campi, 2);
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
-    vietaCampi(await bloccoObiettivo(db, id), Object.keys(c), erroreObiettivoBloccato);
     await verificaConto(db, campi.conto_id);
     const { rowCount } = await db.query(`update obiettivi set ${set.sql} where id = $1`, [id, ...set.valori]);
     if (!rowCount) return undefined;
@@ -225,8 +136,6 @@ rotteObiettivi.patch('/:id', async (req, res) => {
 rotteObiettivi.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    const blocco = await bloccoObiettivo(db, id);
-    if (blocco) throw erroreObiettivoBloccato(blocco);
     if ((await db.query('delete from obiettivi where id = $1', [id])).rowCount) return;
     const visibile = (await db.query('select 1 from obiettivi where id = $1', [id])).rowCount;
     throw visibile ? new ErroreApi(403, "Solo chi ha creato l'obiettivo può cancellarlo") : nonTrovato('Obiettivo');
@@ -234,35 +143,54 @@ rotteObiettivi.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// Il promemoria "ricordami" del salvadanaio: la spesa che lo ricorda in Spese. Si crea,
-// si cambia e si toglie da qui (dalla spesa è bloccata, decisione 37).
+// Il promemoria del salvadanaio, «Mostra nelle spese come promemoria» (decisione 51): una voce in Spese con la quota del mese, fuori dai
+// totali delle spese. Con una scadenza e un traguardo la quota è (traguardo - già messo) / mesi personali rimasti (minimo 0) e la
+// calcola l'API; altrimenti serve la cifra fissa (`importo`). La spunta fa il versamento «Dal conto» (`conto_id`, di base il conto del
+// salvadanaio; vuoto = «soldi nuovi»), togliendola nel mese in corso il versamento si annulla. Si accende, si cambia e si spegne da qui
+// (dalla spesa è bloccato, decisione 37).
 rotteObiettivi.put('/:id/promemoria', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
-  const importo = v.importo(c, 'importo', true)!;
-  if (Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
-  const ogni = v.intero(c, 'ogni_mesi', 1, 120) ?? 1;
-  const conto = v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')) ?? null;
+  const fisso = v.importo(c, 'importo');
+  if (fisso !== undefined && Number(fisso) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
+  const contoScelto = v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id'));
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
-    const nome = (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [id])).rows[0]?.nome;
-    if (!nome) throw nonTrovato('Obiettivo');
-    await vietaPromemoria(db, id);
-    const esistente = (await db.query<{ id: string }>('select id from spese_previste where alimenta_obiettivo_id = $1 limit 1', [id])).rows[0];
-    // Il promemoria vale per tutto il mese personale (decisione 41): ogni N mesi, a partire da quello in corso, senza giorno.
-    const meseQui = `${meseDi(oggi(), await inizioMese(db))}-01`;
+    const n = trova(await alberoObiettivi(db), id);
+    if (!n) throw nonTrovato('Obiettivo');
+    const automatica = !!n.scadenza && n.traguardo_effettivo !== null;
+    const esistente = (await db.query<{ id: string; importo: string; conto_id: string | null }>('select id, importo::text, conto_id from spese_previste where alimenta_obiettivo_id = $1 limit 1', [id])).rows[0];
+    if (!automatica && fisso === undefined && !(esistente && Number(esistente.importo) > 0)) {
+      throw new ErroreApi(400, 'Il salvadanaio non ha una scadenza con un traguardo: scrivi la cifra fissa da ricordare ogni mese');
+    }
+    await verificaConto(db, contoScelto);
+    const conto = contoScelto !== undefined ? contoScelto : esistente ? esistente.conto_id : n.conto_id;
+    const importo = fisso ?? esistente?.importo ?? '0';
+    // La quota è mensile (ogni mese, senza giorno): vale per tutto il mese personale (decisione 41).
     const spesaId = esistente
-      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = $4::smallint, conto_id = $5, tipo = 'investimento',
-            giorno_mese = null,
-            prossima_scadenza = case when $4::smallint = 1 then null else coalesce(prossima_scadenza, $6::date) end,
-            senza_giorno = case when $4::smallint = 1 then false when prossima_scadenza is null then true else senza_giorno end
-          where id = $1 returning id`,
-          [esistente.id, nome, importo, ogni, conto, meseQui])).rows[0].id
+      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = 1, conto_id = $4, tipo = 'investimento',
+            giorno_mese = null, prossima_scadenza = null, senza_giorno = false where id = $1 returning id`,
+          [esistente.id, n.nome, importo, conto])).rows[0].id
       : (await db.query<{ id: string }>(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, senza_giorno, tipo, alimenta_obiettivo_id, conto_id)
-          values (fp_me(), $1, $2, $3, $4, $7, 'investimento', $5, $6) returning id`, [nome, importo, ogni, ogni === 1 ? null : meseQui, id, conto, ogni !== 1])).rows[0].id;
+          values (fp_me(), $1, $2, 1, null, false, 'investimento', $3, $4) returning id`, [n.nome, importo, id, conto])).rows[0].id;
     return (await speseDelMese(db, await periodoRichiesto(db, undefined), spesaId))[0];
   });
   res.json(spesa);
 });
+
+// Il versamento fatto spuntando il promemoria del mese: la quota si divide tra i sotto-salvadanai come ogni versamento, tutte le parti
+// legate alla spunta (togliendola spariscono insieme ai loro movimenti). Con un conto è «Dal conto» (decisione 52: nessun movimento se il salvadanaio sta su quel conto, giroconto se sta su un altro, conto -> Niente se non ha conto), uno per parte.
+export async function versaPerPromemoria(db: PoolClient, obiettivoId: string, importo: number, spuntaId: string, data: string, contoId: string | null): Promise<void> {
+  const parti = await dividiVersamento(db, obiettivoId, importo);
+  for (const x of parti) {
+    const { id: versamentoId } = (await db.query<{ id: string }>(
+      'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id) values ($1, fp_me(), $2, $3, $4) returning id', [x.obiettivo_id, data, x.importo, spuntaId])).rows[0];
+    if (contoId) {
+      const nome = (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [x.obiettivo_id])).rows[0].nome;
+      await movimentoDelVersamento(db, { contoScelto: contoId, obiettivoId: x.obiettivo_id, importo: Number(x.importo), versamentoId, nome });
+    }
+  }
+  await creaSpeseRaggiunte(db, obiettivoId);
+}
 
 rotteObiettivi.delete('/:id/promemoria', async (req, res) => {
   const id = v.idPercorso(req.params.id);
@@ -273,8 +201,9 @@ rotteObiettivi.delete('/:id/promemoria', async (req, res) => {
 });
 
 // Versamenti: importo positivo = metto via, negativo = prelevo.
-// `conto_id` (facoltativo, decisione 47 G): i soldi vengono dal conto (importo positivo: movimento negativo sul conto) o tornano
-// sul conto (importo negativo: movimento positivo), nella stessa transazione e legati al versamento; senza `conto_id` sono
+// `conto_id` (facoltativo, decisioni 47 G e 52): i soldi vengono dal conto (importo positivo) o tornano sul conto (importo negativo). Il
+// movimento dipende da dove sta il salvadanaio: sul conto scelto non si muove niente (sono solo messi da parte), su un altro conto è un
+// giroconto, senza conto va da/verso Niente; sempre nella stessa transazione e legato al versamento. Senza `conto_id` sono
 // «soldi nuovi» / «escono». Non si può unire a `da_liberi`. La data non può cadere in un mese passato (decisione 48 C).
 rotteObiettivi.post('/:id/versamenti', async (req, res) => {
   const id = v.idPercorso(req.params.id);
@@ -308,8 +237,8 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
       // Dal conto: il movimento opposto, legato a questo versamento (se il versamento sparisce, sparisce anche lui).
       if (contoId) {
         const nome = (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [obiettivoId])).rows[0].nome;
-        await registraMovimento(db, { conto_id: contoId, importo: -Number(x), causa: 'versamento', versamento_id: versamentoId,
-          descrizione: Number(x) > 0 ? `Versato in ${nome}` : `Tornato da ${nome}` });
+        // Decisione 52: stesso conto del salvadanaio = nessun movimento; altro conto = giroconto; nessun conto = conto <-> Niente.
+        await movimentoDelVersamento(db, { contoScelto: contoId, obiettivoId, importo: Number(x), versamentoId, nome });
       }
       return versamentoId;
     };
@@ -370,45 +299,6 @@ rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
   });
   res.status(204).end();
 });
-
-// Inserisce un salvadanaio (usato dal modulo della spesa).
-// da_spesa = true: nasce da una spesa e resta bloccato finché una spesa lo paga (decisione 37).
-export async function inserisciSalvadanaio(db: PoolClient, o: { nome: string; padre_id?: string | null; traguardo?: string | null; scadenza?: string | null; icona?: string | null; da_spesa?: boolean }): Promise<string> {
-  return (await db.query<{ id: string }>(
-    'insert into obiettivi (proprietario_id, nome, padre_id, traguardo, scadenza, icona, da_spesa) values (fp_me(), $1, $2, $3, $4, $5, $6) returning id',
-    [o.nome, o.padre_id ?? null, o.traguardo ?? null, o.scadenza ?? null, o.icona ?? null, o.da_spesa ?? false])).rows[0].id;
-}
-
-// Dal modulo della spesa (decisione 39): crea il salvadanaio NUOVO della spesa e la collega.
-// Dove: da solo (padre_id assente/null), sotto un salvadanaio tuo (padre_id) o dentro un
-// contenitore nuovo e libero (contenitore). Traguardo = la quota solo per annuali e una tantum;
-// scadenza = prossima uscita (vuota se senza giorno); icona = quella della spesa.
-export async function creaSalvadanaioDaSpesa(db: PoolClient, spesaId: string, dove: { padre_id?: string | null; contenitore?: string }): Promise<string> {
-  const [s] = await speseDelMese(db, await periodoRichiesto(db, undefined), spesaId);
-  if (!s) throw nonTrovato('Spesa prevista');
-  if (!s.mia) throw new ErroreApi(403, 'Solo chi ha creato la spesa può crearle il salvadanaio');
-  if (!s.nome.trim()) throw new ErroreApi(400, 'La spesa ha bisogno di un nome per creare il salvadanaio');
-  if (s.obiettivo_id) {
-    const g = (await db.query<{ da_spesa: boolean; nome: string }>('select da_spesa, nome from obiettivi where id = $1', [s.obiettivo_id])).rows[0];
-    if (g?.da_spesa) throw new ErroreApi(409, `Questa spesa ha già il suo salvadanaio «${g.nome}»`);
-  }
-  let padre = dove.padre_id ?? null;
-  if (padre) {
-    const p = (await db.query<{ mio: boolean; da_spesa: boolean }>('select proprietario_id = fp_me() as mio, da_spesa from obiettivi where id = $1', [padre])).rows[0];
-    if (!p) throw new ErroreApi(404, 'Il salvadanaio scelto come contenitore non esiste');
-    if (!p.mio) throw new ErroreApi(403, 'Il salvadanaio scelto come contenitore non è tuo');
-    if (p.da_spesa) throw new ErroreApi(400, 'Un salvadanaio creato da una spesa non può contenerne altri');
-  } else if (dove.contenitore !== undefined) {
-    padre = await inserisciSalvadanaio(db, { nome: dove.contenitore });
-  }
-  const periodica = s.tipo !== 'budget' && s.ogni_mesi !== 1;
-  // Le mensili non hanno traguardo né scadenza (periodica è falso): la prossima uscita serve solo alle altre.
-  const prossima = periodica && s.prossima_scadenza ? prossimaUscita(s.prossima_scadenza, s.ogni_mesi, oggi(), s.senza_giorno, (await periodoRichiesto(db, undefined)).inizio, s.giorno_mese) : null;
-  const id = await inserisciSalvadanaio(db, { nome: s.nome, padre_id: padre, traguardo: periodica ? s.mia_quota : null,
-    scadenza: periodica ? prossima : null, icona: s.icona, da_spesa: true });
-  await db.query('update spese_previste set obiettivo_id = $2 where id = $1', [spesaId, id]);
-  return id;
-}
 
 // Traguardi di copertura.
 rotteObiettivi.post('/:id/traguardi', async (req, res) => {

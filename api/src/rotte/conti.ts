@@ -6,9 +6,12 @@ import * as v from '../valida.ts';
 export const rotteConti = Router();
 
 // I conti hanno un saldo (decisione 47): UNO per conto, uguale per tutte le persone che lo vedono.
-// saldo = saldo di partenza (scritto a mano, con data e ora) + movimenti registrati DOPO quel momento.
+// saldo = saldo di partenza (scritto a mano, con data e ora) + entrate verso il conto - uscite dal conto, registrate DOPO quel momento
+// (decisione 51: ogni movimento ha una sorgente e una destinazione; il conto speciale «Niente» non si vede mai).
 // saldo_partenza / saldo_partenza_il: quello scritto; saldo: l'attuale (null se il conto non ha un saldo di partenza);
 // saldo_aggiornato_il: l'ultima volta che è cambiato (saldo scritto o ultimo movimento che conta).
+// nei_salvadanai (decisione 52): i soldi dei salvadanai che stanno su questo conto (solo quelli che chi chiede vede: i suoi e i condivisi
+// con lui; `fp_nei_salvadanai`); liberi = saldo - nei_salvadanai (null se il conto non ha saldo), può essere negativo.
 const SELEZIONE = `
   select c.id, c.proprietario_id, c.nome, c.icona, c.archiviato,
          c.proprietario_id = fp_me() as mio,
@@ -17,10 +20,14 @@ const SELEZIONE = `
          case when c.saldo_partenza is null then null
               else (c.saldo_partenza + coalesce(m.somma, 0))::text end as saldo,
          case when c.saldo_partenza is null then null
-              else greatest(c.saldo_partenza_il, m.ultimo) end as saldo_aggiornato_il
+              else greatest(c.saldo_partenza_il, m.ultimo) end as saldo_aggiornato_il,
+         coalesce(n.totale, 0)::numeric(12,2)::text as nei_salvadanai,
+         case when c.saldo_partenza is null then null
+              else (c.saldo_partenza + coalesce(m.somma, 0) - coalesce(n.totale, 0))::text end as liberi
     from conti c
-    left join lateral (select sum(x.importo) as somma, max(x.momento) as ultimo from movimenti_conto x
-                        where x.conto_id = c.id and x.momento > c.saldo_partenza_il) m on true`;
+    left join fp_nei_salvadanai() n on n.conto_id = c.id
+    left join lateral (select sum(case when x.a_conto_id = c.id then x.importo else -x.importo end) as somma, max(x.momento) as ultimo from movimenti_conto x
+                        where (x.a_conto_id = c.id or x.da_conto_id = c.id) and x.momento > c.saldo_partenza_il) m on true`;
 
 rotteConti.get('/', async (req, res) => {
   const archiviati = req.query.archiviati === 'true';
@@ -89,18 +96,21 @@ rotteConti.put('/:id/saldo', async (req, res) => {
   res.json(conto);
 });
 
-// Ultimi movimenti del conto (?limite=, di base 20), dal più recente. `conta` dice se il movimento è dopo il saldo di
-// partenza (e quindi è nel saldo attuale); gli altri erano già nel saldo scritto.
+// Ultimi movimenti del conto (?limite=, di base 20), dal più recente. `importo` ha il segno visto da questo conto (+ se arrivano
+// soldi, - se escono); `da` e `a` sono i nomi dei due conti (null = «Niente», cioè entrata o uscita). `conta` dice se il movimento è
+// dopo il saldo di partenza (e quindi è nel saldo attuale); gli altri erano già nel saldo scritto.
 rotteConti.get('/:id/movimenti', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const limite = Math.min(200, Math.max(1, Number(req.query.limite ?? 20) || 20));
   const righe = await conUtente(res.locals.utenteId, async (db) => {
     if (!(await db.query('select 1 from conti where id = $1', [id])).rowCount) return undefined;
     return (await db.query(
-      `select m.id, m.importo::text as importo, m.momento, m.momento::date as data, m.causa, m.descrizione, u.nome as utente,
+      `select m.id, (case when m.a_conto_id = $1 then m.importo else -m.importo end)::text as importo, m.momento, m.momento::date as data, m.causa, m.descrizione, u.nome as utente,
+              cd.nome as da, ca.nome as a, (m.da_conto_id = fp_niente()) as da_niente, (m.a_conto_id = fp_niente()) as a_niente,
               (c.saldo_partenza_il is not null and m.momento > c.saldo_partenza_il) as conta
-         from movimenti_conto m join conti c on c.id = m.conto_id left join utenti u on u.id = m.utente_id
-        where m.conto_id = $1 order by m.momento desc, m.id desc limit $2`, [id, limite])).rows;
+         from movimenti_conto m join conti c on c.id = $1 left join utenti u on u.id = m.utente_id
+         left join conti cd on cd.id = m.da_conto_id left join conti ca on ca.id = m.a_conto_id
+        where m.da_conto_id = $1 or m.a_conto_id = $1 order by m.momento desc, m.id desc limit $2`, [id, limite])).rows;
   });
   if (!righe) throw nonTrovato('Conto');
   res.json(righe);

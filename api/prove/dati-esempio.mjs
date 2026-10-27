@@ -54,9 +54,12 @@ const spotify = await spesa('Spotify duo', '16.99', { conto_id: paypal, categori
 await spesa('Claude', '21.96', { conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 24) });
 await spesa('Figma', '25', { conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 26) });
 await spesa('Adobe', '18.45', { conto_id: paypal, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 27) });
-const spesaB = await spesa('Spesa', '500', { tipo: 'budget', conto_id: comune, categoria_id: C('Cibo', null) }); await meta(spesaB);
-await spesa('Budget personale', '200', { tipo: 'budget', conto_id: revolut, categoria_id: C('Pranzo fuori') });
-const macchina = await spesa('Macchina', '70', { tipo: 'budget', conto_id: comune, categoria_id: C('Carburante') }); await meta(macchina);
+// I budget nascono da una categoria (decisione 49).
+const budget = async (categoria, importo, extra) => (await r('POST', '/budget', M, { categoria_id: categoria, importo, ...extra })).id;
+const metaBudget = async (id) => r('POST', '/condivisioni', M, { voce: 'budget', id, email: 'ele@brokenbroker.test' });
+await metaBudget(await budget(C('Cibo', null), '500'));
+await budget(C('Pranzo fuori'), '200');
+await metaBudget(await budget(C('Carburante'), '70'));
 await spesa('ETF MSCI World', '500', { tipo: 'investimento', conto_id: tr, categoria_id: C('Risparmio e investimenti'), prossima_scadenza: meseFa(6, 2) });
 await spesa('Tari', '250', { ogni_mesi: 6, conto_id: bper, categoria_id: C('Tari'), prossima_scadenza: meseFa(-1, 20) });
 await spesa('Assicurazione auto', '430.86', { ogni_mesi: 6, conto_id: intesa, categoria_id: C('Assicurazione'), prossima_scadenza: meseFa(-2, 15) });

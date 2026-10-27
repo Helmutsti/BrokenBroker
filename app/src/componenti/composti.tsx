@@ -223,7 +223,8 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, on
 // ---- CMP-23 Numero chiave ----
 export type ToneNumero = 'normale' | 'ok' | 'attenzione' | 'errore';
 // `titolo` sostituisce l'etichetta con un nodo (es. un selettore); `onPress` rende premibile cifra e nota (non il titolo).
-export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale', titolo, onPress, etichettaPressione }: { etichetta: string; valore: string; nota?: string; icona: string; tono?: ToneNumero; titolo?: ReactNode; onPress?: () => void; etichettaPressione?: string }) {
+// `dettagli`: righe in più sotto la nota (es. «Liberi» e «Nei salvadanai» del saldo), ognuna può essere in rosso.
+export function NumeroChiave({ etichetta, valore, nota, dettagli, icona, tono = 'normale', titolo, onPress, etichettaPressione }: { etichetta: string; valore: string; nota?: string; dettagli?: { testo: string; rosso?: boolean }[]; icona: string; tono?: ToneNumero; titolo?: ReactNode; onPress?: () => void; etichettaPressione?: string }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const t: Tono = tono === 'normale' ? 'accento' : tono;
@@ -238,6 +239,7 @@ export function NumeroChiave({ etichetta, valore, nota, icona, tono = 'normale',
       <Pressable disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={onPress ? etichettaPressione : undefined} onPress={onPress} style={{ gap: d['spazio-testo'] }}>
         <Testo stile="numero-grande" colore={coloreValore} style={compatto ? { fontSize: 20, lineHeight: 26 } : undefined}>{valore}</Testo>
         {nota ? <Testo stile="dettaglio-normale" colore={tono === 'normale' ? 'testo-secondario' : coloreValore}>{nota}</Testo> : null}
+        {dettagli?.map((x) => <Testo key={x.testo} stile="dettaglio-normale" colore={x.rosso ? 'testo-errore' : tono === 'normale' ? 'testo-secondario' : coloreValore}>{x.testo}</Testo>)}
       </Pressable>
     </View>
   );
@@ -463,7 +465,8 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
 }
 
 // ---- CMP-28 Scheda conto ----
-export function SchedaConto({ nome, nota, saldo, saldoNegativo, condiviso, icona, onApri }: { nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; condiviso: boolean; icona: string; onApri: () => void }) {
+// `liberi` e `neiSalvadanai` (decisione 52): i soldi che restano liberi sul conto e quelli messi da parte nei salvadanai che stanno su di lui; liberi in rosso se negativi.
+export function SchedaConto({ nome, nota, saldo, saldoNegativo, liberi, liberiNegativi, neiSalvadanai, condiviso, icona, onApri }: { nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; liberi?: string; liberiNegativi?: boolean; neiSalvadanai?: string; condiviso: boolean; icona: string; onApri: () => void }) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
@@ -474,6 +477,12 @@ export function SchedaConto({ nome, nota, saldo, saldoNegativo, condiviso, icona
         <View style={{ flex: 1, gap: d['spazio-testo'] }}>
           <Testo stile="titolo-scheda">{nome}</Testo>
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
+          {liberi && neiSalvadanai ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: d['spazio-colonne'], rowGap: d['spazio-testo'] }}>
+              <Testo stile="dettaglio-normale" colore={liberiNegativi ? 'testo-errore' : 'testo-secondario'}>{`Liberi ${liberi}`}</Testo>
+              <Testo stile="dettaglio-normale" colore="testo-secondario">{`Nei salvadanai ${neiSalvadanai}`}</Testo>
+            </View>
+          ) : null}
         </View>
         {saldo ? <Testo stile="corpo-forte" colore={saldoNegativo ? 'testo-errore' : 'testo-primario'}>{saldo}</Testo> : null}
         {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
@@ -542,14 +551,15 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 }
 
 // ---- CMP-31 Riga categoria ----
-export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina }: {
-  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
+export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina, onBudget, budget }: {
+  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; onBudget?: () => void; budget?: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const [sopra, setSopra] = useState(false);
   const pulsanti = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], flexShrink: 0 }}>
+      {onBudget ? <PulsanteIcona icona="chart-column" etichetta={budget ? `Budget di ${nome}: ${budget}` : `Crea il budget di ${nome}`} onPress={onBudget} /> : null}
       {onNuovo ? <PulsanteIcona icona="plus" etichetta={`Nuova sottocategoria di ${nome}`} onPress={onNuovo} /> : null}
       <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />
       {onElimina ? <PulsanteIcona icona="trash-2" etichetta={`Elimina ${nome}`} onPress={onElimina} /> : null}
@@ -568,6 +578,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, perc
       <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
+        {budget ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`Budget ${budget}`}</Testo> : null}
         {compatto && percentuale !== undefined ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`${percentuale} dello stipendio`}</Testo> : null}
         {compatto ? <View style={{ alignSelf: 'flex-start' }}>{pulsanti}</View> : null}
       </View>

@@ -143,7 +143,7 @@ export function RiquadroCondivisione({ aperta, nome, condiviso, onCambia, con, o
 }
 
 // Crea o toglie la condivisione di una voce secondo l'interruttore; restituisce l'id dell'altra persona (o null).
-export async function salvaCondivisione(voce: 'conto' | 'spesa' | 'obiettivo', id: string, condiviso: boolean, con: string | null): Promise<string | null> {
+export async function salvaCondivisione(voce: 'conto' | 'spesa' | 'obiettivo' | 'budget', id: string, condiviso: boolean, con: string | null): Promise<string | null> {
   const esistente = (await leggi<Condivisione[]>('/condivisioni')).find((x) => x.voce === voce && x.voce_id === id && x.mia);
   if (condiviso && esistente && con && esistente.condiviso_con_id !== con) await cancella(`/condivisioni/${esistente.id}`);
   else if (condiviso && esistente) return esistente.condiviso_con_id;

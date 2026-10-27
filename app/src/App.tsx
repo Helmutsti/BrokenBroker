@@ -21,7 +21,7 @@ import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
 // Sezioni della barra laterale (flussi.md): l'ordine è quello delle bozze approvate.
 // Le sezioni dei 3 fogli dell'Excel (Spese, Salvadanai, Investimenti) più Categorie, Conti
-// e Analisi. Budget (i due modi) e Movimenti (il registro dei conti) sono tornati con la decisione 48.
+// e Analisi. Budget (senza modi) e Movimenti (il registro dei conti) sono tornati con la decisione 48.
 // La sezione delle spese del mese si chiama "Spese" (richiesta di Manuel, prima "Mese").
 const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
   { chiave: 'mese', testo: 'Spese', icona: 'calendar-check', percorso: '', schermata: Panoramica },

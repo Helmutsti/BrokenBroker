@@ -32,14 +32,14 @@ verifica(come(b, `select count(*) from traguardi_copertura`)[0] === '3', 'B vede
 verifica(come(b, `insert into traguardi_copertura (obiettivo_id, nome, importo) values ('${priv}', 'X', 10)`) === 'ERRORE', 'B non scrive traguardi su obiettivo privato di A');
 verifica(come(a, `insert into traguardi_copertura (obiettivo_id, nome, importo) values ('${fondo}', 'Zero', 0)`) === 'ERRORE', 'importo zero rifiutato');
 verifica(come(a, `update obiettivi set padre_id = '${mens}' where id = '${fondo}'`) === 'ERRORE', 'ciclo bloccato');
-// Spese una tantum pagate da un obiettivo
+// Spese una tantum create da un obiettivo e promemoria dei salvadanai (decisione 50: nessun salvadanaio «pagante»)
 const nikon = come(a, `insert into obiettivi (proprietario_id, nome, traguardo, scadenza, crea_spesa) values ('${a}', 'Nikon', 400, '2027-03-01', true) returning id`)[0];
 verifica(/^[0-9a-f-]{36}/.test(nikon), 'obiettivo con crea spesa');
-const sp = come(a, `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, obiettivo_id) values ('${a}', 'Nikon', 400, null, '2027-03-01', '${nikon}') returning id`)[0];
-verifica(/^[0-9a-f-]{36}/.test(sp), 'spesa una tantum collegata all obiettivo');
+const sp = come(a, `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza) values ('${a}', 'Nikon', 400, null, '2027-03-01') returning id`)[0];
+verifica(/^[0-9a-f-]{36}/.test(sp), 'spesa una tantum del salvadanaio');
 verifica(come(a, `update obiettivi set spesa_creata_id = '${sp}' where id = '${nikon}' returning id`).length === 1, 'obiettivo ricorda la spesa creata');
-verifica(come(b, `insert into spese_previste (proprietario_id, nome, importo, obiettivo_id) values ('${b}', 'Furbo', 10, '${nikon}')`) === 'ERRORE', 'B non collega spese a obiettivi privati di A');
-verifica(come(b, `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, obiettivo_id) values ('${b}', 'Dal fondo', 50, null, '${mens}') returning id`).length === 1, 'B collega una spesa a un obiettivo condiviso');
+verifica(come(b, `insert into spese_previste (proprietario_id, nome, importo, alimenta_obiettivo_id) values ('${b}', 'Furbo', 10, '${nikon}')`) === 'ERRORE', 'B non fa promemoria su salvadanai privati di A');
+verifica(come(b, `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, alimenta_obiettivo_id) values ('${b}', 'Dal fondo', 50, null, '${mens}') returning id`).length === 1, 'B fa un promemoria su un salvadanaio condiviso');
 verifica(come(a, `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi) values ('${a}', 'Zero mesi', 10, 0)`) === 'ERRORE', 'frequenza zero rifiutata');
 verifica(come(a, `delete from obiettivi where id = '${fondo}' returning id`).length === 1, 'A cancella il padre');
 verifica(come(a, 'select count(*) from obiettivi')[0] === '2', 'i figli spariscono con il padre (restano Privato e Nikon)');

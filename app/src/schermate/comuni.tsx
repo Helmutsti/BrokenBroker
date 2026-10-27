@@ -1,9 +1,8 @@
 import { ActivityIndicator, View } from 'react-native';
 import { Esito } from '../componenti/base.tsx';
-import type { Tono } from '../componenti/base.tsx';
 import type { ElencoSpese, Obiettivo, Profilo, Rata, Spesa } from '../dati/tipi.ts';
-import { dataSpesa, euro, oggiIso } from '../formato.ts';
-import { aggiungiMesi, mesiFinoScadenza, meseDi, meseDiVoce, mesiTraChiavi, periodoDi, proxOccorrenza, spostaChiave } from '../mesePersonale.ts';
+import { dataSpesa, oggiIso } from '../formato.ts';
+import { aggiungiMesi, mesiFinoScadenza, meseDi, meseDiVoce, periodoDi, proxOccorrenza, spostaChiave } from '../mesePersonale.ts';
 import { d, useTema } from '../tema/tema.tsx';
 
 // Pezzi condivisi tra le schermate.
@@ -41,7 +40,6 @@ export function scadenzaRataNel(r: Rata, dal: string, al: string): string | null
 
 // "Il 5 · ogni mese", "15 novembre · ogni 6 mesi", "Marzo · ogni anno" (senza giorno), "Una volta · 20 novembre", "Tutto il mese".
 export function quando(s: Spesa, inizio = 1): string {
-  if (s.tipo === 'budget') return 'Tutto il mese';
   if (s.ogni_mesi === null) return `Una volta · ${dataSpesa(s.prossima_scadenza, s.senza_giorno)}`;
   if (s.ogni_mesi === 1) return s.giorno_mese ? `Il ${s.giorno_mese} · ogni mese` : 'Ogni mese';
   const prossima = proxSpesa(s, oggiIso(), inizio);
@@ -62,79 +60,27 @@ export const suQuelConto = (o: Obiettivo, filtro: string) => (filtro === 'tutti'
 export const sommaSuConto = (radici: Obiettivo[], filtro: string) =>
   tuttiGliObiettivi(radici).filter((o) => suQuelConto(o, filtro)).reduce((t, o) => t + Number(o.versato), 0);
 
-// Spese annuali o periodiche: escono ogni N mesi (N > 1), budget esclusi; non le
-// spese "mettici da parte", che riempiono un salvadanaio invece di uscire.
-export const eAnnuale = (s: Spesa) => s.attiva && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1;
+// Spese annuali o periodiche: escono ogni N mesi (N > 1); non i «Ricordami» dei salvadanai. Sono promemoria come
+// le altre: si vedono e si spuntano solo nel mese in cui cadono, per intero (decisione 50).
+export const eAnnuale = (s: Spesa) => s.attiva && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1;
 
-// Cifra del mese: la quota mensile per le annuali, la mia quota per le altre voci.
-export const importoDelMese = (s: Spesa) => Number(eAnnuale(s) ? s.quota_mensile : s.mia_quota);
+// Cifra del mese: la mia quota.
+export const importoDelMese = (s: Spesa) => Number(s.mia_quota);
 
-// Le voci del mese divise per tipo.
-// Annuali non ordinate; "delConto" sono tutte le voci che escono dal conto (le annuali con la quota del mese).
+// Le voci del mese divise per tipo; "delConto" sono tutte le voci che escono dal conto (annuali comprese, nel loro mese).
 export function vociDelMese(el: ElencoSpese, perUscita?: (a: Spesa, b: Spesa) => number) {
-  const delMese = el.spese.filter((s) => s.attiva && s.nel_mese && !eAnnuale(s) && !s.obiettivo_id);
+  const delMese = el.spese.filter((s) => s.attiva && s.nel_mese);
   if (perUscita) delMese.sort(perUscita);
   const fisse = delMese.filter((s) => s.tipo === 'fissa');
-  const budget = delMese.filter((s) => s.tipo === 'budget');
   const investimenti = delMese.filter((s) => s.tipo === 'investimento' && !s.alimenta_obiettivo_id);
-  // "Mettici da parte": spuntate, i soldi vanno nel salvadanaio.
+  // «Ricordami»: la spunta è solo un segno.
   const salvadanai = delMese.filter((s) => s.alimenta_obiettivo_id);
-  const annuali = el.spese.filter(eAnnuale);
-  return { fisse, budget, investimenti, salvadanai, annuali, delConto: [...fisse, ...budget, ...investimenti, ...salvadanai, ...annuali] };
-}
-
-// Quanto dovrebbe esserci oggi in un salvadanaio che paga una spesa periodica (ogni_mesi > 1):
-// la spesa si riempie di 1/ogni_mesi al mese dalla scadenza precedente alla prossima.
-// Per un salvadanaio che ne contiene (a qualunque livello) è la somma dei sotto-salvadanai
-// che pagano una spesa. Senza spese periodiche dentro: null.
-export function riempimento(o: Obiettivo, spese: Spesa[], oggi = oggiIso(), inizio = 1): { dovrebbe: number; ce: number; indietro: number } | null {
-  const proprio = o.paga_spesa ? spese.find((s) => s.id === o.paga_spesa!.id) : null;
-  if (proprio) {
-    const quando = proxSpesa(proprio, oggi, inizio);
-    if (!quando || proprio.ogni_mesi === null || proprio.ogni_mesi <= 1) return null;
-    const ogni = proprio.ogni_mesi;
-    // Per mesi personali interi: dal mese della scadenza precedente a quello in corso (nel mese di scadenza è tutto).
-    const passati = Math.max(0, Math.min(ogni, mesiTraChiavi(spostaChiave(meseDi(quando, inizio), -ogni), meseDi(oggi, inizio))));
-    const dovrebbe = Math.round(Number(proprio.mia_quota) * passati / ogni * 100) / 100, ce = Number(o.saldo);
-    return { dovrebbe, ce, indietro: Math.max(0, dovrebbe - ce) };
-  }
-  const parti = o.figli.map((f) => riempimento(f, spese, oggi, inizio)).filter((x): x is NonNullable<typeof x> => x !== null);
-  if (!parti.length) return null;
-  const dovrebbe = parti.reduce((t, x) => t + x.dovrebbe, 0), ce = parti.reduce((t, x) => t + x.ce, 0);
-  return { dovrebbe, ce, indietro: parti.reduce((t, x) => t + x.indietro, 0) };
+  return { fisse, investimenti, salvadanai, delConto: [...fisse, ...investimenti, ...salvadanai] };
 }
 
 // Le rate che cadono nel periodo, in ordine di data.
 export const rateDelMese = (rate: Rata[], dal: string, al: string) =>
   rate.map((x) => ({ r: x, quando: x.scadenza ?? scadenzaRataNel(x, dal, al) })).filter((x) => x.quando).sort((a, b) => a.quando!.localeCompare(b.quando!));
-
-export type ScadenzaAnnuale = { s: Spesa; quando: string; copertura: { testo: string; tono: Tono } };
-
-// Prossime uscite annuali in ordine di data. Quelle pagate da un salvadanaio sono
-// "coperte" finché il saldo del salvadanaio basta, contando le uscite precedenti;
-// oltre `entroMesi` mesi si stanno ancora preparando.
-export function prossimeAnnuali(spese: Spesa[], obiettivi: Obiettivo[], entroMesi = 3, da = oggiIso(), inizio = 1) {
-  const saldi = new Map(tuttiGliObiettivi(obiettivi).map((o) => [o.id, Number(o.saldo)]));
-  // Il limite è un mese personale: «fino a gennaio» vuol dire fino alla fine del mese personale di gennaio.
-  const meseLimite = spostaChiave(meseDi(da, inizio), entroMesi), limite = `${meseLimite}-01`;
-  const voci = spese.filter(eAnnuale).map((s) => ({ s, quando: proxSpesa(s, da, inizio) }))
-    .filter((x): x is { s: Spesa; quando: string } => !!x.quando).sort((a, b) => a.quando.localeCompare(b.quando));
-  const usato = new Map<string, number>();
-  let serve = 0, mancano = 0;
-  const elenco: ScadenzaAnnuale[] = voci.map(({ s, quando }) => {
-    const importo = Number(s.mia_quota);
-    if (meseDi(quando, inizio) > meseLimite) return { s, quando, copertura: { testo: 'Si prepara', tono: 'neutro' } };
-    if (!s.obiettivo_id || !saldi.has(s.obiettivo_id)) return { s, quando, copertura: { testo: 'Dal mese', tono: 'neutro' } };
-    const prima = usato.get(s.obiettivo_id) ?? 0, saldo = saldi.get(s.obiettivo_id)!;
-    usato.set(s.obiettivo_id, prima + importo); serve += importo;
-    if (prima + importo <= saldo + 0.005) return { s, quando, copertura: { testo: 'Coperta', tono: 'ok' } };
-    const manca = Math.min(importo, prima + importo - saldo); mancano += manca;
-    return { s, quando, copertura: { testo: `Mancano ${euro(manca)}`, tono: 'attenzione' } };
-  });
-  const idSalvadanai = [...new Set(spese.filter(eAnnuale).map((s) => s.obiettivo_id).filter((x): x is string => !!x && saldi.has(x)))];
-  const nelSalvadanaio = idSalvadanai.reduce((t, id) => t + saldi.get(id)!, 0);
-  return { elenco, nelSalvadanaio, serve, mancano, conSalvadanaio: idSalvadanai.length > 0, limite };
-}
 
 // Uscite annuali di ognuno dei prossimi 12 mesi personali, a partire da quello in corso (chiave «AAAA-MM» del mese personale).
 export function calendarioAnnuali(spese: Spesa[], da = oggiIso(), inizio = 1) {
@@ -158,10 +104,9 @@ export function calendarioAnnuali(spese: Spesa[], da = oggiIso(), inizio = 1) {
 export function ordinaPerScadenza(xs: Obiettivo[], da = oggiIso(), inizio = 1): Obiettivo[] {
   const adesso = meseDi(da, inizio);
   const propria = (o: Obiettivo): string | null => {
-    const dt = o.paga_spesa ? o.paga_spesa.prossima : o.scadenza;
+    const dt = o.scadenza;
     if (!dt) return null;
-    const senza = !!o.paga_spesa?.senza_giorno, mese = meseDiVoce(dt, senza, inizio);
-    const giorno = senza ? '00' : dt.slice(8, 10);
+    const mese = meseDiVoce(dt, false, inizio), giorno = dt.slice(8, 10);
     return mese < adesso && o.percentuale !== null && o.percentuale >= 100 ? `${adesso}-00` : `${mese}-${giorno}`;
   };
   const rami = xs.map((o) => ({ ...o, figli: ordinaPerScadenza(o.figli, da, inizio) }));
