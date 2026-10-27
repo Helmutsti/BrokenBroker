@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View } from 'react-native';
 import { Esito, Pulsante } from '../componenti/base.tsx';
+import { LogoApp } from '../componenti/LogoApp.tsx';
 import { Campo } from '../componenti/campi.tsx';
 import { crea } from '../dati/api.ts';
 import { salvaToken } from '../dati/sessione';
@@ -29,7 +30,10 @@ export function Accesso({ onEntrato }: { onEntrato: () => void }) {
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: c['sfondo-barra-laterale'], padding: d['margine-pagina'] }}>
       <View accessibilityRole="form" style={{ width: d['larghezza-accesso'], maxWidth: '100%', padding: d['margine-finestra'], gap: d['spazio-blocco'], backgroundColor: c['sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }}>
         <View style={{ gap: d['spazio-testo'] }}>
-          <Testo stile="logo" accessibilityRole="header">BrokenBroker</Testo>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+            <LogoApp misura={40} />
+            <Testo stile="logo" accessibilityRole="header">BrokenBroker</Testo>
+          </View>
           <Testo colore="testo-secondario">Accedi per vedere quanto resta davvero questo mese.</Testo>
         </View>
         {errore ? <Esito tono="errore" testo={errore} /> : null}

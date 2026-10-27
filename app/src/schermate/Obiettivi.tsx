@@ -287,7 +287,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
         <Interruttore acceso={creaSpesa} onCambia={setCreaSpesa} etichetta="Crea spesa al raggiungimento" />)}
       {!o || o.mio ? (
         <ConErrore campo="condivisione"><RiquadroCondivisione aperta={!!stato} nome="questo salvadanaio" condiviso={condiviso} onCambia={setCondiviso} con={con ?? miaCondivisione?.condiviso_con_id ?? null} onCon={setCon}
-          giaCondivisa={!!o?.condiviso} testoAttivo="Vede e modifica anche i sotto-salvadanai." /></ConErrore>
+          giaCondivisa={!!o?.condiviso} testoCondividi="Condividi questo salvadanaio con un'altra persona" testoAttivo="Vede e modifica anche i sotto-salvadanai." /></ConErrore>
       ) : null}
       {o ? (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>

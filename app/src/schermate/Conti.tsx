@@ -99,7 +99,7 @@ function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; apert
       ) : null}
       {!conto || conto.mio ? (
         <ConErrore campo="condivisione"><RiquadroCondivisione aperta={aperta} nome="questo conto" condiviso={condiviso} onCambia={setCondiviso} con={con ?? miaCondivisione?.condiviso_con_id ?? null} onCon={setCon}
-          giaCondivisa={!!conto?.condiviso && conto.mio} testoAttivo="Lo vede e lo usa nelle spese." /></ConErrore>
+          giaCondivisa={!!conto?.condiviso && conto.mio} testoCondividi="Condividi questo conto: l'altra persona vedrà saldo e movimenti" testoAttivo="Lo vede e lo usa nelle spese." /></ConErrore>
       ) : <Testo stile="dettaglio-normale" colore="testo-secondario">Conto condiviso con te: puoi modificarlo, solo chi l'ha creato può eliminarlo.</Testo>}
       {conto && movimenti?.length ? (
         <Voce etichetta="Ultimi movimenti">

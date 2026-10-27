@@ -3,7 +3,7 @@ import { Modal, Pressable, ScrollView, TextInput, type TextInputProps, useWindow
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { carattere, ombre, stiliTesto } from '../tema/token.ts';
-import { anelloFocus, dentroIlBordo, type StatoPressione } from './base.tsx';
+import { ALTEZZA_CONTROLLO, anelloFocus, dentroIlBordo, type StatoPressione } from './base.tsx';
 import { Icona } from './Icona.tsx';
 
 // CMP-05 Campo di testo e CMP-06 Tendina.

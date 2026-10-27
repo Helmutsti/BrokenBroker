@@ -35,6 +35,21 @@ rotteBudget.get('/', async (req, res) => {
   res.json(risposta);
 });
 
+// Un budget con le quote scritte (con chi è diviso, anche senza condivisione).
+rotteBudget.get('/:id', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  const voce = await conUtente(res.locals.utenteId, async (db) => {
+    const [b] = await budgetDelMese(db, await periodoRichiesto(db, req.query.mese), id);
+    if (!b) return undefined;
+    const quote = (await db.query(
+      `select q.utente_id, u.nome, q.percentuale::text as percentuale from quote q join utenti u on u.id = q.utente_id
+        where q.budget_id = $1 order by u.nome`, [id])).rows;
+    return { ...b, quote };
+  });
+  if (!voce) throw nonTrovato('Budget');
+  res.json(voce);
+});
+
 function leggi(c: Record<string, unknown>, nuovo: boolean) {
   const importo = v.importo(c, 'importo', nuovo);
   if (importo !== undefined && Number(importo) <= 0) throw new ErroreApi(400, 'Il tetto deve essere positivo');

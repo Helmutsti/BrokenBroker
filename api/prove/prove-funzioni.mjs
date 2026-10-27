@@ -133,6 +133,27 @@ verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [
 verifica((await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: b.utente_id, percentuale: '100' }] })).s === 204, 'quota sola al 100: tutto a B (somma 100)');
 await r('PUT', `/spese-previste/${affitto.j.id}/quote`, Bt, { quote: [{ utente_id: a.utente_id, percentuale: '60' }, { utente_id: b.utente_id, percentuale: '40' }] });
 verifica((await r('GET', `/spese-previste/${affitto.j.id}?mese=2026-10`, A)).j.mia_quota === '420.00', 'quota 60%');
+// Dividere e condividere sono scelte indipendenti: togliere la condivisione non cancella le quote.
+{
+  const sp = (await r('POST', '/spese-previste', A, { nome: 'Divisa', importo: '100', conto_id: conto.id, categoria_id: casa.id })).j;
+  await r('POST', '/condivisioni', A, { voce: 'spesa', id: sp.id, utente_id: b.utente_id });
+  await r('PUT', `/spese-previste/${sp.id}/quote`, A, { quote: [{ utente_id: a.utente_id, percentuale: '50' }, { utente_id: b.utente_id, percentuale: '50' }] });
+  const cd = (await r('GET', '/condivisioni', A)).j.find((x) => x.voce_id === sp.id);
+  verifica((await r('DELETE', `/condivisioni/${cd.id}`, A)).s === 204, 'tolgo la condivisione della spesa divisa');
+  const dopo = (await r('GET', `/spese-previste/${sp.id}`, A)).j;
+  verifica(dopo.condivisa === false && dopo.quote.length === 2 && dopo.mia_percentuale === 50, 'senza condivisione la divisione a metà resta', dopo.quote);
+  verifica(dopo.quote.some((q) => q.utente_id === b.utente_id && Number(q.percentuale) === 50), 'resta anche la persona della divisione', dopo.quote);
+  const bu = spesaBudget;
+  await r('POST', '/condivisioni', A, { voce: 'budget', id: bu.id, utente_id: b.utente_id });
+  await r('PUT', `/budget/${bu.id}/quote`, A, { quote: [{ utente_id: a.utente_id, percentuale: '50' }, { utente_id: b.utente_id, percentuale: '50' }] });
+  const cb = (await r('GET', '/condivisioni', A)).j.find((x) => x.voce_id === bu.id);
+  verifica((await r('DELETE', `/condivisioni/${cb.id}`, A)).s === 204, 'tolgo la condivisione del budget diviso');
+  const bdopo = (await r('GET', `/budget/${bu.id}`, A)).j;
+  verifica(bdopo.condiviso === false && bdopo.mia_percentuale === 50 && bdopo.quote.some((q) => q.utente_id === b.utente_id), 'budget: la divisione resta senza condivisione', bdopo.quote);
+  await r('PUT', `/budget/${bu.id}/quote`, A, { quote: [] });
+  await r('DELETE', `/spese-previste/${sp.id}`, A);
+}
+
 verifica((await r('DELETE', `/spese-previste/${affitto.j.id}`, Bt)).s === 403, "l'altro non cancella la spesa");
 
 const cond = (await r('GET', '/condivisioni', Bt)).j;

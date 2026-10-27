@@ -1,10 +1,12 @@
 import { type ComponentRef, createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante } from '../componenti/base.tsx';
-import { MessaggioErrore, Tendina } from '../componenti/campi.tsx';
+import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
+import { Campo, MessaggioErrore, Tendina } from '../componenti/campi.tsx';
 import { Icona } from '../componenti/Icona.tsx';
 import { ConfermaFinestra, Finestra } from '../componenti/composti.tsx';
-import { cancella, crea, leggi, useDati } from '../dati/api.ts';
+import { cancella, crea, leggi, sostituisci, useDati } from '../dati/api.ts';
+import { useRiferimenti } from '../dati/contesto.tsx';
+import { euro } from '../formato.ts';
 import type { Condivisione, PersonaSistema } from '../dati/tipi.ts';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
@@ -122,22 +124,113 @@ export function Riquadro({ titolo, nota, icona, interruttore, children }: { tito
   );
 }
 
-// Il riquadro «Condividi», uguale in tutti i moduli: l'interruttore acceso vuol dire «condividi», poi si sceglie con chi
-// tra le altre persone del sistema (solo nomi).
-export function RiquadroCondivisione({ aperta, nome, condiviso, onCambia, con, onCon, giaCondivisa, testoAttivo, testoPrivato }: {
+// Riga di condivisione: il testo (titolo + eventuale aiuto) a sinistra e lo switch sulla stessa riga, a destra.
+function RigaCondividi({ testo, aiuto, acceso, onCambia, disattivato }: { testo: string; aiuto?: string; acceso: boolean; onCambia: (v: boolean) => void; disattivato?: boolean }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+        <Testo stile="dettaglio-forte">{testo}</Testo>
+        {aiuto ? <Testo stile="dettaglio-normale" colore="testo-secondario">{aiuto}</Testo> : null}
+      </View>
+      <Interruttore acceso={acceso} onCambia={onCambia} etichetta={testo} disattivato={disattivato} />
+    </View>
+  );
+}
+
+// Solo condivisione (conti, salvadanai): lo switch «Condividi» (testo e switch sulla stessa riga) e sotto la tendina «Con chi», disattivata finché lo switch è spento.
+// Con una sola altra persona nel sistema, spuntando si sceglie da sola.
+export function RiquadroCondivisione({ aperta, nome, condiviso, onCambia, con, onCon, giaCondivisa, testoAttivo, testoPrivato, testoCondividi }: {
   aperta: boolean; nome: string; condiviso: boolean; onCambia: (v: boolean) => void; con: string | null; onCon: (id: string | null) => void;
-  giaCondivisa: boolean; testoAttivo: string; testoPrivato?: string;
+  giaCondivisa: boolean; testoAttivo: string; testoPrivato?: string; testoCondividi: string;
 }) {
   const persone = useDati<PersonaSistema[]>(aperta ? '/persone/tutte' : null).dati;
   useEffect(() => { if (condiviso && !con && persone?.length === 1) onCon(persone[0].id); }, [condiviso, con, persone]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <Riquadro titolo="Condividi" icona="users" nota={condiviso ? testoAttivo : `Accendi per condividere ${nome} con un'altra persona.${testoPrivato ? ` ${testoPrivato}` : ''}`}
-      interruttore={<Interruttore acceso={condiviso} onCambia={onCambia} etichetta="Condividi" />}>
-      {condiviso ? (
-        persone && persone.length === 0 ? <Esito tono="attenzione" testo="Non c'è ancora nessun altro utente nel sistema." />
-          : <Tendina etichetta="Condividi con" valore={con} iconaPrima="user" disattivato={giaCondivisa} onCambia={onCon} segnaposto="Scegli una persona"
-              opzioni={(persone ?? []).map((p) => ({ valore: p.id, testo: p.nome }))} />
-      ) : null}
+    <Riquadro titolo="Condividi" icona="users" nota={condiviso ? testoAttivo : `Accendi lo switch e scegli con chi per condividere ${nome}.${testoPrivato ? ` ${testoPrivato}` : ''}`}>
+      {persone && persone.length === 0 ? <Esito tono="attenzione" testo="Non c'è ancora nessun altro utente nel sistema." /> : (
+        <View style={{ gap: d['spazio-blocco'] }}>
+          <RigaCondividi testo={testoCondividi} acceso={condiviso} onCambia={onCambia} />
+          <Tendina etichetta="Con chi" valore={con} iconaPrima="user" disattivato={!condiviso || giaCondivisa} onCambia={onCon} segnaposto="Scegli una persona"
+            opzioni={(persone ?? []).map((p) => ({ valore: p.id, testo: p.nome }))} />
+        </View>
+      )}
+    </Riquadro>
+  );
+}
+
+// ---- Divisione e condivisione di una spesa o di un budget: un solo modulo, uguale ovunque ----
+export type OrigineDivisione = { id: string; mia: boolean; condiviso: boolean; miaPercentuale: number };
+type Divisione = 'no' | 'meta' | 'altra';
+
+// Lo stato e il salvataggio. Dividere (la mia quota) e condividere (l'altra persona la vede e la modifica) sono due scelte indipendenti.
+// Senza condivisione si scrive solo la mia quota (100% = nessuna quota scritta); con la condivisione anche quella dell'altra persona.
+// Togliere la condivisione non cambia la quota.
+export function useDivisione({ aperta, voce, rotta, origine }: { aperta: boolean; voce: 'spesa' | 'budget'; rotta: string; origine: OrigineDivisione | null }) {
+  const rif = useRiferimenti();
+  const miaCondivisione = useDati<Condivisione[]>(aperta && origine ? '/condivisioni' : null).dati?.find((x) => x.voce === voce && x.voce_id === origine?.id && x.mia);
+  // Se era diviso con qualcuno senza condividere, la persona si legge dalle quote del dettaglio.
+  const dettaglio = useDati<{ quote: { utente_id: string }[] }>(aperta && origine?.mia ? `${rotta}/${origine.id}` : null).dati;
+  const persone = useDati<PersonaSistema[]>(aperta ? '/persone/tutte' : null).dati;
+  const [condiviso, setCondiviso] = useState(false);
+  const [con, setCon] = useState<string | null>(null);
+  const [divisione, setDivisione] = useState<Divisione>('no');
+  const [miaQuota, setMiaQuota] = useState('50');
+  useEffect(() => {
+    if (!aperta) return;
+    const o = origine;
+    const pct = o?.miaPercentuale ?? 100;
+    setCondiviso(o?.condiviso ?? false); setCon(null);
+    setDivisione(pct === 100 ? 'no' : pct === 50 ? 'meta' : 'altra'); setMiaQuota(String(pct === 100 ? 50 : pct));
+  }, [aperta, origine?.id, origine?.mia, origine?.condiviso, origine?.miaPercentuale]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const conEff = con ?? miaCondivisione?.condiviso_con_id ?? dettaglio?.quote.find((q) => q.utente_id !== rif.profilo?.id)?.utente_id ?? null;
+  const bloccata = !!origine?.condiviso && condiviso;
+  const nomeAltro = persone?.find((p) => p.id === conEff)?.nome ?? null;
+  useEffect(() => { if (condiviso && !conEff && persone?.length === 1) setCon(persone[0].id); }, [condiviso, conEff, persone]);
+
+  const salva = async (id: string) => {
+    const mia = divisione === 'no' ? 100 : divisione === 'meta' ? 50 : Number(miaQuota.replace(',', '.'));
+    if (!(mia > 0 && mia < 100)) serve(null, 'La tua quota deve essere tra 1 e 99%', 'quota');
+    const io = { utente_id: rif.profilo!.id, percentuale: String(mia) };
+    if (!condiviso) {
+      await salvaCondivisione(voce, id, false, null);
+      await sostituisci(`${rotta}/${id}/quote`, { quote: mia === 100 ? [] : [io] });
+      return;
+    }
+    const altroId = serve(conEff, 'Scegli con chi condividi', 'condivisione');
+    await salvaCondivisione(voce, id, true, altroId);
+    // Condivisa le quote vanno sempre scritte: senza, la divisione di base sarebbe metà e metà.
+    await sostituisci(`${rotta}/${id}/quote`, { quote: mia === 100 ? [io] : [io, { utente_id: altroId, percentuale: String(100 - mia) }] });
+  };
+  return { condiviso, divisione, setDivisione, miaQuota, setMiaQuota, conEff, bloccata, nomeAltro, persone, setCondiviso, setCon, salva };
+}
+
+// Il modulo, uno sotto l'altro: «Come la dividete» (No / Metà / Altra quota, con il campo % se «Altra quota»), lo switch di condivisione
+// (testo e switch sulla stessa riga) e la tendina «Con chi», disattivata finché lo switch è spento.
+export function SezioneDivisione({ stato, cosa, cifra, testoCondividi }: { stato: ReturnType<typeof useDivisione>; cosa: 'spesa' | 'budget'; cifra: string | null; testoCondividi: string }) {
+  const s = stato;
+  const lui = cosa === 'budget';
+  const nome = lui ? 'il budget' : 'la spesa';
+  const percentuale = s.divisione === 'no' ? 100 : s.divisione === 'meta' ? 50 : Number(s.miaQuota.replace(',', '.')) || 0;
+  const quota = cifra ? `La tua quota: ${euro((Number(cifra) * percentuale) / 100)}.` : undefined;
+  const grande = (x: string) => `${x.charAt(0).toUpperCase()}${x.slice(1)}`;
+  const nessuno = !!s.persone && s.persone.length === 0;
+  return (
+    <Riquadro titolo="Dividi e condividi" icona="users" nota={`Dividi ${nome} per contare solo la tua quota; condividi${lui ? 'lo' : 'la'} perché l'altra persona ${lui ? 'lo' : 'la'} veda e ${lui ? 'lo' : 'la'} possa modificare.`}>
+      <View style={{ gap: d['spazio-blocco'] }}>
+        <Voce etichetta="Come la dividete" aiuto={quota}>
+          <SceltaSegmenti etichetta="Come la dividete" larghezzaPiena valore={s.divisione} onCambia={s.setDivisione}
+            opzioni={[{ valore: 'no', testo: 'No' }, { valore: 'meta', testo: 'Metà' }, { valore: 'altra', testo: 'Altra quota' }]} />
+        </Voce>
+        {s.divisione === 'altra' ? <ConErrore campo="quota"><Campo etichetta="La tua quota in %" valore={s.miaQuota} onCambia={s.setMiaQuota} inputMode="decimal" /></ConErrore> : null}
+        <RigaCondividi testo={testoCondividi} acceso={s.condiviso} onCambia={s.setCondiviso} disattivato={nessuno}
+          aiuto={nessuno ? 'Non c\'è ancora nessun altro utente nel sistema.' : s.condiviso && s.nomeAltro ? `${grande(s.nomeAltro)} ${lui ? 'lo vede e lo può modificare' : 'la vede e la può modificare'}; solo tu puoi eliminar${lui ? 'lo' : 'la'}.` : lui ? 'Lo vedrà anche lei e potrà modificarlo.' : 'La vedrà anche lei e potrà spuntarla.'} />
+        <ConErrore campo="condivisione">
+          <Tendina etichetta="Con chi" valore={s.conEff} iconaPrima="user" disattivato={!s.condiviso || s.bloccata} onCambia={s.setCon} segnaposto="Scegli una persona"
+            opzioni={(s.persone ?? []).map((p) => ({ valore: p.id, testo: p.nome }))} />
+          {s.bloccata ? <Testo stile="dettaglio-normale" colore="testo-secondario">Per cambiare persona togli prima la condivisione.</Testo> : null}
+        </ConErrore>
+      </View>
     </Riquadro>
   );
 }

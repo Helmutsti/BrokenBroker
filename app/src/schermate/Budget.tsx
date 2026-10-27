@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Barra, Esito, Etichetta, Interruttore, Pulsante, PulsanteIcona, SceltaSegmenti, Tessera, type ToneAvanzamento } from '../componenti/base.tsx';
+import { Barra, Esito, Etichetta, Interruttore, Pulsante, PulsanteIcona, Tessera, type ToneAvanzamento } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
 import { ConfermaFinestra, Intestazione, NumeroChiave, RigaNumeri, Scheda, SelettorePeriodo, Vuoto } from '../componenti/composti.tsx';
-import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
+import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
-import type { Budget as VoceBudget, Condivisione, ElencoBudget, PersonaSistema, UscitaBudget } from '../dati/tipi.ts';
+import type { Budget as VoceBudget, ElencoBudget, UscitaBudget } from '../dati/tipi.ts';
 import { data, dataInTesto, dataOra, euro, importoInTesto, leggiData, leggiImporto, nomeMese, oggiIso } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento } from './comuni.tsx';
 import { FinestraMovimento } from './Movimenti.tsx';
-import { ConErrore, ErroreCampo, FinestraModulo, Riquadro, salvaCondivisione, serve, Voce } from './moduli.tsx';
+import { ConErrore, ErroreCampo, FinestraModulo, Riquadro, SezioneDivisione, serve, useDivisione, Voce } from './moduli.tsx';
 
 // Budget (decisioni 49, 51 e 57): uno per categoria, senza modi. Una cifra da tenere sotto controllo, non un limite: lo speso è tutto ciò che
 // esce con la categoria, da qualunque conto; se si sfora si conta tutto lo stesso, in rosso, con di quanto si è sforato. Le uscite si
@@ -174,60 +174,26 @@ function FinestraUscita({ budget, onChiudi }: { budget: VoceBudget | null; onChi
   );
 }
 
-const NON_SPECIFICATO = 'non-specificato';
 
 // Crea o cambia il budget di una categoria. Aperta da una categoria (categoriaId) la categoria è fissa; da «Nuovo budget» si sceglie tra
 // quelle senza budget. Cifra del mese, divisione e condivisione.
 export function FinestraBudget({ budget, categoriaId, aperta, onChiudi }: { budget: VoceBudget | null; categoriaId: string | null; aperta: boolean; onChiudi: () => void }) {
   const rif = useRiferimenti();
-  const miaCondivisione = useDati<Condivisione[]>(aperta && budget ? '/condivisioni' : null).dati?.find((x) => x.voce === 'budget' && x.voce_id === budget?.id && x.mia);
-  const persone = useDati<PersonaSistema[]>(aperta ? '/persone/tutte' : null).dati;
   const [categoria, setCategoria] = useState<string | null>(null);
   const [importo, setImporto] = useState('');
   const [attivo, setAttivo] = useState(true);
   const [note, setNote] = useState('');
-  const [diviso, setDiviso] = useState(false);
-  const [condiviso, setCondiviso] = useState(false);
-  const [con, setCon] = useState<string | null>(null);
-  const [divisione, setDivisione] = useState<'meta' | 'altra'>('meta');
-  const [miaQuota, setMiaQuota] = useState('50');
+  const div = useDivisione({ aperta, voce: 'budget', rotta: '/budget', origine: budget ? { id: budget.id, mia: budget.mia, condiviso: budget.condiviso, miaPercentuale: budget.mia_percentuale } : null });
   useEffect(() => {
     if (!aperta) return;
     const b = budget;
     setCategoria(b?.categoria_id ?? categoriaId); setImporto(importoInTesto(b?.importo));
     setAttivo(b?.attivo ?? true); setNote(b?.note ?? '');
-    setDiviso(!!b && (b.condiviso || (b.mia && b.mia_percentuale < 100))); setCondiviso(b?.condiviso ?? false); setCon(null);
-    setDivisione(!b || b.mia_percentuale === 50 || b.mia_percentuale === 100 ? 'meta' : 'altra'); setMiaQuota(String(b?.mia_percentuale ?? 50));
   }, [aperta, budget, categoriaId]);
 
   const senzaBudget = opzioniCategorie(rif.categorie, 'uscita').filter((o) => !rif.categoria(o.valore)?.budget);
   const fissa = !!budget || !!categoriaId;
   const cat = rif.categoria(categoria);
-  const conEff = con ?? miaCondivisione?.condiviso_con_id ?? (budget && !budget.condiviso && budget.mia_percentuale < 100 ? NON_SPECIFICATO : null) ?? (persone?.length === 1 ? persone[0].id : persone?.length === 0 ? NON_SPECIFICATO : null);
-  const nonSpec = conEff === NON_SPECIFICATO;
-  const bloccata = !!budget?.condiviso && condiviso;
-  const nomeAltro = persone?.find((p) => p.id === conEff)?.nome ?? 'l’altra persona';
-  const valoreTetto = leggiImporto(importo);
-  const accendiDivisione = (v: boolean) => { setDiviso(v); if (v && !budget?.condiviso) setCondiviso(true); if (!v) setCondiviso(false); };
-
-  const dividi = async (id: string) => {
-    if (!diviso) {
-      await salvaCondivisione('budget', id, false, null);
-      await sostituisci(`/budget/${id}/quote`, { quote: [] });
-      return;
-    }
-    const altroId = nonSpec ? null : serve(conEff, 'Scegli con chi lo dividi', 'divisione');
-    const mia = divisione === 'meta' ? 50 : Number(miaQuota.replace(',', '.'));
-    if (!(mia > 0 && mia < 100)) serve(null, 'La tua quota deve essere tra 1 e 99%', 'quota');
-    if (!altroId) {
-      await salvaCondivisione('budget', id, false, null);
-      await sostituisci(`/budget/${id}/quote`, { quote: [{ utente_id: rif.profilo!.id, percentuale: String(mia) }] });
-      return;
-    }
-    await salvaCondivisione('budget', id, condiviso, altroId);
-    await sostituisci(`/budget/${id}/quote`, { quote: [{ utente_id: rif.profilo!.id, percentuale: String(mia) }, { utente_id: altroId, percentuale: String(100 - mia) }] });
-  };
-
   const salva = async () => {
     const tetto = serve(leggiImporto(importo), 'Scrivi la cifra del mese, es. 250,00', 'importo');
     if (Number(tetto) <= 0) throw new ErroreCampo('importo', 'La cifra deve essere positiva');
@@ -235,11 +201,11 @@ export function FinestraBudget({ budget, categoriaId, aperta, onChiudi }: { budg
     if (budget) {
       await modifica(`/budget/${budget.id}`, corpo);
       if (!budget.mia) return; // la divisione la decide chi l'ha creato
-      await dividi(budget.id);
+      await div.salva(budget.id);
       return;
     }
     const nuovo = await crea<VoceBudget>('/budget', { ...corpo, categoria_id: serve(categoria, 'Scegli la categoria', 'categoria') });
-    await dividi(nuovo.id);
+    await div.salva(nuovo.id);
   };
 
   return (
@@ -267,31 +233,8 @@ export function FinestraBudget({ budget, categoriaId, aperta, onChiudi }: { budg
       <Riquadro titolo="Cosa conta" nota="Vale per tutto il mese: non serve una data.">
         <Testo stile="dettaglio-normale" colore="testo-secondario">Conta tutto ciò che esce con questa categoria, da qualunque conto: le uscite che aggiungi dalla pagina Budget (per qualunque budget) e le spese previste spuntate. Il conto non è legato alla categoria.</Testo>
       </Riquadro>
-      {!budget || budget.mia ? (
-        <Riquadro titolo="Dividi il budget con qualcuno" icona="users" nota={diviso ? 'Scegli con chi e come lo dividete: nei tuoi conti conta solo la tua quota.' : 'Accendi se il budget è in due: conta solo la tua quota.'}
-          interruttore={<Interruttore acceso={diviso} onCambia={accendiDivisione} etichetta="Dividi il budget con qualcuno" />}>
-          {diviso ? (
-            <>
-              <ConErrore campo="divisione"><Tendina etichetta="Con chi" valore={conEff} iconaPrima="user" disattivato={bloccata} onCambia={(x) => { setCon(x); if (x === NON_SPECIFICATO) setCondiviso(false); }} segnaposto="Scegli una persona"
-                opzioni={[{ valore: NON_SPECIFICATO, testo: 'Non specificato' }, ...(persone ?? []).map((p) => ({ valore: p.id, testo: p.nome }))]} />
-                {bloccata ? <Testo stile="dettaglio-normale" colore="testo-secondario">Per cambiare persona spegni prima la condivisione.</Testo> : null}</ConErrore>
-              <Voce etichetta="Come lo dividete" aiuto={`La tua quota: ${valoreTetto ? euro((Number(valoreTetto) * (divisione === 'meta' ? 50 : Number(miaQuota) || 0)) / 100) : '—'}.`}>
-                <SceltaSegmenti etichetta="Come lo dividete" larghezzaPiena valore={divisione} onCambia={setDivisione} opzioni={[{ valore: 'meta', testo: 'A metà' }, { valore: 'altra', testo: 'Altra quota' }]} />
-              </Voce>
-              {divisione === 'altra' ? <ConErrore campo="quota"><Campo etichetta="La tua quota in %" valore={miaQuota} onCambia={setMiaQuota} inputMode="decimal" /></ConErrore> : null}
-              {nonSpec ? null : (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-                  <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-                    <Testo stile="corpo-forte">{`Condividi anche con ${nomeAltro}`}</Testo>
-                    <Testo stile="dettaglio-normale" colore="testo-secondario">{condiviso ? `${nomeAltro.charAt(0).toUpperCase()}${nomeAltro.slice(1)} lo vede e lo può modificare; solo tu puoi eliminarlo.` : 'Spento: il budget lo vedi solo tu.'}</Testo>
-                  </View>
-                  <Interruttore acceso={condiviso} onCambia={setCondiviso} etichetta={`Condividi anche con ${nomeAltro}`} />
-                </View>
-              )}
-            </>
-          ) : null}
-        </Riquadro>
-      ) : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condiviso con te: la tua quota è ${budget.mia_percentuale}%. Può cambiarla solo chi l'ha creato.`}</Testo>}
+      {!budget || budget.mia ? <SezioneDivisione stato={div} cosa="budget" cifra={leggiImporto(importo)} testoCondividi="Condividi questo budget con un'altra persona" />
+      : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condiviso con te: la tua quota è ${budget.mia_percentuale}%. Può cambiarla solo chi l'ha creato.`}</Testo>}
       <Campo etichetta="Note (facoltative)" valore={note} onCambia={setNote} />
     </FinestraModulo>
   );

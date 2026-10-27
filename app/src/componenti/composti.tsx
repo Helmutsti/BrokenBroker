@@ -7,6 +7,7 @@ import { d, Testo, useTema } from '../tema/tema.tsx';
 import { coloriCategorie, ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
 import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
 import { Icona } from './Icona.tsx';
+import { LogoApp } from './LogoApp.tsx';
 
 // Componenti composti (CMP-20 … CMP-40). I contenitori hanno padding e gap
 // dal ruolo; i contenuti no.
@@ -30,7 +31,10 @@ export function BarraLaterale({ voci, attiva, onNaviga, profilo, onProfilo, onEs
   };
   return (
     <View accessibilityRole="navigation" style={{ width: d['larghezza-barra-laterale'], padding: d['margine-barra-laterale'], gap: d['spazio-gruppo'], backgroundColor: c['sfondo-barra-laterale'], alignSelf: 'stretch' }}>
-      <Testo stile="logo">BrokenBroker</Testo>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+        <LogoApp misura={32} />
+        <Testo stile="logo">BrokenBroker</Testo>
+      </View>
       <View style={{ gap: d['spazio-elenco'] }}>{voci.map((v) => voce(v, () => onNaviga(v.chiave)))}</View>
       <View style={{ flex: 1 }} />
       <View style={{ gap: d['spazio-elenco'] }}>
@@ -128,6 +132,7 @@ export function TestataCompatta({ profilo, impostazioniAttive, onProfilo, onEsci
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingHorizontal: 16, paddingVertical: 6, paddingTop: 'max(6px, env(safe-area-inset-top))',
       backgroundColor: c['sfondo-barra-laterale'], borderBottomWidth: d['misura-bordo'], borderBottomColor: c['bordo-separatore'] } as object}>
+      <LogoApp misura={28} />
       <Testo stile="logo" style={{ flex: 1, fontSize: 18 }} numberOfLines={1}>BrokenBroker</Testo>
       <View style={{ borderRadius: d['raggio-controllo'], backgroundColor: impostazioniAttive ? c['sfondo-accento-tenue'] : 'transparent' }}>
         <PulsanteIcona icona="sliders-horizontal" etichetta="Impostazioni" fantasma onPress={onProfilo} />
