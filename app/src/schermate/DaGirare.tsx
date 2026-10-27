@@ -16,7 +16,8 @@ export function DaGirareAiConti() {
   const rate = useDati<Rata[]>(`/rate?mese=${mese}`).dati ?? [];
   if (!spese || !profilo) return null;
 
-  const { delConto } = vociDelMese(spese);
+  // I budget non sono sui conti (decisione 47 E): non entrano qui.
+  const delConto = vociDelMese(spese).delConto.filter((s) => s.tipo !== 'budget');
   const rateMese = rateDelMese(rate, spese.periodo.dal, spese.periodo.al);
   const perConto = new Map<string, { daUscire: number; inTutto: number }>();
   const aggiungi = (nome: string | null, importo: number, spuntata: boolean) => {
@@ -27,17 +28,25 @@ export function DaGirareAiConti() {
   };
   for (const s of delConto) aggiungi(s.conto, importoDelMese(s), !!s.uscita);
   for (const x of rateMese) aggiungi(rif.conti.find((k) => k.id === x.r.conto_id)?.nome ?? null, Number(x.r.importo_rata), !!x.r.pagata);
+  // Quanto c'è ora su ogni conto (saldo attuale, decisione 47): si confronta con quello che serve ancora.
+  const saldoDi = (nome: string) => { const c = rif.conti.find((k) => k.nome === nome && !k.archiviato); return c && c.saldo !== null ? Number(c.saldo) : null; };
   const girate = [...perConto.entries()].sort(([na, a], [nb, b]) => b.daUscire - a.daUscire || na.localeCompare(nb, 'it'));
   const daSpuntare = delConto.filter((s) => !s.uscita).length + rateMese.filter((x) => !x.r.pagata).length;
   const devonoUscire = delConto.filter((s) => !s.uscita).reduce((t, s) => t + importoDelMese(s), 0)
     + rateMese.filter((x) => !x.r.pagata).reduce((t, x) => t + Number(x.r.importo_rata), 0);
 
   return (
-    <Scheda titolo="Quanto mettere su ogni conto" icona="landmark" nota="Quanto serve su ogni conto per le voci non ancora spuntate del mese">
+    <Scheda titolo="Quanto mettere su ogni conto" icona="landmark" nota="Quanto serve su ogni conto per le voci non ancora spuntate del mese, rispetto al saldo di oggi. I budget non sono sui conti.">
       <View style={{ gap: d['spazio-elenco'] }}>
         {girate.map(([nome, v]) => (
           <View key={nome} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
-            <Testo style={{ flex: 1 }}>{nome}</Testo>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Testo>{nome}</Testo>
+              {saldoDi(nome) !== null ? (
+                <Testo stile="dettaglio-normale" colore={saldoDi(nome)! < v.daUscire ? 'testo-attenzione' : 'testo-secondario'}>
+                  {`ora ${euro(saldoDi(nome))}${v.daUscire > 0.005 ? (saldoDi(nome)! < v.daUscire ? ` · mancano ${euro(v.daUscire - saldoDi(nome)!)}` : ' · basta') : ''}`}</Testo>
+              ) : null}
+            </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Testo stile="corpo-forte">{euro(v.daUscire)}</Testo>
               <Testo stile="dettaglio-normale" colore="testo-secondario">{`su ${euro(v.inTutto)} in tutto`}</Testo>

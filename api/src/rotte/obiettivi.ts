@@ -3,6 +3,7 @@ import { Router } from 'express';
 import type { PoolClient } from 'pg';
 import { bloccoObiettivo, erroreObiettivoBloccato, vietaCampi, vietaPromemoria, sqlBloccoObiettivo, type Blocco } from '../collegamenti.ts';
 import { conUtente } from '../db.ts';
+import { registraMovimento } from '../movimenti.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { inizioMese, meseDi, mesiFino, oggi, periodoRichiesto, prossimaUscita } from '../periodo.ts';
 import { speseDelMese } from '../spese.ts';
@@ -272,13 +273,23 @@ rotteObiettivi.delete('/:id/promemoria', async (req, res) => {
 });
 
 // Versamenti: importo positivo = metto via, negativo = prelevo.
+// `conto_id` (facoltativo, decisione 47 G): i soldi vengono dal conto (importo positivo: movimento negativo sul conto) o tornano
+// sul conto (importo negativo: movimento positivo), nella stessa transazione e legati al versamento; senza `conto_id` sono
+// «soldi nuovi» / «escono». Non si può unire a `da_liberi`. Con `conto_id` la data non può cadere in un mese passato.
 rotteObiettivi.post('/:id/versamenti', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
   const importo = v.importo(c, 'importo', true)!;
   if (Number(importo) === 0) throw new ErroreApi(400, "L'importo non può essere zero");
+  const contoId = v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')) ?? null;
+  if (contoId && v.booleano(c, 'da_liberi')) throw new ErroreApi(400, 'I soldi vengono dal conto oppure dai liberi del salvadanaio superiore, non da tutti e due');
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
     if (!(await db.query('select 1 from obiettivi where id = $1', [id])).rowCount) throw nonTrovato('Obiettivo');
+    if (contoId) {
+      if (!(await db.query('select 1 from conti where id = $1', [contoId])).rowCount) throw nonTrovato('Conto');
+      const dataScelta = v.data(c, 'data');
+      if (dataScelta && dataScelta < (await periodoRichiesto(db, undefined)).dal) throw new ErroreApi(409, 'Il passato non si cambia: non si può spostare denaro dal conto in un mese passato');
+    }
     // "Aggiungi quota mensile": il versamento spunta anche il promemoria del mese, se c'è e non è già spuntato.
     let spuntaId: string | null = null;
     if (v.booleano(c, 'promemoria')) {
@@ -291,9 +302,18 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
       }
     }
     const data = v.data(c, 'data') ?? null;
-    const inserisci = (obiettivoId: string, x: string, spunta: string | null, spostamento: string | null) => db.query(
-      'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id, spostamento_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4, $5)',
-      [obiettivoId, data, x, spunta, spostamento]);
+    const inserisci = async (obiettivoId: string, x: string, spunta: string | null, spostamento: string | null): Promise<string> => {
+      const versamentoId = (await db.query<{ id: string }>(
+        'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id, spostamento_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4, $5) returning id',
+        [obiettivoId, data, x, spunta, spostamento])).rows[0].id;
+      // Dal conto: il movimento opposto, legato a questo versamento (se il versamento sparisce, sparisce anche lui).
+      if (contoId) {
+        const nome = (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [obiettivoId])).rows[0].nome;
+        await registraMovimento(db, { conto_id: contoId, importo: -Number(x), causa: 'versamento', versamento_id: versamentoId,
+          descrizione: Number(x) > 0 ? `Versato in ${nome}` : `Tornato da ${nome}` });
+      }
+      return versamentoId;
+    };
     if (v.booleano(c, 'da_liberi')) {
       // Spostamento (decisione 46): i soldi passano tra i liberi del salvadanaio superiore e questo sotto-salvadanaio,
       // il totale del superiore non cambia. Importo positivo = dai liberi al sotto-salvadanaio, negativo = dal sotto-salvadanaio ai liberi.
@@ -329,6 +349,10 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
 rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
+    // Un versamento che ha mosso il conto si annulla (insieme al suo movimento) solo nel mese in corso: il passato non si cambia.
+    const mosso = (await db.query<{ data: string; con_conto: boolean }>(
+      'select x.data, exists (select 1 from movimenti_conto m where m.versamento_id = x.id) as con_conto from versamenti x where x.id = $1', [id])).rows[0];
+    if (mosso?.con_conto && mosso.data < (await periodoRichiesto(db, undefined)).dal) throw new ErroreApi(409, 'Il passato non si cambia: un versamento fatto dal conto in un mese passato non si annulla più');
     const eliminato = (await db.query<{ spunta: string | null; spostamento: string | null }>('delete from versamenti where id = $1 returning promemoria_spunta_id as spunta, spostamento_id as spostamento', [id])).rows[0];
     if (eliminato) {
       if (eliminato.spunta) await db.query('delete from spunte where id = $1', [eliminato.spunta]);

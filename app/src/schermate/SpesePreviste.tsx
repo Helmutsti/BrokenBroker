@@ -237,7 +237,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
       senzaGiorno = g === null;
     } else if (g !== null) serve(null, 'Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese', 'scadenza');
     else serve(null, 'Scegli almeno il mese in cui esce: da lì si ripete', 'scadenza');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 && tipo !== 'budget' ? g : null, tipo, conto_id: conto, categoria_id: categoria,
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 && tipo !== 'budget' ? g : null, tipo, conto_id: tipo === 'budget' ? null : conto, categoria_id: categoria,
       ...(scollega ? { obiettivo_id: null } : {}), note: note.trim() || null, attiva };
     if (salv === 'crea' && !spesa?.obiettivo_id) {
       if (doveEff === 'sotto' && !padreEff) serve(null, 'Scegli sotto quale salvadanaio metterlo', 'padre');
@@ -329,7 +329,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
           </View>
         </View>
       </Riquadro>
-      <Riquadro titolo="Regole di uscita" nota={tipo === 'budget' ? 'Un budget vale per tutto il mese: non serve una data. Scegli solo il conto da cui paghi.' : 'Ogni quanto si ripete, in quale giorno o mese esce e da quale conto.'}>
+      <Riquadro titolo="Regole di uscita" nota={tipo === 'budget' ? 'Un budget vale per tutto il mese: non serve una data né un conto.' : 'Ogni quanto si ripete, in quale giorno o mese esce e da quale conto.'}>
         {tipo === 'budget' ? null : (
           <>
             <Voce etichetta="Ogni quanto esce">
@@ -357,7 +357,9 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
             </View>
           </>
         )}
-        <Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} />
+        {tipo === 'budget'
+          ? <Testo stile="dettaglio-normale" colore="testo-secondario">Il budget è legato alla categoria, non a un conto: spuntarlo non muove il saldo di nessun conto, resta un promemoria.</Testo>
+          : <Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} />}
       </Riquadro>
       {bloc || (spesa && !spesa.mia) ? null : generato ? (
         <Riquadro titolo="Salvadanaio" nota="Metti da parte i soldi per questa spesa.">

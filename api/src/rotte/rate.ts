@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
+import { annullaSpunta, importoSulConto, registraMovimento, vietaMesePassato } from '../movimenti.ts';
 import { mesiTra, oggi, periodoRichiesto } from '../periodo.ts';
 import { leggiRate, scadenzaRata } from '../rate.ts';
 import * as v from '../valida.ts';
@@ -40,12 +41,14 @@ rotteRate.get('/', async (req, res) => {
   }));
 });
 
-// La spunta "pagata" è solo un segno nel mese, come per le spese previste.
+// La spunta "pagata" muove il saldo del conto della rata (decisione 47): movimento negativo della rata (conto condiviso o no, esce la rata).
+// I mesi precedenti a quello in corso non si cambiano più.
 rotteRate.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
   const spunta = await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, c.mese);
+    await vietaMesePassato(db, p);
     const [r] = await leggiRate(db, id);
     if (!r) throw nonTrovato('Rata');
     const scadenza = scadenzaRata(r, p);
@@ -54,7 +57,12 @@ rotteRate.post('/:id/spunta', async (req, res) => {
     if (gia.rowCount) throw new ErroreApi(409, 'Questa rata è già pagata in questo mese');
     const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : scadenza);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
-    return (await db.query('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
+    const spunta = (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
+    if (r.conto_id) {
+      const sulConto = await importoSulConto(db, r.conto_id, Number(r.importo_rata), Number(r.importo_rata));
+      if (sulConto !== null) await registraMovimento(db, { conto_id: r.conto_id, importo: -sulConto, causa: 'rata', spunta_id: spunta.id, descrizione: r.oggetto });
+    }
+    return spunta;
   });
   res.status(201).json(spunta);
 });
@@ -63,8 +71,11 @@ rotteRate.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
-    const tolte = (await db.query('delete from spunte where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount ?? 0;
-    if (!tolte) throw nonTrovato('Spunta');
+    await vietaMesePassato(db, p);
+    const spunte = (await db.query<{ id: string }>('select id from spunte where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rows;
+    if (!spunte.length) throw nonTrovato('Spunta');
+    for (const x of spunte) await annullaSpunta(db, x.id);
+    await db.query('delete from spunte where rata_id = $1 and data between $2 and $3', [id, p.dal, p.al]);
   });
   res.status(204).end();
 });

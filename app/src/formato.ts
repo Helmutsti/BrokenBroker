@@ -99,6 +99,15 @@ export function leggiData(testo: string): string | null {
   if (dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== g) return null;
   return `${a}-${String(m).padStart(2, '0')}-${String(g).padStart(2, '0')}`;
 }
+// Data e ora di un momento (ISO con fuso): «27/10 alle 14:35», nel fuso di chi guarda.
+export function dataOra(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return '';
+  const due = (n: number) => String(n).padStart(2, '0');
+  return `${due(t.getDate())}/${due(t.getMonth() + 1)} alle ${due(t.getHours())}:${due(t.getMinutes())}`;
+}
+
 export const dataInTesto = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '');
 
 export const percento = (v: number | null | undefined) => (v === null || v === undefined ? '—' : `${numero(v, Number.isInteger(v) ? 0 : 1)}%`);

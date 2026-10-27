@@ -137,12 +137,14 @@ const contoDaCondividere = (await r('POST', '/conti', A, { nome: 'Conto in due' 
 verifica((await r('POST', '/condivisioni', A, { voce: 'conto', id: contoDaCondividere.id, utente_id: '00000000-0000-4000-8000-000000000000' })).s === 404, 'utente_id sconosciuto 404');
 verifica((await r('POST', '/condivisioni', A, { voce: 'conto', id: contoDaCondividere.id, utente_id: b.utente_id })).s === 201, 'condivisione con utente_id');
 
-// "Sul conto oggi" per conto: un saldo per persona, privato anche sul conto condiviso
+// Saldo del conto (decisione 47): UNO per conto, uguale per tutte le persone che lo vedono
 const sc1 = await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: '1250.40' });
-verifica(sc1.s === 200 && sc1.j.saldo === '1250.40' && /^\d{4}-\d{2}-\d{2}/.test(sc1.j.saldo_al), 'saldo del conto scritto', sc1.j);
-verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, Bt, { importo: '-20' })).j.saldo === '-20.00', 'saldo dell\'altra persona sullo stesso conto');
-verifica((await r('GET', '/conti', A)).j.find((x) => x.id === contoDaCondividere.id).saldo === '1250.40', 'il saldo di A non cambia con quello di B');
+verifica(sc1.s === 200 && sc1.j.saldo === '1250.40' && sc1.j.saldo_partenza === '1250.40' && /^\d{4}-\d{2}-\d{2}T/.test(sc1.j.saldo_partenza_il), 'saldo del conto scritto', sc1.j);
+verifica((await r('GET', '/conti', Bt)).j.find((x) => x.id === contoDaCondividere.id).saldo === '1250.40', 'conto condiviso: B vede lo stesso saldo di A');
+verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, Bt, { importo: '-20' })).j.saldo === '-20.00', 'B riscrive il saldo del conto condiviso');
+verifica((await r('GET', '/conti', A)).j.find((x) => x.id === contoDaCondividere.id).saldo === '-20.00', 'conto condiviso: il saldo scritto da B è anche quello di A');
 verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: 'abc' })).s === 400, 'saldo non valido rifiutato');
+verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: '5', momento: new Date(Date.now() + 3600e3).toISOString() })).s === 400, 'saldo nel futuro rifiutato');
 verifica((await r('PUT', `/conti/${conto.id}/saldo`, Bt, { importo: '5' })).s === 404, 'saldo di un conto non visibile: 404');
 verifica((await r('PUT', `/conti/${contoDaCondividere.id}/saldo`, A, { importo: null })).j.saldo === null, 'saldo del conto tolto');
 
@@ -534,6 +536,194 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   const liberiOra = Number((await dammi(sc.id)).versato);
   const coppia = await Promise.all([ass.id, bollo.id].map((x) => r('POST', `/obiettivi/${x}/versamenti`, A, { importo: String(liberiOra - 10), da_liberi: true })));
   verifica(coppia.filter((x) => x.s === 201).length === 1 && coppia.filter((x) => x.s === 400).length === 1 && Number((await dammi(sc.id)).versato) === 10, 'spostamenti insieme: uno solo passa, i liberi non vanno sotto zero', coppia.map((x) => x.s));
+}
+
+
+// ---- Il saldo dei conti si muove con spese e salvadanai (decisione 47) ----
+{
+  const sposta = (m, k) => { const [y, mm] = m.split('-').map(Number); const t = y * 12 + mm - 1 + k; return `${Math.floor(t / 12)}-${String(t % 12 + 1).padStart(2, '0')}`; };
+  const meseA = (await r('GET', '/spese-previste', A)).j.periodo.mese, meseB = (await r('GET', '/spese-previste', Bt)).j.periodo.mese;
+  const saldoDi = async (id, T = A) => (await r('GET', '/conti', T)).j.find((x) => x.id === id)?.saldo;
+  const movs = async (id, T = A) => (await r('GET', `/conti/${id}/movimenti?limite=100`, T)).j;
+  const mk = async (T, corpo) => (await r('POST', '/spese-previste', T, { importo: '10', ...corpo })).j;
+  const spuntaA = (id, mese = meseA) => r('POST', `/spese-previste/${id}/spunta`, A, { mese });
+  const togliA = (id, mese = meseA) => r('DELETE', `/spese-previste/${id}/spunta?mese=${mese}`, A);
+  const scrivi = (id, importo, T = A, extra = {}) => r('PUT', `/conti/${id}/saldo`, T, { importo, ...extra });
+  const piatti = (xs) => xs.flatMap((o) => [o, ...piatti(o.figli)]);
+  const goal = async (id) => piatti((await r('GET', '/obiettivi', A)).j).find((o) => o.id === id);
+  const condividi = async (spesaId, pctA) => {
+    await r('POST', '/condivisioni', A, { voce: 'spesa', id: spesaId, utente_id: b.utente_id });
+    await r('PUT', `/spese-previste/${spesaId}/quote`, A, { quote: [{ utente_id: a.utente_id, percentuale: String(pctA) }, { utente_id: b.utente_id, percentuale: String(100 - pctA) }] });
+  };
+
+  // A. Saldo di partenza + movimenti registrati dopo
+  const cA = (await r('POST', '/conti', A, { nome: 'Saldo prova' })).j;
+  verifica(cA.saldo === null && cA.saldo_partenza === null && cA.saldo_aggiornato_il === null, 'conto nuovo: nessun saldo');
+  await scrivi(cA.id, '1000');
+  const X = await mk(A, { nome: 'Spesa X', importo: '100', conto_id: cA.id });
+  const sX = await spuntaA(X.id);
+  verifica(sX.s === 201 && await saldoDi(cA.id) === '900.00', 'C: spesa sul tuo conto, non condivisa: esce l\'importo intero', sX.j);
+  let mv = await movs(cA.id);
+  verifica(mv.length === 1 && mv[0].importo === '-100.00' && mv[0].descrizione === 'Spesa X' && mv[0].causa === 'spesa' && mv[0].conta === true && mv[0].utente === 'Anna' && /^\d{4}-\d{2}-\d{2}$/.test(mv[0].data), 'movimento della spunta: importo, causa leggibile, chi, conta', mv);
+  verifica((await togliA(X.id)).s === 204 && await saldoDi(cA.id) === '1000.00' && (await movs(cA.id)).length === 0, 'togliere la spunta: il movimento sparisce, i soldi tornano');
+  // Riscrivere il saldo: i movimenti prima di quel momento sono già nel saldo scritto e non si contano due volte.
+  await spuntaA(X.id);
+  const riscritto = await scrivi(cA.id, '880');
+  verifica(riscritto.j.saldo === '880.00' && (await movs(cA.id))[0].conta === false, 'saldo riscritto dopo la spunta: vale quello scritto, il movimento di prima non si conta', riscritto.j);
+  const Y = await mk(A, { nome: 'Spesa Y', importo: '30', conto_id: cA.id });
+  await spuntaA(Y.id);
+  verifica(await saldoDi(cA.id) === '850.00', 'un movimento dopo il saldo scritto si conta');
+  await togliA(X.id);
+  verifica(await saldoDi(cA.id) === '850.00', 'togliere una spunta fatta prima del saldo scritto non lo cambia');
+  await scrivi(cA.id, '500', A, { momento: new Date(Date.now() - 3600e3).toISOString() });
+  verifica(await saldoDi(cA.id) === '470.00', 'saldo scritto con un momento nel passato: contano i movimenti fatti dopo quel momento');
+  await scrivi(cA.id, '500');
+  verifica(await saldoDi(cA.id) === '500.00', 'riscrivere il saldo adesso: riallineato alla banca');
+  const agg = (await r('GET', '/conti', A)).j.find((x) => x.id === cA.id);
+  verifica(agg.saldo_partenza === '500.00' && agg.saldo_aggiornato_il >= agg.saldo_partenza_il, 'saldo_partenza e aggiornato_il', agg);
+  await togliA(Y.id);
+
+  // C. I tre casi: conto solo tuo + spesa condivisa (la tua quota); conto condiviso (intero)
+  const split = await mk(A, { nome: 'Divisa 60', importo: '200', conto_id: cA.id });
+  await condividi(split.id, 60);
+  await spuntaA(split.id);
+  verifica(await saldoDi(cA.id) === '380.00', 'C: conto solo tuo, spesa condivisa 60/40: esce solo la tua quota (120)', await saldoDi(cA.id));
+  await togliA(split.id);
+  const cS = contoDaCondividere;
+  await scrivi(cS.id, '1000');
+  const sola = await mk(A, { nome: 'Sola 80', importo: '80', conto_id: cS.id });
+  const divisa = await mk(A, { nome: 'Divisa su conto in due', importo: '200', conto_id: cS.id });
+  await condividi(divisa.id, 50);
+  await spuntaA(sola.id); await spuntaA(divisa.id);
+  verifica(await saldoDi(cS.id) === '720.00' && await saldoDi(cS.id, Bt) === '720.00', 'C: conto condiviso: esce l\'importo intero (80 + 200), stesso saldo per entrambi', [await saldoDi(cS.id), await saldoDi(cS.id, Bt)]);
+  verifica((await movs(cS.id, Bt)).length === 2 && (await movs(cS.id, Bt))[0].utente === 'Anna', 'B vede i movimenti del conto condiviso');
+  verifica((await r('DELETE', `/spese-previste/${divisa.id}/spunta?mese=${meseB}`, Bt)).s === 204, 'B toglie la spunta di A');
+  verifica(await saldoDi(cS.id) === '920.00' && await saldoDi(cS.id, Bt) === '920.00', 'togliendo la spunta il movimento sparisce anche se a spuntare era stata l\'altra persona');
+  verifica((await r('GET', `/conti/${cA.id}/movimenti`, Bt)).s === 404, 'i movimenti di un conto non visibile: 404');
+  // Conto solo di A, spesa condivisa con B: B non vede il conto, spunta senza muovere nulla
+  const perB = await mk(A, { nome: 'Per B', importo: '100', conto_id: cA.id });
+  await condividi(perB.id, 50);
+  const sB = await r('POST', `/spese-previste/${perB.id}/spunta`, Bt, { mese: meseB });
+  verifica(sB.s === 201 && await saldoDi(cA.id) === '500.00', 'B spunta una spesa su un conto che non vede: nessun movimento', sB.j);
+  await r('DELETE', `/spese-previste/${perB.id}/spunta?mese=${meseB}`, Bt);
+
+  // Rate: stessa regola
+  const rata = (await r('POST', '/rate', A, { oggetto: 'Rata prova', importo_rata: '50', numero_rate: 6, prima_scadenza: `${meseA}-15`, conto_id: cA.id })).j;
+  const sr = await r('POST', `/rate/${rata.id}/spunta`, A, { mese: meseA });
+  mv = await movs(cA.id);
+  verifica(sr.s === 201 && await saldoDi(cA.id) === '450.00' && mv[0].causa === 'rata' && mv[0].descrizione === 'Rata prova', 'rata con conto: movimento negativo', [sr.j, mv[0]]);
+  verifica((await r('DELETE', `/rate/${rata.id}/spunta?mese=${meseA}`, A)).s === 204 && await saldoDi(cA.id) === '500.00', 'rata: togliendo la spunta i soldi tornano');
+
+  // D. Il passato non si cambia
+  const passato = sposta(meseA, -1), futuro = sposta(meseA, 1);
+  verifica((await spuntaA(X.id, passato)).s === 409, 'D: spunta in un mese passato: 409');
+  verifica((await togliA(X.id, passato)).s === 409, 'D: togliere una spunta di un mese passato: 409');
+  verifica((await r('POST', `/rate/${rata.id}/spunta`, A, { mese: passato })).s === 409 && (await r('DELETE', `/rate/${rata.id}/spunta?mese=${passato}`, A)).s === 409, 'D: rate nei mesi passati: 409');
+  verifica((await spuntaA(X.id, futuro)).s === 201 && (await togliA(X.id, futuro)).s === 204, 'D: un mese futuro si può ancora spuntare e togliere');
+  verifica(await saldoDi(cA.id) === '500.00', 'D: nessun cambiamento di saldo dai 409 e dal mese futuro rimesso a posto');
+
+  // E. Budget: nessun conto, la spunta non muove il saldo
+  const bud = await mk(A, { nome: 'Budget prova', tipo: 'budget', importo: '300', conto_id: cA.id, categoria_id: cibo.id });
+  verifica(bud.conto_id === null && bud.categoria_id === cibo.id, 'E: un budget non ha conto, ha la categoria', bud);
+  verifica((await r('PATCH', `/spese-previste/${bud.id}`, A, { conto_id: cA.id })).j.conto_id === null, 'E: il conto di un budget non si imposta');
+  const sbud = await spuntaA(bud.id);
+  verifica(sbud.s === 201 && await saldoDi(cA.id) === '500.00' && (await movs(cA.id)).filter((x) => x.descrizione === 'Budget prova').length === 0, 'E: la spunta di un budget non muove il saldo', sbud.j);
+  await togliA(bud.id);
+  const diventa = await mk(A, { nome: 'Fissa che diventa budget', conto_id: cA.id });
+  verifica(diventa.conto_id === cA.id && (await r('PATCH', `/spese-previste/${diventa.id}`, A, { tipo: 'budget' })).j.conto_id === null, 'E: da fissa a budget il conto viene tolto');
+
+  // F. Annuali con salvadanaio: la quota del mese passa dal conto al salvadanaio
+  const an = await mk(A, { nome: 'Assicurazione prova', importo: '1200', ogni_mesi: 12, prossima_scadenza: `${sposta(meseA, 5)}-15`, conto_id: cA.id, nuovo_salvadanaio: {} });
+  verifica(an.obiettivo_id, 'annuale con salvadanaio creato dalla spesa', an);
+  const sAn = await spuntaA(an.id);
+  const gAn = await goal(an.obiettivo_id);
+  mv = await movs(cA.id);
+  verifica(sAn.s === 201 && await saldoDi(cA.id) === '400.00' && Number(gAn.saldo) === 100 && mv[0].importo === '-100.00' && mv[0].causa === 'versamento' && mv[0].descrizione.startsWith('Versato in Assicurazione prova'),
+    'F: la spunta sposta la quota (1200/12) dal conto al salvadanaio', [sAn.j, gAn.saldo, mv[0]]);
+  verifica((await togliA(an.id)).s === 204 && await saldoDi(cA.id) === '500.00' && Number((await goal(an.obiettivo_id)).saldo) === 0 && (await movs(cA.id)).length === mv.length - 1, 'F: togliendo la spunta tornano entrambi (conto e salvadanaio)');
+  await spuntaA(an.id);
+  verifica((await r('DELETE', `/spese-previste/${an.id}`, A)).s === 204 && await saldoDi(cA.id) === '400.00' && Number((await goal(an.obiettivo_id)).saldo) === 100, 'F: eliminare la spesa non fa sparire i soldi già messi da parte né il movimento');
+  const senzaConto = await mk(A, { nome: 'Bollo prova', importo: '240', ogni_mesi: 12, prossima_scadenza: `${sposta(meseA, 5)}-20`, nuovo_salvadanaio: {} });
+  await spuntaA(senzaConto.id);
+  verifica(Number((await goal(senzaConto.obiettivo_id)).saldo) === 20 && await saldoDi(cA.id) === '400.00', 'F: senza conto solo il versamento nel salvadanaio (soldi nuovi)');
+  await togliA(senzaConto.id);
+  verifica(Number((await goal(senzaConto.obiettivo_id)).saldo) === 0, 'F: senza conto, togliendo la spunta il versamento sparisce');
+  const senzaSalv = await mk(A, { nome: 'Tari prova', importo: '120', ogni_mesi: 12, prossima_scadenza: `${sposta(meseA, 4)}-20`, conto_id: cA.id });
+  await spuntaA(senzaSalv.id);
+  verifica(await saldoDi(cA.id) === '390.00', 'annuale con conto e senza salvadanaio: esce la quota messa da parte (120/12)');
+  await togliA(senzaSalv.id);
+  const anDiv = await mk(A, { nome: 'Annuale divisa', importo: '1200', ogni_mesi: 12, prossima_scadenza: `${sposta(meseA, 6)}-20`, conto_id: cA.id });
+  await condividi(anDiv.id, 50);
+  await spuntaA(anDiv.id);
+  verifica(await saldoDi(cA.id) === '350.00', 'annuale divisa su conto solo tuo: esce la tua quota mensile (50)', await saldoDi(cA.id));
+  await togliA(anDiv.id);
+  // Il promemoria di un salvadanaio resta solo un segno
+  const fondoP = (await r('POST', '/obiettivi', A, { nome: 'Fondo promemoria' })).j;
+  const prom = (await r('PUT', `/obiettivi/${fondoP.id}/promemoria`, A, { importo: '100', ogni_mesi: 1, conto_id: cA.id })).j;
+  const antes = await saldoDi(cA.id);
+  verifica((await spuntaA(prom.id)).s === 201 && await saldoDi(cA.id) === antes && Number((await goal(fondoP.id)).saldo) === 0, 'la spunta di un promemoria è solo un segno: nessun movimento');
+  await togliA(prom.id);
+
+  // G. Salvadanai: la provenienza dei soldi
+  const cG = (await r('POST', '/conti', A, { nome: 'Conto salvadanai' })).j;
+  await scrivi(cG.id, '1000');
+  const fondoG = (await r('POST', '/obiettivi', A, { nome: 'Fondo G', conto_id: cG.id })).j;
+  const versa = (id, corpo) => r('POST', `/obiettivi/${id}/versamenti`, A, corpo);
+  verifica((await versa(fondoG.id, { importo: '200', conto_id: cG.id })).s === 201 && Number((await goal(fondoG.id)).saldo) === 200 && await saldoDi(cG.id) === '800.00', 'G principale «Dal conto»: versamento e movimento negativo insieme');
+  mv = await movs(cG.id);
+  verifica(mv[0].importo === '-200.00' && mv[0].causa === 'versamento' && mv[0].descrizione === 'Versato in Fondo G', 'G: il movimento si legge «Versato in Fondo G»', mv[0]);
+  await versa(fondoG.id, { importo: '50' });
+  verifica(Number((await goal(fondoG.id)).saldo) === 250 && await saldoDi(cG.id) === '800.00', 'G principale «Soldi nuovi»: il conto non si muove');
+  await versa(fondoG.id, { importo: '-30', conto_id: cG.id });
+  verifica(Number((await goal(fondoG.id)).saldo) === 220 && await saldoDi(cG.id) === '830.00' && (await movs(cG.id))[0].descrizione === 'Tornato da Fondo G', 'G: togliendo «Torna sul conto»: movimento positivo');
+  await versa(fondoG.id, { importo: '-20' });
+  verifica(Number((await goal(fondoG.id)).saldo) === 200 && await saldoDi(cG.id) === '830.00', 'G: togliendo «Esce»: il conto non si muove');
+  const idDa200 = (await r('GET', `/obiettivi/${fondoG.id}`, A)).j.versamenti.find((x) => x.importo === '200.00').id;
+  verifica((await r('DELETE', `/obiettivi/versamenti/${idDa200}`, A)).s === 204 && await saldoDi(cG.id) === '1030.00' && (await movs(cG.id)).every((x) => x.importo !== '-200.00'), 'G: annullare il versamento annulla anche il movimento collegato');
+  verifica((await versa(fondoG.id, { importo: '10', conto_id: cG.id, da_liberi: true })).s === 400, 'G: conto e liberi insieme: 400');
+  const cB = (await r('POST', '/conti', Bt, { nome: 'Conto di B' })).j;
+  verifica((await versa(fondoG.id, { importo: '10', conto_id: cB.id })).s === 404, 'G: un conto che non si vede: 404');
+  verifica((await versa(fondoG.id, { importo: '10', conto_id: cG.id, data: '2020-01-01' })).s === 409, 'D: versamento dal conto in un mese passato: 409');
+  // Sotto-salvadanaio: tre provenienze
+  const sotto = (await r('POST', '/obiettivi', A, { nome: 'Sotto G', padre_id: fondoG.id, traguardo: '1000' })).j;
+  const base0 = Number(await saldoDi(cG.id));
+  await versa(sotto.id, { importo: '100', conto_id: cG.id });
+  verifica(Number(await saldoDi(cG.id)) === base0 - 100 && Number((await goal(sotto.id)).saldo) === 100, 'G sotto «Dal conto»: movimento negativo');
+  await versa(fondoG.id, { importo: '300', conto_id: cG.id });
+  const prima = Number(await saldoDi(cG.id));
+  const dl = await versa(sotto.id, { importo: '40', da_liberi: true });
+  verifica(dl.s === 201 && Number(await saldoDi(cG.id)) === prima && Number((await goal(sotto.id)).saldo) === 140, 'G sotto «Dai liberi»: il conto non si muove');
+  await versa(sotto.id, { importo: '10' });
+  verifica(Number(await saldoDi(cG.id)) === prima && Number((await goal(sotto.id)).saldo) === 150, 'G sotto «Soldi nuovi»: il conto non si muove');
+  await versa(sotto.id, { importo: '-25', conto_id: cG.id });
+  verifica(Number(await saldoDi(cG.id)) === prima + 25, 'G sotto «Torna sul conto»');
+  // Saldo sotto zero: permesso (è la realtà della banca)
+  const grosso = await versa(fondoG.id, { importo: '5000', conto_id: cG.id });
+  verifica(grosso.s === 201 && Number(await saldoDi(cG.id)) < 0, 'G: il saldo può andare sotto zero', await saldoDi(cG.id));
+  // Un versamento diviso tra i sotto-salvadanai: un movimento per ogni parte, la somma è l'importo
+  await scrivi(cG.id, '2000');
+  const padreD = (await r('POST', '/obiettivi', A, { nome: 'Fondo D', conto_id: cG.id })).j;
+  const d1 = (await r('POST', '/obiettivi', A, { nome: 'D1', padre_id: padreD.id, traguardo: '100' })).j;
+  const d2 = (await r('POST', '/obiettivi', A, { nome: 'D2', padre_id: padreD.id, traguardo: '100' })).j;
+  await versa(padreD.id, { importo: '150', conto_id: cG.id, dividi: true });
+  const dettD = (await r('GET', `/obiettivi/${padreD.id}`, A)).j;
+  const movD = (await movs(cG.id)).filter((x) => /^Versato in (D1|D2|Fondo D)$/.test(x.descrizione));
+  verifica(await saldoDi(cG.id) === '1850.00' && movD.length >= 2 && movD.reduce((t, x) => t + Number(x.importo), 0) === -150 && Number(dettD.saldo) === 150, 'G con dividi: un movimento per parte, la somma è l\'importo', [movD, dettD.saldo]);
+  const parteD1 = (await r('GET', `/obiettivi/${d1.id}`, A)).j.versamenti[0];
+  await r('DELETE', `/obiettivi/versamenti/${parteD1.id}`, A);
+  verifica(Number(await saldoDi(cG.id)) === 1850 + Number(parteD1.importo), 'G con dividi: annullando una parte torna solo il suo movimento');
+  // Anche «Riempi» e «Metti 1/12» sono versamenti normali: usano la provenienza scelta (qui: dal conto)
+  const fondoR = (await r('POST', '/obiettivi', A, { nome: 'Fondo R', traguardo: '1200' })).j;
+  const prePrima = Number(await saldoDi(cG.id));
+  await versa(fondoR.id, { importo: '100', conto_id: cG.id });
+  verifica(Number(await saldoDi(cG.id)) === prePrima - 100, '«Metti 1/12» dal conto');
+  await versa(fondoR.id, { importo: '1100', conto_id: cG.id });
+  verifica(Number(await saldoDi(cG.id)) === prePrima - 1200 && Number((await goal(fondoR.id)).saldo) === 1200, '«Riempi» dal conto');
+  // Eliminare il salvadanaio: i versamenti spariscono e con loro i movimenti collegati (i soldi tornano sul conto)
+  const prePre = Number(await saldoDi(cG.id));
+  verifica((await r('DELETE', `/obiettivi/${fondoR.id}`, A)).s === 204 && Number(await saldoDi(cG.id)) === prePre + 1200, 'eliminare un salvadanaio: i movimenti collegati spariscono');
+  // Conto condiviso: B scrive/legge lo stesso saldo anche dopo i movimenti dei salvadanai
+  verifica(await saldoDi(cS.id) === await saldoDi(cS.id, Bt), 'conto condiviso: stesso saldo per entrambi');
 }
 
 console.log(`prove: ${ok} passate, ${ko} fallite`);

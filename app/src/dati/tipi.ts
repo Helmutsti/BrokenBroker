@@ -3,8 +3,11 @@
 export type Profilo = { id: string; email: string; nome: string; stipendio_netto: string | null; giorno_paga: number | null; inizio_mese: number; creato_il: string;
   sul_conto: string | null; sul_conto_al: string | null };
 
-// I conti sono un elenco di nomi con un'icona; il saldo («Sul conto oggi», scritto a mano) è quello di chi guarda.
-export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; mio: boolean; condiviso: boolean; saldo: string | null; saldo_al: string | null };
+// Un conto ha UN saldo, uguale per chi lo vede (decisione 47): `saldo` è l'attuale (saldo di partenza scritto a mano + movimenti dopo),
+// null se non è stato scritto un saldo di partenza; `saldo_aggiornato_il` è l'ultima volta che è cambiato (data e ora).
+export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; mio: boolean; condiviso: boolean;
+  saldo_partenza: string | null; saldo_partenza_il: string | null; saldo: string | null; saldo_aggiornato_il: string | null };
+export type MovimentoConto = { id: string; importo: string; momento: string; data: string; causa: 'spesa' | 'rata' | 'versamento'; descrizione: string; utente: string | null; conta: boolean };
 
 export type Categoria = { id: string; proprietario_id: string; padre_id: string | null; nome: string; tipo: 'uscita' | 'entrata'; colore: string | null; icona: string | null; ordine: number; figli?: Categoria[] };
 

@@ -463,7 +463,7 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
 }
 
 // ---- CMP-28 Scheda conto ----
-export function SchedaConto({ nome, nota, condiviso, icona, onApri }: { nome: string; nota?: string; condiviso: boolean; icona: string; onApri: () => void }) {
+export function SchedaConto({ nome, nota, saldo, saldoNegativo, condiviso, icona, onApri }: { nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; condiviso: boolean; icona: string; onApri: () => void }) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
@@ -475,6 +475,7 @@ export function SchedaConto({ nome, nota, condiviso, icona, onApri }: { nome: st
           <Testo stile="titolo-scheda">{nome}</Testo>
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
         </View>
+        {saldo ? <Testo stile="corpo-forte" colore={saldoNegativo ? 'testo-errore' : 'testo-primario'}>{saldo}</Testo> : null}
         {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
         <Icona nome="chevron-right" misura={16} colore="icona-tenue" />
       </View>
