@@ -8,10 +8,12 @@ import { cancellaToken, leggiToken } from './dati/sessione';
 import type { Profilo } from './dati/tipi.ts';
 import { Accesso } from './schermate/Accesso.tsx';
 import { Analisi } from './schermate/Analisi.tsx';
+import { Budget } from './schermate/Budget.tsx';
 import { Categorie } from './schermate/Categorie.tsx';
 import { Conti } from './schermate/Conti.tsx';
 import { Impostazioni } from './schermate/Impostazioni.tsx';
 import { Investimenti } from './schermate/Investimenti.tsx';
+import { Movimenti } from './schermate/Movimenti.tsx';
 import { Panoramica } from './schermate/Panoramica.tsx';
 import { Salvadanai } from './schermate/Salvadanai.tsx';
 import { useCompatto } from './tema/compatto.ts';
@@ -19,14 +21,16 @@ import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
 // Sezioni della barra laterale (flussi.md): l'ordine è quello delle bozze approvate.
 // Le sezioni dei 3 fogli dell'Excel (Spese, Salvadanai, Investimenti) più Categorie, Conti
-// e Analisi. I movimenti non esistono più (decisione del 2026-10-24).
+// e Analisi. Budget (i due modi) e Movimenti (il registro dei conti) sono tornati con la decisione 48.
 // La sezione delle spese del mese si chiama "Spese" (richiesta di Manuel, prima "Mese").
 const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
   { chiave: 'mese', testo: 'Spese', icona: 'calendar-check', percorso: '', schermata: Panoramica },
+  { chiave: 'budget', testo: 'Budget', icona: 'chart-column', percorso: 'budget', schermata: Budget },
   { chiave: 'salvadanai', testo: 'Salvadanai', breve: 'Salvad.', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
   { chiave: 'investimenti', testo: 'Investimenti', breve: 'Invest.', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
   { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
   { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti },
+  { chiave: 'movimenti', testo: 'Movimenti', icona: 'arrow-left-right', percorso: 'movimenti', schermata: Movimenti },
   { chiave: 'analisi', testo: 'Analisi', icona: 'chart-pie', percorso: 'analisi', schermata: Analisi },
 ];
 

@@ -84,7 +84,7 @@ await r('POST', '/rate', M, { oggetto: 'Telefono', finanziaria: 'Findomestic', i
 
 // Obiettivi: fondo di emergenza con traguardi di copertura, viaggio con sotto-obiettivi.
 const fondo = await r('POST', '/obiettivi', M, { nome: 'Fondo emergenza', traguardo: '8000' });
-await r('POST', `/obiettivi/${fondo.id}/versamenti`, M, { importo: '2500', data: meseFa(4, 1) });
+await r('POST', `/obiettivi/${fondo.id}/versamenti`, M, { importo: '2500' });
 for (const [n, i] of [['Un mese di spese', '1770'], ['Due mesi di spese', '3540'], ['Riparazione auto', '2000'], ['PC o telefono nuovo', '2000'], ['Elettrodomestico', '1500'], ['Occhiali', '500']])
   await r('POST', `/obiettivi/${fondo.id}/traguardi`, M, { nome: n, importo: i });
 const viaggio = await r('POST', '/obiettivi', M, { nome: 'Viaggio insieme', scadenza: meseFa(-10, 1), crea_spesa: true });

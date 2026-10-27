@@ -60,7 +60,7 @@ rotteRate.post('/:id/spunta', async (req, res) => {
     const spunta = (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
     if (r.conto_id) {
       const sulConto = await importoSulConto(db, r.conto_id, Number(r.importo_rata), Number(r.importo_rata));
-      if (sulConto !== null) await registraMovimento(db, { conto_id: r.conto_id, importo: -sulConto, causa: 'rata', spunta_id: spunta.id, descrizione: r.oggetto });
+      await registraMovimento(db, { conto_id: r.conto_id, importo: -sulConto, causa: 'rata', spunta_id: spunta.id, descrizione: r.oggetto });
     }
     return spunta;
   });

@@ -4,7 +4,7 @@ import { bloccoSpesa, erroreSpesaBloccata, vietaCampi, vietaPromemoria } from '.
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodoRichiesto } from '../periodo.ts';
-import { annullaSpunta, importoSulConto, registraMovimento, vietaMesePassato } from '../movimenti.ts';
+import { annullaSpunta, giroconto, importoSulConto, muoviPerSpunta, vietaMesePassato } from '../movimenti.ts';
 import { creaSalvadanaioDaSpesa } from './obiettivi.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
@@ -80,7 +80,38 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     // `nuovo_salvadanaio`, oppure si scollega con null.
     obiettivo_id: obiettivoNull(c),
     alimenta_obiettivo_id: v.annullabile(c, 'alimenta_obiettivo_id', () => v.id(c, 'alimenta_obiettivo_id')),
+    // Budget (decisione 48): il modo e, per «sposto i soldi», i due conti del giroconto.
+    budget_modo: v.scelta(c, 'budget_modo', MODI_BUDGET) as (typeof MODI_BUDGET)[number] | null | undefined,
+    conto_partenza_id: v.annullabile(c, 'conto_partenza_id', () => v.id(c, 'conto_partenza_id')),
+    conto_arrivo_id: v.annullabile(c, 'conto_arrivo_id', () => v.id(c, 'conto_arrivo_id')),
   };
+}
+
+const MODI_BUDGET = ['sposto', 'conto'] as const;
+
+// Modo e conti di un budget (decisione 48). `prima` = come sono ora (PATCH). Un budget ha sempre un modo (di base «sposto»);
+// i conti esistono solo nel modo «sposto» e devono essere due conti diversi che si vedono; una spesa che non è un budget
+// non ha né modo né conti.
+async function normalizzaBudget(db: PoolClient, campi: Campi, prima: { tipo: string; budget_modo: string | null; conto_partenza_id: string | null; conto_arrivo_id: string | null } | undefined): Promise<void> {
+  const tipo = campi.tipo ?? prima?.tipo;
+  if (tipo !== 'budget') {
+    if (campi.budget_modo !== undefined || (campi.conto_partenza_id ?? null) !== null || (campi.conto_arrivo_id ?? null) !== null) throw new ErroreApi(400, 'Il modo e i conti di partenza e di arrivo valgono solo per i budget');
+    if (prima?.tipo === 'budget') { campi.budget_modo = null; campi.conto_partenza_id = null; campi.conto_arrivo_id = null; }
+    return;
+  }
+  const modo = campi.budget_modo ?? (prima?.budget_modo === 'conto' ? 'conto' : 'sposto');
+  campi.budget_modo = modo;
+  if (modo === 'conto') {
+    if ((campi.conto_partenza_id ?? null) !== null || (campi.conto_arrivo_id ?? null) !== null) throw new ErroreApi(400, 'I conti di partenza e di arrivo valgono solo per «Sposto i soldi»');
+    campi.conto_partenza_id = null; campi.conto_arrivo_id = null;
+    return;
+  }
+  const partenza = campi.conto_partenza_id !== undefined ? campi.conto_partenza_id : prima?.conto_partenza_id ?? null;
+  const arrivo = campi.conto_arrivo_id !== undefined ? campi.conto_arrivo_id : prima?.conto_arrivo_id ?? null;
+  if (partenza && arrivo && partenza === arrivo) throw new ErroreApi(400, 'Il conto di partenza e quello di arrivo devono essere diversi');
+  for (const x of [campi.conto_partenza_id, campi.conto_arrivo_id]) {
+    if (x && !(await db.query('select 1 from conti where id = $1', [x])).rowCount) throw nonTrovato('Conto');
+  }
 }
 
 type Campi = ReturnType<typeof leggi>;
@@ -117,6 +148,7 @@ rotteSpese.post('/', async (req, res) => {
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
     await categoriaMia(db, campi.categoria_id);
+    await normalizzaBudget(db, campi, undefined);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
       `insert into spese_previste (proprietario_id, ${voci.map(([k]) => k).join(', ')})
@@ -139,8 +171,10 @@ rotteSpese.patch('/:id', async (req, res) => {
     if (campi.alimenta_obiettivo_id) await vietaPromemoria(db, campi.alimenta_obiettivo_id);
     const sua = (await db.query<{ mia: boolean }>('select proprietario_id = fp_me() as mia from spese_previste where id = $1', [id])).rows[0];
     if (!sua) return undefined;
-    const prima = (await db.query<{ ogni_mesi: number | null; prossima_scadenza: string | null; tipo: string }>('select ogni_mesi, prossima_scadenza, tipo from spese_previste where id = $1', [id])).rows[0];
+    const prima = (await db.query<{ ogni_mesi: number | null; prossima_scadenza: string | null; tipo: string; budget_modo: string | null; conto_partenza_id: string | null; conto_arrivo_id: string | null }>(
+      'select ogni_mesi, prossima_scadenza, tipo, budget_modo, conto_partenza_id, conto_arrivo_id from spese_previste where id = $1', [id])).rows[0];
     normalizzaMensile(campi, prima.ogni_mesi);
+    await normalizzaBudget(db, campi, prima);
     if ((campi.tipo ?? prima.tipo) === 'budget') campi.conto_id = null;
     // Da mensile a periodica serve la data (il mese): niente più «mensile» da cui ricavarla.
     if (prima.ogni_mesi === 1 && campi.ogni_mesi !== undefined && campi.ogni_mesi !== 1 && !campi.prossima_scadenza) {
@@ -199,7 +233,9 @@ rotteSpese.delete('/:id', async (req, res) => {
 
 // La spunta dice che la spesa è uscita nel mese e muove il saldo del conto (decisione 47):
 //  - spesa con conto: movimento negativo sul conto (conto condiviso: importo intero; conto solo tuo: la tua quota);
-//  - budget e promemoria di un salvadanaio: solo un segno, nessun movimento;
+//  - budget «sposto i soldi»: il giroconto tra i due conti del budget (due movimenti collegati); senza i conti solo un segno;
+//    budget «conto le uscite»: non si spunta (409), le uscite si registrano da /budget;
+//  - promemoria di un salvadanaio: solo un segno, nessun movimento;
 //  - spesa pagata da un salvadanaio (non periodica): preleva dal salvadanaio, il conto non si muove;
 //  - spesa annuale/periodica: la quota del mese passa dal conto al salvadanaio collegato (movimento negativo + versamento
 //    positivo, legati); senza conto solo il versamento; senza salvadanaio solo il movimento (la quota messa da parte).
@@ -212,6 +248,7 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     await vietaMesePassato(db, p);
     const [s] = await speseDelMese(db, p, id);
     if (!s) throw nonTrovato('Spesa prevista');
+    if (s.tipo === 'budget' && s.budget_modo === 'conto') throw new ErroreApi(409, 'Questo budget conta le uscite: non si spunta, si registrano le uscite dalla pagina Budget');
     // Le annuali contano ogni mese come quota: si spuntano anche fuori dal mese della scadenza.
     const annuale = s.attiva && s.tipo !== 'budget' && !s.alimenta_obiettivo_id && s.ogni_mesi !== null && s.ogni_mesi > 1;
     if (!s.nel_mese && !annuale) throw new ErroreApi(400, 'Questa spesa non cade in questo mese');
@@ -221,27 +258,25 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
     const spunta = (await db.query<{ id: string; data: string }>(
       'insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
-    if (s.tipo === 'budget' || s.alimenta_obiettivo_id) return spunta;
+    // Il movimento e il versamento li scrive il database (decisione 48 B): valgono anche se il conto o il salvadanaio della
+    // spesa li vede solo chi l'ha creata.
+    if (s.tipo === 'budget') {
+      // «Sposto i soldi»: il giroconto tra i due conti del budget (la tua quota). Senza i due conti la spunta è solo un segno.
+      if (s.budget_modo === 'sposto' && s.conto_partenza_id && s.conto_arrivo_id) await giroconto(db, spunta.id, Number(s.mia_quota));
+      return spunta;
+    }
+    if (s.alimenta_obiettivo_id) return spunta;
     if (annuale) {
       const quota = Number(s.quota_mensile), intera = Number(s.importo) / s.ogni_mesi!;
-      const salvadanaio = s.obiettivo_id ? (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [s.obiettivo_id])).rows[0] : undefined;
-      let versamentoId: string | null = null;
-      if (salvadanaio && quota >= 0.005) {
-        versamentoId = (await db.query<{ id: string }>(
-          'insert into versamenti (obiettivo_id, utente_id, data, importo, quota_spunta_id) values ($1, fp_me(), $2, $3, $4) returning id',
-          [s.obiettivo_id, data, s.quota_mensile, spunta.id])).rows[0].id;
-      }
-      const sulConto = s.conto_id ? await importoSulConto(db, s.conto_id, intera, quota) : null;
-      if (s.conto_id && sulConto !== null) {
-        await registraMovimento(db, { conto_id: s.conto_id, importo: -sulConto, causa: versamentoId ? 'versamento' : 'spesa', spunta_id: spunta.id, versamento_id: versamentoId,
-          descrizione: salvadanaio ? `Versato in ${salvadanaio.nome} (quota di ${s.nome})` : s.nome });
-      }
+      const versamento = s.obiettivo_id && quota >= 0.005 ? quota : 0;
+      const sulConto = s.conto_id ? await importoSulConto(db, s.conto_id, intera, quota) : 0;
+      // Con un versamento la descrizione («Versato in … (quota di …)») la scrive il database, che il nome del salvadanaio lo vede sempre.
+      await muoviPerSpunta(db, spunta.id, { conto: sulConto, causa: versamento ? 'versamento' : 'spesa', versamento, data, descrizione: s.nome });
     } else if (s.obiettivo_id) {
-      await db.query('insert into versamenti (obiettivo_id, utente_id, data, importo, spunta_id) values ($1, fp_me(), $2, $3, $4)',
-        [s.obiettivo_id, data, `-${s.mia_quota}`, spunta.id]);
+      await muoviPerSpunta(db, spunta.id, { conto: 0, causa: 'spesa', versamento: -Number(s.mia_quota), data, descrizione: s.nome });
     } else if (s.conto_id) {
       const sulConto = await importoSulConto(db, s.conto_id, Number(s.importo), Number(s.mia_quota));
-      if (sulConto !== null) await registraMovimento(db, { conto_id: s.conto_id, importo: -sulConto, causa: 'spesa', spunta_id: spunta.id, descrizione: s.nome });
+      await muoviPerSpunta(db, spunta.id, { conto: sulConto, causa: 'spesa', versamento: 0, data, descrizione: s.nome });
     }
     return spunta;
   });

@@ -20,6 +20,10 @@ export type SpesaDelMese = {
   // calcolati
   scadenza: string | null; nel_mese: boolean; uscita: boolean; mia_percentuale: number; mia_quota: string;
   quota_mensile: string;
+  // Budget (decisione 48): il modo, i conti del giroconto e, per «conto le uscite», quanto è già stato speso nel mese
+  // (in tutto e per conto: la chiave 'senza' sono le uscite senza conto).
+  budget_modo: 'sposto' | 'conto' | null; conto_partenza_id: string | null; conto_partenza: string | null; conto_arrivo_id: string | null; conto_arrivo: string | null;
+  speso: string | null; speso_per_conto: Record<string, string> | null;
   // Se la spesa nasce da un salvadanaio (promemoria o spesa creata al raggiungimento): quali campi si cambiano solo da lì.
   bloccato_da: { tipo: 'salvadanaio'; id: string; nome: string; campi: string[] } | null;
 };
@@ -29,6 +33,12 @@ const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string): Promise<SpesaDelMese[]> {
   const { rows } = await db.query(
     `select s.id, s.nome, s.importo::text as importo, s.ogni_mesi, s.prossima_scadenza, s.senza_giorno, s.giorno_mese, s.conto_id, co.nome as conto,
+            s.budget_modo, s.conto_partenza_id, cp.nome as conto_partenza, s.conto_arrivo_id, ca.nome as conto_arrivo,
+            case when s.budget_modo = 'conto' then (select coalesce(-sum(m.importo), 0.00)::text from movimenti_conto m
+              where m.budget_id = s.id and m.causa = 'budget' and m.momento >= $1::date and m.momento < $2::date + 1) end as speso,
+            case when s.budget_modo = 'conto' then (select coalesce(jsonb_object_agg(z.k, z.t), '{}'::jsonb) from (
+              select coalesce(m.conto_id::text, 'senza') as k, (-sum(m.importo))::text as t from movimenti_conto m
+               where m.budget_id = s.id and m.causa = 'budget' and m.momento >= $1::date and m.momento < $2::date + 1 group by 1) z) end as speso_per_conto,
             c.id as categoria_id, c.nome as categoria, pc.nome as categoria_padre,
             (with recursive su as (
                select id, padre_id, icona from categorie where id = c.id
@@ -46,6 +56,8 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
             exists (select 1 from spunte x where x.spesa_prevista_id = s.id and x.data between $1 and $2) as spuntata
        from spese_previste s
        left join conti co on co.id = s.conto_id
+       left join conti cp on cp.id = s.conto_partenza_id
+       left join conti ca on ca.id = s.conto_arrivo_id
        left join spese_dati_utente d on d.spesa_prevista_id = s.id and d.utente_id = fp_me()
        left join categorie c on c.proprietario_id = fp_me()
                             and c.id = case when s.proprietario_id = fp_me() then s.categoria_id else d.categoria_id end

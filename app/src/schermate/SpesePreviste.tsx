@@ -5,12 +5,12 @@ import { Campo, CampoData, Tendina, TendinaGiorni } from '../componenti/campi.ts
 import { CalendarioAnnuali, Intestazione, NumeroChiave, RigaNumeri, RigaSpesa, Scheda, TitoloGruppo, Vuoto } from '../componenti/composti.tsx';
 import { cancella, modifica, crea, sostituisci, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
-import type { Condivisione, ElencoSpese, Obiettivo, PersonaSistema, Spesa, TipoSpesa } from '../dati/tipi.ts';
+import type { Condivisione, ElencoSpese, ModoBudget, Obiettivo, PersonaSistema, Spesa, TipoSpesa } from '../dati/tipi.ts';
 import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { meseDi, primaOccorrenzaPersonale } from '../mesePersonale.ts';
 import { Caricamento, calendarioAnnuali, eAnnuale, proxSpesa, prossimeAnnuali, quando, segnoQuota } from './comuni.tsx';
-import { ConErrore, FinestraModulo, Riquadro, salvaCondivisione, serve, Voce } from './moduli.tsx';
+import { Affiancati, ConErrore, FinestraModulo, Meta, Riquadro, salvaCondivisione, serve, Voce } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
 type Filtro = 'tutte' | 'mese' | 'periodiche' | 'spente';
@@ -46,7 +46,7 @@ export function SpesePreviste() {
   const periodiche = visibili.filter((s) => s.ogni_mesi !== 1);
   const gruppiMese: [string, Spesa[]][] = [
     ['Fisse · ogni mese', ogniMese.filter((s) => s.tipo === 'fissa')],
-    ['Budget variabili · ogni mese', ogniMese.filter((s) => s.tipo === 'budget')],
+    ['Budget · ogni mese (si seguono in Budget)', ogniMese.filter((s) => s.tipo === 'budget')],
     ['Investimenti · ogni mese', ogniMese.filter((s) => s.tipo === 'investimento')],
   ];
   // Annuali in ordine di prossima uscita; le "una volta sola" in fondo.
@@ -58,7 +58,7 @@ export function SpesePreviste() {
   const calendario = calendarioAnnuali(attive, oggiIso(), inizio);
   const vediMese = filtro !== 'periodiche', vediAnnuali = filtro !== 'mese';
   const riga = (s: Spesa, alMese?: string) => (
-    <RigaSpesa key={s.id} nome={s.nome} categoria={s.categoria_padre ? `${s.categoria_padre} › ${s.categoria}` : s.categoria ?? '—'} conto={s.conto ?? '—'}
+    <RigaSpesa key={s.id} nome={s.nome} categoria={s.categoria_padre ? `${s.categoria_padre} › ${s.categoria}` : s.categoria ?? '—'} conto={s.tipo === 'budget' ? (s.budget_modo === 'conto' ? 'Conto le uscite' : s.conto_partenza && s.conto_arrivo ? `${s.conto_partenza} → ${s.conto_arrivo}` : 'Sposto i soldi') : s.conto ?? '—'}
       quando={quando(s, inizio)} totale={euro(s.importo)} quota={alMese ?? euro(s.mia_quota) + segnoQuota(s)} icona={s.icona ?? 'ellipsis'} avviso={avvisoSpesa(s)} onApri={() => setAperta(s)} />
   );
   const nuova = <Pulsante tipo="primario" etichetta="Nuova spesa prevista" icona="plus" onPress={() => setAperta('nuova')} />;
@@ -140,7 +140,7 @@ const avvisoSpesa = (s: Spesa): { testo: string; tono: Tono } | undefined =>
 
 const NON_SPECIFICATO = 'non-specificato';
 // SC-03 Aggiungi o modifica una spesa prevista (finestra al centro, variante B).
-export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void }) {
+export function FinestraSpesa({ spesa, aperta, onChiudi, tipoIniziale }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void; tipoIniziale?: TipoSpesa }) {
   const rif = useRiferimenti();
   const obiettivi = useDati<Obiettivo[]>(aperta ? '/obiettivi' : null).dati ?? [];
   const miaCondivisione = useDati<Condivisione[]>(aperta && spesa ? '/condivisioni' : null).dati?.find((x) => x.voce === 'spesa' && x.voce_id === spesa?.id && x.mia);
@@ -162,6 +162,10 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const [ogniN, setOgniN] = useState('6');
   const [tipo, setTipo] = useState<TipoSpesa>('fissa');
   const [conto, setConto] = useState<string | null>(null);
+  // Budget (decisione 48): il modo e, per «Sposto i soldi», il conto di partenza e quello di arrivo ('' = nessuno).
+  const [modo, setModo] = useState<ModoBudget>('sposto');
+  const [partenza, setPartenza] = useState('');
+  const [arrivo, setArrivo] = useState('');
   const [categoria, setCategoria] = useState<string | null>(null);
   // Salvadanaio della spesa (decisione 39): si crea nuovo, mai uno esistente. dove/padre null = la proposta in base alla spesa.
   const [salv, setSalv] = useState<'nessuno' | 'crea'>('nessuno');
@@ -186,9 +190,9 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     setDataUna(s && s.ogni_mesi === null ? dataInTesto(s.prossima_scadenza) : '');
     setDiviso(!!s && (s.condivisa || (s.mia && s.mia_percentuale < 100))); setCondiviso(s?.condivisa ?? false); setCon(null); setDivisione(!s || s.mia_percentuale === 50 || s.mia_percentuale === 100 ? 'meta' : 'altra'); setMiaQuota(String(s?.mia_percentuale ?? 50));
     setFrequenza(!s || s.ogni_mesi === 1 ? 'mese' : s.ogni_mesi === null ? 'una' : s.ogni_mesi === 12 ? 'anno' : s.ogni_mesi === 24 ? 'biennale' : 'n'); setOgniN(String(s?.ogni_mesi && s.ogni_mesi > 1 ? s.ogni_mesi : 6));
-    setTipo(s?.tipo ?? 'fissa'); setConto(s?.conto_id ?? null); setCategoria(s?.categoria_id ?? null); setSalv('nessuno'); setDove(null); setPadre(null); setContenitore(''); setScollega(false);
+    setTipo(s?.tipo ?? tipoIniziale ?? 'fissa'); setModo(s?.budget_modo ?? 'sposto'); setPartenza(s?.conto_partenza_id ?? ''); setArrivo(s?.conto_arrivo_id ?? ''); setConto(s?.conto_id ?? null); setCategoria(s?.categoria_id ?? null); setSalv('nessuno'); setDove(null); setPadre(null); setContenitore(''); setScollega(false);
     setNote(s?.note ?? ''); setAttiva(s?.attiva ?? true);
-  }, [aperta, spesa]);
+  }, [aperta, spesa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Salvadanai dove si può mettere quello nuovo: tuoi e non nati da una spesa (anche i nascosti, decisione 39).
   const opzioniPadri = useMemo(() => {
@@ -238,6 +242,12 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     } else if (g !== null) serve(null, 'Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese', 'scadenza');
     else serve(null, 'Scegli almeno il mese in cui esce: da lì si ripete', 'scadenza');
     const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 && tipo !== 'budget' ? g : null, tipo, conto_id: tipo === 'budget' ? null : conto, categoria_id: categoria,
+      ...(tipo === 'budget' ? {
+        budget_modo: modo,
+        // I conti si mandano solo se li hai cambiati: chi riceve un budget condiviso può non vedere quelli scelti da chi l'ha creato.
+        ...(modo === 'sposto' && partenza !== (spesa?.conto_partenza_id ?? '') ? { conto_partenza_id: partenza || null } : {}),
+        ...(modo === 'sposto' && arrivo !== (spesa?.conto_arrivo_id ?? '') ? { conto_arrivo_id: arrivo || null } : {}),
+      } : {}),
       ...(scollega ? { obiettivo_id: null } : {}), note: note.trim() || null, attiva };
     if (salv === 'crea' && !spesa?.obiettivo_id) {
       if (doveEff === 'sotto' && !padreEff) serve(null, 'Scegli sotto quale salvadanaio metterlo', 'padre');
@@ -316,7 +326,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
       ) : null}
       <Riquadro titolo="Che spesa è" nota="Come si chiama, di che tipo è e quanto costa.">
         <ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} disattivato={fisso('nome')} /></ConErrore>
-        <Voce etichetta="Tipo" aiuto={tipo === 'budget' ? 'Una cifra da tenere da parte per le spese del mese di questa categoria: si spunta quando l’hai usata.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
+        <Voce etichetta="Tipo" aiuto={tipo === 'budget' ? 'Una cifra del mese legata a una categoria. Sotto scegli come funziona; i budget si seguono dalla pagina Budget.' : 'Un importo preciso che esce, es. affitto, bollette, abbonamenti.'}>
           <SceltaSegmenti etichetta="Tipo di spesa" larghezzaPiena valore={tipo} onCambia={fisso('tipo') ? () => {} : setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'budget', testo: 'Budget del mese' }, ...(spesa?.tipo === 'investimento' ? [{ valore: 'investimento' as const, testo: 'Investimento' }] : [])]} />
         </Voce>
         <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-start', gap: compatto ? d['spazio-blocco'] : d['spazio-icona'] }}>
@@ -329,8 +339,26 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
           </View>
         </View>
       </Riquadro>
-      <Riquadro titolo="Regole di uscita" nota={tipo === 'budget' ? 'Un budget vale per tutto il mese: non serve una data né un conto.' : 'Ogni quanto si ripete, in quale giorno o mese esce e da quale conto.'}>
-        {tipo === 'budget' ? null : (
+      {tipo === 'budget' ? (
+        <Riquadro titolo="Come funziona" nota="Due modi, scelti per ogni budget. Vale per tutto il mese: non serve una data.">
+          <SceltaSegmenti etichetta="Modo del budget" larghezzaPiena valore={modo} onCambia={setModo} opzioni={[{ valore: 'sposto', testo: 'Sposto i soldi' }, { valore: 'conto', testo: 'Conto le uscite' }]} />
+          {modo === 'sposto' ? (
+            <>
+              <Testo stile="dettaglio-normale" colore="testo-secondario">Spuntandolo nel mese i soldi passano dal conto di partenza a quello di arrivo (un giroconto). Togliendo la spunta, nel mese in corso, tornano com’erano. Senza i due conti la spunta è solo un segno.</Testo>
+              <Affiancati>
+                <Meta><Tendina etichetta="Conto di partenza" valore={partenza} segnaposto="Nessuno" iconaPrima="landmark" onCambia={setPartenza}
+                  opzioni={[{ valore: '', testo: 'Nessuno' }, ...rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome, icona: c.icona }))]} /></Meta>
+                <Meta><Tendina etichetta="Conto di arrivo" valore={arrivo} segnaposto="Nessuno" iconaPrima="landmark" onCambia={setArrivo}
+                  opzioni={[{ valore: '', testo: 'Nessuno' }, ...rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome, icona: c.icona }))]} /></Meta>
+              </Affiancati>
+            </>
+          ) : (
+            <Testo stile="dettaglio-normale" colore="testo-secondario">Il tetto è la cifra qui sopra. Durante il mese registri le uscite vere dalla pagina Budget (importo, descrizione, giorno e, se vuoi, il conto): scendono dal conto e riempiono il budget. Non si spunta.</Testo>
+          )}
+        </Riquadro>
+      ) : (
+      <Riquadro titolo="Regole di uscita" nota="Ogni quanto si ripete, in quale giorno o mese esce e da quale conto.">
+        {(
           <>
             <Voce etichetta="Ogni quanto esce">
               <SceltaSegmenti etichetta="Ogni quanto esce" larghezzaPiena valore={frequenza} onCambia={fisso('ogni_mesi') ? () => {} : setFrequenza} opzioni={[{ valore: 'mese', testo: 'Ogni mese' }, { valore: 'anno', testo: 'Ogni anno' }, { valore: 'biennale', testo: 'Ogni 2 anni' }, { valore: 'n', testo: 'Ogni N mesi' }, { valore: 'una', testo: 'Una volta sola' }]} />
@@ -357,10 +385,9 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
             </View>
           </>
         )}
-        {tipo === 'budget'
-          ? <Testo stile="dettaglio-normale" colore="testo-secondario">Il budget è legato alla categoria, non a un conto: spuntarlo non muove il saldo di nessun conto, resta un promemoria.</Testo>
-          : <Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} />}
+        <Tendina etichetta="Da quale conto esce" disattivato={fisso('conto_id')} valore={conto} opzioni={rif.conti.filter((c) => !c.archiviato).map((c) => ({ valore: c.id, testo: c.nome }))} onCambia={setConto} />
       </Riquadro>
+      )}
       {bloc || (spesa && !spesa.mia) ? null : generato ? (
         <Riquadro titolo="Salvadanaio" nota="Metti da parte i soldi per questa spesa.">
           <Testo stile="dettaglio-normale" colore="testo-secondario">{`Salvadanaio: «${collegato!.nome}». Per aprirlo vai in Salvadanai; nome, cifra e scadenza si cambiano da questa spesa.`}</Testo>

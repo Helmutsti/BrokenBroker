@@ -4,7 +4,7 @@ import { Pressable, View } from 'react-native';
 import { Icona } from '../componenti/Icona.tsx';
 import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, MenuScelta, Tendina } from '../componenti/campi.tsx';
-import { Foglio, Intestazione, NumeroChiave, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
+import { Foglio, Intestazione, NumeroChiave, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceBudget, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Conto, ControlloRate, ElencoSpese, Obiettivo, Rata, RiepilogoMese, Spesa } from '../dati/tipi.ts';
@@ -12,6 +12,8 @@ import { data, dataInTesto, dataOra, euro, importoInTesto, leggiData, leggiImpor
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { ombre } from '../tema/token.ts';
 import { meseDi } from '../mesePersonale.ts';
+import { pesoBudget } from '../calcoliAvanzo.ts';
+import { useNavigation } from '@react-navigation/native';
 import { Caricamento, divisioneTraSotto, importoDelMese, mensileSenzaGiorno, proxSpesa, quando, rateDelMese, tuttiGliObiettivi, vociDelMese } from './comuni.tsx';
 import { DaGirareAiConti } from './DaGirare.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
@@ -27,6 +29,7 @@ let ultimoConto = 'tutti';
 // Le annuali contano ogni mese con la quota mensile.
 export function Panoramica() {
   const rif = useRiferimenti();
+  const navigazione = useNavigation<{ navigate: (n: string) => void }>();
   const { mese, setMese } = rif;
   const riepilogo = useDati<RiepilogoMese>(`/analisi/mese?mese=${mese}`);
   const spese = useDati<ElencoSpese>(`/spese-previste?mese=${mese}`);
@@ -64,7 +67,11 @@ export function Panoramica() {
   const conti = rif.conti.filter((x) => !x.archiviato);
   const conto = conti.find((x) => x.id === contoScelto) ?? null;
   const titoloSaldo = conto ? `Su ${conto.nome} oggi` : 'Sui conti oggi';
-  const el: ElencoSpese = conto ? { ...elencoCompleto, spese: elencoCompleto.spese.filter((s) => s.conto_id === conto.id) } : elencoCompleto;
+  // Un budget non ha un conto: con un conto scelto compare se lo sposta (partenza o arrivo) o se ne ha già speso (decisione 48).
+  const delContoScelto = (s: Spesa) => s.tipo === 'budget'
+    ? s.conto_partenza_id === conto!.id || s.conto_arrivo_id === conto!.id || Number(s.speso_per_conto?.[conto!.id] ?? 0) > 0
+    : s.conto_id === conto!.id;
+  const el: ElencoSpese = conto ? { ...elencoCompleto, spese: elencoCompleto.spese.filter(delContoScelto) } : elencoCompleto;
   const rate = conto ? tutteLeRate.filter((x) => x.conto_id === conto.id) : tutteLeRate;
   const p = el.periodo;
   // In ordine di uscita: la data nel mese, poi il nome.
@@ -81,11 +88,15 @@ export function Panoramica() {
   const nonAttive = el.spese.filter((s) => !s.attiva);
 
   // Il conto dell'Excel: escono dal conto le voci non ancora spuntate. Le annuali ci sono con la quota del mese (da mettere da parte), non con l'importo intero.
-  const delConto = [...fisse, ...budget, ...investimenti, ...salvadanai, ...annualiTutte];
+  // I budget pesano a modo loro (decisione 48, calcoliAvanzo.ts): un giroconto esce dalla partenza ed entra nell'arrivo (con «Tutti i conti» si annulla),
+  // un budget che conta le uscite pesa per quanto resta del tetto.
+  const delConto = [...fisse, ...investimenti, ...salvadanai, ...annualiTutte];
+  const pesi = budget.map((s) => ({ s, w: pesoBudget(s, conto?.id ?? null) }));
   const daSpuntare = delConto.filter((s) => !s.uscita);
   const rateDaPagare = rateMese.filter((x) => !x.r.pagata);
-  const devonoUscire = daSpuntare.reduce((t, s) => t + importoDelMese(s), 0) + rateDaPagare.reduce((t, x) => t + Number(x.r.importo_rata), 0);
-  const quanteDaSpuntare = daSpuntare.length + rateDaPagare.length;
+  const devonoUscire = daSpuntare.reduce((t, s) => t + importoDelMese(s), 0) + rateDaPagare.reduce((t, x) => t + Number(x.r.importo_rata), 0) + pesi.reduce((t, x) => t + x.w.daUscire, 0);
+  const inArrivo = pesi.reduce((t, x) => t + x.w.inArrivo, 0);
+  const quanteDaSpuntare = daSpuntare.length + rateDaPagare.length + pesi.filter((x) => x.w.daSpuntare).length;
   // Il saldo ATTUALE dei conti (decisione 47): scritto a mano una volta e mosso da spunte e salvadanai. Con «Tutti i conti» è la somma dei
   // saldi dei conti visibili; solo se nessun conto ha un saldo vale ancora il vecchio «sul conto» del profilo, finché non se ne scrive uno.
   // L'avanzo è il saldo attuale meno quello che deve ancora uscire: le voci già spuntate sono già nel saldo.
@@ -93,7 +104,7 @@ export function Panoramica() {
   const saldoVecchio = !conto && !contiConSaldo.length && profilo.sul_conto !== null;
   const saldo = conto ? (conto.saldo === null ? null : Number(conto.saldo))
     : contiConSaldo.length ? contiConSaldo.reduce((t, x) => t + Number(x.saldo), 0) : saldoVecchio ? Number(profilo.sul_conto) : null;
-  const avanzo = saldo === null ? null : saldo - devonoUscire;
+  const avanzo = saldo === null ? null : saldo - devonoUscire + inArrivo;
   const notaSaldo = conto
     ? (conto.saldo === null ? `Scrivi quanto c'è su ${conto.nome}` : `Aggiornato il ${dataOra(conto.saldo_aggiornato_il)} · tocca per riallinearlo`)
     : saldoVecchio ? `Scritto il ${data(profilo.sul_conto_al, 'corta')} a mano · scrivi il saldo di un conto per sostituirlo`
@@ -120,14 +131,25 @@ export function Panoramica() {
   // Usciti: quello che è già spuntato e le rate pagate.
   const spuntate = delConto.filter((s) => s.uscita);
   const ratePagate = rateMese.filter((x) => x.r.pagata);
-  const usciti = spuntate.reduce((t, s) => t + importoDelMese(s), 0) + ratePagate.reduce((t, x) => t + Number(x.r.importo_rata), 0);
-  const quanteUscite = spuntate.length + ratePagate.length;
+  const usciti = spuntate.reduce((t, s) => t + importoDelMese(s), 0) + ratePagate.reduce((t, x) => t + Number(x.r.importo_rata), 0) + pesi.reduce((t, x) => t + x.w.uscito, 0);
+  const quanteUscite = spuntate.length + ratePagate.length + pesi.filter((x) => x.w.uscito > 0).length;
   // Ha un salvadanaio (creato da questa spesa) o nasce da uno (promemoria, spesa generata).
   const colSalvadanaio = (s: Spesa) => !!(s.obiettivo_id || s.alimenta_obiettivo_id || s.bloccato_da);
   const voce = (s: Spesa, conIcona: boolean, icona = 'ellipsis', sotto?: string, dettaglio?: Parameters<typeof VoceDaSpuntare>[0]['dettaglio']) => (
     <VoceDaSpuntare key={s.id} nome={s.nome} conto={conGiorno(s)} importo={euro(s.mia_quota)} sottoImporto={sotto} icona={conIcona ? s.icona ?? icona : null} salvadanaio={colSalvadanaio(s)} fatta={s.uscita}
       onSpunta={passato ? undefined : () => spunta(s)} onApri={() => setSpesa(s)} dettaglio={dettaglio} />
   );
+  // Un budget è un promemoria (decisione 48): «Sposto i soldi» si spunta (giroconto), «Conto le uscite» mostra quanto è stato speso sul tetto.
+  const voceBudget = (s: Spesa, conIcona: boolean) => {
+    if (s.budget_modo === 'conto') {
+      const sp = Number(s.speso ?? 0), tetto = Number(s.importo), pct = tetto > 0 ? sp / tetto * 100 : sp > 0 ? 100 : 0;
+      return <VoceBudget key={s.id} nome={s.nome} nota={sp > tetto ? `Speso ${euro(sp)}: sforato di ${euro(sp - tetto)}` : `Speso ${euro(sp)} · restano ${euro(tetto - sp)}`} conto="Conto le uscite" importo={euro(tetto)} icona={conIcona ? s.icona ?? 'wallet' : null}
+        valore={pct} stato={sp > tetto ? 'superato' : pct >= 85 ? 'attenzione' : 'normale'} onApri={() => setSpesa(s)} />;
+    }
+    const giro = s.conto_partenza && s.conto_arrivo ? `da ${s.conto_partenza} a ${s.conto_arrivo}` : 'budget del mese';
+    return <VoceDaSpuntare key={s.id} nome={s.nome} conto={giro} importo={euro(s.mia_quota)} sottoImporto={s.conto_partenza && s.conto_arrivo ? 'giroconto' : 'budget del mese'} icona={conIcona ? s.icona ?? 'wallet' : null}
+      fatta={s.uscita} onSpunta={passato ? undefined : () => spunta(s)} onApri={() => setSpesa(s)} />;
+  };
   // Un salvadanaio con sotto-salvadanai si apre e mostra come si divide la cifra (le parti non si spuntano).
   const dettaglioSalvadanaio = (s: Spesa) => {
     const o = tuttiObiettivi.find((x) => x.id === s.alimenta_obiettivo_id);
@@ -147,7 +169,7 @@ export function Panoramica() {
       icona={s.icona ?? 'calendar'} salvadanaio={colSalvadanaio(s)} fatta={s.uscita} onSpunta={passato ? undefined : () => spunta(s)} onApri={() => setSpesa(s)} />) });
   const righe: Riga[] = [
     ...fisse.map((s) => ({ s, tipo: 'fisse' as const, vista: (i: boolean) => voce(s, i) })),
-    ...budget.map((s) => ({ s, tipo: 'budget' as const, vista: (i: boolean) => voce(s, i, 'wallet', 'budget del mese') })),
+    ...budget.map((s) => ({ s, tipo: 'budget' as const, vista: (i: boolean) => voceBudget(s, i) })),
     ...investimenti.map((s) => ({ s, tipo: 'investimenti' as const, vista: (i: boolean) => voce(s, i, 'trending-up') })),
     ...salvadanai.map((s) => ({ s, tipo: 'salvadanai' as const, vista: (i: boolean) => voce({ ...s, icona: 'piggy-bank' }, i, 'piggy-bank', s.ogni_mesi === 12 ? "una volta all'anno" : undefined, dettaglioSalvadanaio(s)) })),
   ].map(({ s, tipo, vista }) => ({ chiave: s.id, nome: s.nome, scadenza: s.scadenza, tipo, categoria: s.categoria_id, importo: Number(s.mia_quota), vista }));
@@ -158,7 +180,7 @@ export function Panoramica() {
   righe.sort(ordina === 'scadenza' ? (a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it') : (a, b) => a.nome.localeCompare(b.nome, 'it'));
   const alMeseEAnno = (m: number) => `${euro(m)} al mese · ${euro(m * 12)} all'anno`;
   const manca = rate.filter((x) => x.attiva).reduce((t, x) => t + Number(x.residuo), 0);
-  const TITOLI: Record<Tipo, string> = { fisse: 'Fisse', budget: 'Budget del mese', rate: 'Rate', investimenti: 'Investimenti',
+  const TITOLI: Record<Tipo, string> = { fisse: 'Fisse', budget: 'Budget del mese · promemoria', rate: 'Rate', investimenti: 'Investimenti',
     salvadanai: 'Salvadanai · da versare, poi spunta', annuali: 'Annuali' };
   const radice = (id: string | null) => { let c = rif.categoria(id); while (c?.padre_id) c = rif.categoria(c.padre_id); return c ?? null; };
   // Per tipo, le annuali sono un gruppo sempre presente con tutte le annuali attive, a rotazione:
@@ -231,7 +253,7 @@ export function Panoramica() {
         <NumeroChiave etichetta="Devono uscire" valore={euro(devonoUscire)} icona="arrow-up-right"
           nota={[quanteDaSpuntare ? `${quanteDaSpuntare} ${quanteDaSpuntare === 1 ? 'voce' : 'voci'} da spuntare` : 'Tutto spuntato'].join(' · ')} />
         <NumeroChiave etichetta="Avanzo" valore={avanzo === null ? '—' : euro(avanzo, { segno: true })} icona="scale" tono={avanzo === null ? 'normale' : avanzo < 0 ? 'errore' : avanzo < 0.005 ? 'attenzione' : 'ok'}
-          nota={avanzo === null ? (conto ? `Scrivi quanto c'è su ${conto.nome}` : 'Scrivi il saldo di un conto') : avanzo < 0 ? `Sul conto mancano ${euro(-avanzo)} per sostenere le spese` : 'Saldo di oggi meno quello che deve ancora uscire'} />
+          nota={avanzo === null ? (conto ? `Scrivi quanto c'è su ${conto.nome}` : 'Scrivi il saldo di un conto') : avanzo < 0 ? `Sul conto mancano ${euro(-avanzo)} per sostenere le spese` : inArrivo > 0.005 ? `Saldo di oggi meno quello che deve ancora uscire, più ${euro(inArrivo)} che arrivano dai giroconti` : 'Saldo di oggi meno quello che deve ancora uscire'} />
       </View>
       {fuori ? createPortal(
         <View accessibilityRole="summary" style={{ position: 'fixed', top: compatto ? 0 : 12, right: compatto ? 0 : 16, ...(compatto ? { left: 0 } : {}), zIndex: 50, flexDirection: 'row', justifyContent: compatto ? 'space-between' : 'flex-start', gap: compatto ? 4 : d['spazio-colonne'], paddingVertical: compatto ? 6 : 8, paddingHorizontal: compatto ? 12 : 14, ...(compatto ? { paddingTop: 'max(6px, env(safe-area-inset-top))' } : {}),
@@ -295,6 +317,7 @@ export function Panoramica() {
           </View>
         ))}
       </View>
+      {budget.length ? <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" icona="chart-column" etichetta="Vai alla pagina Budget" onPress={() => navigazione.navigate('budget')} /></View> : null}
       {nonAttive.length ? (
         <View>
           <Pulsante tipo="testo" etichetta={`${spente ? 'Nascondi' : 'Mostra'} ${nonAttive.length} ${nonAttive.length === 1 ? 'spesa non attiva' : 'spese non attive'}`} icona={spente ? 'chevron-up' : 'chevron-down'} onPress={() => setSpente(!spente)} />

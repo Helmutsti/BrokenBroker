@@ -1,4 +1,5 @@
-﻿import { useEffect, useState } from 'react';
+﻿import { useNavigation } from '@react-navigation/native';
+import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Interruttore, Pulsante } from '../componenti/base.tsx';
 import { Campo, SceltaIcona } from '../componenti/campi.tsx';
@@ -8,6 +9,7 @@ import type { Condivisione, Conto, ElencoSpese, MovimentoConto, Rata } from '../
 import { data, dataOra, euro, importoInTesto, leggiImporto } from '../formato.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento } from './comuni.tsx';
+import { filtraMovimentiPerConto } from './Movimenti.tsx';
 import { ConErrore, FinestraModulo, RiquadroCondivisione, salvaCondivisione, serve, Voce } from './moduli.tsx';
 
 // SC-06 Conti: i conti da cui si paga, con nome, icona e saldo (decisione 47). Il saldo è uno per conto, uguale per chi lo vede:
@@ -55,6 +57,7 @@ function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; apert
   const collegate = [nSpese ? `${nSpese} ${nSpese === 1 ? 'spesa' : 'spese'}` : null, nRate ? `${nRate} ${nRate === 1 ? 'rata' : 'rate'}` : null].filter(Boolean).join(' e ');
   const [nome, setNome] = useState('');
   const [icona, setIcona] = useState('landmark');
+  const navigazione = useNavigation<{ navigate: (n: string) => void }>();
   const [archiviato, setArchiviato] = useState(false);
   const [condiviso, setCondiviso] = useState(false);
   const [con, setCon] = useState<string | null>(null);
@@ -100,6 +103,9 @@ function FinestraConto({ conto, aperta, onChiudi }: { conto: Conto | null; apert
               <Testo stile="dettaglio-forte" colore={x.conta ? (Number(x.importo) < 0 ? 'testo-errore' : 'testo-primario') : 'testo-terziario'}>{euro(x.importo, { segno: true })}</Testo>
             </View>
           ))}
+          <View style={{ alignItems: 'flex-start' }}>
+            <Pulsante tipo="testo" icona="arrow-left-right" etichetta="Tutti i movimenti" onPress={() => { filtraMovimentiPerConto(conto!.id); onChiudi(); navigazione.navigate('movimenti'); }} />
+          </View>
         </Voce>
       ) : null}
       {conto ? (

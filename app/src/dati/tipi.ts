@@ -7,13 +7,19 @@ export type Profilo = { id: string; email: string; nome: string; stipendio_netto
 // null se non è stato scritto un saldo di partenza; `saldo_aggiornato_il` è l'ultima volta che è cambiato (data e ora).
 export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; mio: boolean; condiviso: boolean;
   saldo_partenza: string | null; saldo_partenza_il: string | null; saldo: string | null; saldo_aggiornato_il: string | null };
-export type MovimentoConto = { id: string; importo: string; momento: string; data: string; causa: 'spesa' | 'rata' | 'versamento'; descrizione: string; utente: string | null; conta: boolean };
+export type CausaMovimento = 'spesa' | 'rata' | 'versamento' | 'giroconto' | 'budget';
+export type MovimentoConto = { id: string; importo: string; momento: string; data: string; causa: CausaMovimento; descrizione: string; utente: string | null; conta: boolean };
+// La pagina Movimenti (decisione 48): come sopra, ma di conti diversi (conto vuoto = uscita di budget senza conto).
+export type MovimentoElenco = MovimentoConto & { conto_id: string | null; conto: string | null; conto_icona: string | null; giroconto_id: string | null; budget_id: string | null };
+export type ElencoMovimenti = { movimenti: MovimentoElenco[]; mesi: string[]; mese_in_corso: string };
 
 export type Categoria = { id: string; proprietario_id: string; padre_id: string | null; nome: string; tipo: 'uscita' | 'entrata'; colore: string | null; icona: string | null; ordine: number; figli?: Categoria[] };
 
 // Voci collegate (decisione 37): ciò che nasce dall'altro si cambia solo dall'origine; `campi` sono quelli bloccati.
 export type Blocco = { tipo: 'spesa' | 'salvadanaio'; id: string; nome: string; campi: string[] };
 export type TipoSpesa = 'fissa' | 'budget' | 'investimento';
+// Un budget ha due modi (decisione 48): «sposto» i soldi da un conto a un altro, oppure «conto» le uscite sotto un tetto.
+export type ModoBudget = 'sposto' | 'conto';
 export type Spesa = {
   id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; conto_id: string | null; conto: string | null;
   categoria_id: string | null; categoria: string | null; categoria_padre: string | null; icona: string | null; colore: string | null;
@@ -22,10 +28,15 @@ export type Spesa = {
   alimenta_obiettivo_id: string | null; // "mettici da parte": spuntata, versa in questo salvadanaio
   bloccato_da: Blocco | null; // nasce da un salvadanaio: promemoria o spesa creata al raggiungimento
   scadenza: string | null; nel_mese: boolean; uscita: boolean;
+  budget_modo: ModoBudget | null; conto_partenza_id: string | null; conto_partenza: string | null; conto_arrivo_id: string | null; conto_arrivo: string | null;
+  speso: string | null; speso_per_conto: Record<string, string> | null; // «conto le uscite»: speso nel mese, in tutto e per conto ('senza' = senza conto)
   mia_percentuale: number; mia_quota: string; quota_mensile: string; quote?: { utente_id: string; nome: string; percentuale: string }[];
 };
 export type Periodo = { mese: string; dal: string; al: string };
 export type ElencoSpese = { periodo: Periodo; spese: Spesa[] };
+export type UscitaBudget = { id: string; budget_id: string; importo: string; momento: string; data: string; descrizione: string; conto_id: string | null; conto: string | null; utente: string | null; modificabile: boolean };
+export type BudgetDelMese = Spesa & { uscite: UscitaBudget[] };
+export type ElencoBudget = { periodo: Periodo; budget: BudgetDelMese[] };
 
 export type Traguardo = { id: string; nome: string; importo: string; ordine: number; percentuale: number };
 export type Obiettivo = {
