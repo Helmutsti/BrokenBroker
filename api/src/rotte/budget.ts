@@ -135,8 +135,8 @@ rotteBudget.post('/:id/uscite', async (req, res) => {
     await contoVisibile(db, contoId);
     const giorno = dataScelta ?? oggi();
     await db.query(
-      `insert into movimenti (utente_id, tipo, conto_id, importo, momento, descrizione, budget_id, categoria_id)
-       values (fp_me(), 'uscita', $1, $2, case when $3::date = $4::date then now() else ($3::date + time '12:00')::timestamptz end, $5, $6, $7)`,
+      `insert into movimenti (utente_id, da_conto_id, verso, importo, momento, descrizione, budget_id, categoria_id)
+       values (fp_me(), $1, case when $1::uuid is null then 'uscita' end, $2, case when $3::date = $4::date then now() else ($3::date + time '12:00')::timestamptz end, $5, $6, $7)`,
       [contoId, importo, giorno, oggi(), descrizione || b.nome, id, b.categoria_id]);
     // Il budget mostrato è quello del mese personale in cui cade l'uscita.
     const adesso = await periodoRichiesto(db, undefined);
@@ -149,8 +149,8 @@ rotteBudget.post('/:id/uscite', async (req, res) => {
 rotteBudget.delete('/uscite/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    if (!(await db.query(`select 1 from movimenti where id = $1 and tipo = 'uscita'`, [id])).rowCount) throw nonTrovato('Uscita');
-    if (!(await db.query('delete from movimenti where id = $1', [id])).rowCount) throw new ErroreApi(403, 'Solo chi ha scritto l\'uscita la può togliere');
+    if (!(await db.query('select 1 from movimenti where id = $1 and a_conto_id is null', [id])).rowCount) throw nonTrovato('Uscita');
+    if (!(await db.query('delete from movimenti where id = $1 and spunta_id is null', [id])).rowCount) throw new ErroreApi(403, 'Solo chi ha scritto l\'uscita la può togliere');
   });
   res.status(204).end();
 });

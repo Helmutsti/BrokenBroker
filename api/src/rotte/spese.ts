@@ -5,6 +5,7 @@ import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodoRichiesto } from '../periodo.ts';
 import { speseDelMese } from '../spese.ts';
+import { transazioneDaSpunta } from '../transazioni.ts';
 import * as v from '../valida.ts';
 
 export const rotteSpese = Router();
@@ -55,6 +56,7 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     senza_giorno: v.booleano(c, 'senza_giorno'),
     giorno_mese: v.annullabile(c, 'giorno_mese', () => v.intero(c, 'giorno_mese', 1, 31)),
     conto_id: v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')),
+    a_conto_id: v.annullabile(c, 'a_conto_id', () => v.id(c, 'a_conto_id')),
     categoria_id: v.annullabile(c, 'categoria_id', () => v.id(c, 'categoria_id')),
     tipo: v.scelta(c, 'tipo', TIPI),
     attiva: v.booleano(c, 'attiva'),
@@ -165,9 +167,8 @@ rotteSpese.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// La spunta dice che la spesa è uscita nel mese: è solo un segno, come la casella dell'Excel (decisione 59). Non muove nessun saldo e,
-// per il promemoria di un salvadanaio, non fa il versamento (si scrive a mano nel salvadanaio). Una spesa si spunta solo nel mese in cui
-// cade (un'annuale a marzo, per intero).
+// La spunta dice che la spesa è uscita nel mese e crea la sua transazione (decisione 61): dal conto della spesa al conto di arrivo, o verso
+// fuori se non ce l'ha. Togliendo la spunta la transazione sparisce. Una spesa si spunta solo nel mese in cui cade (un'annuale a marzo, per intero).
 rotteSpese.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
@@ -180,13 +181,15 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     // Di base oggi se siamo nel mese, altrimenti il giorno della scadenza.
     const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : s.scadenza ?? p.dal);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
-    return (await db.query<{ id: string; data: string }>(
+    const spunta = (await db.query<{ id: string; data: string }>(
       'insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
+    await transazioneDaSpunta(db, { spunta, da: s.conto_id, a: s.a_conto_id, intero: Number(s.importo), mia: Number(s.mia_quota), descrizione: s.nome, categoria: s.categoria_id });
+    return spunta;
   });
   res.status(201).json(risultato);
 });
 
-// Toglie la spunta del mese.
+// Toglie la spunta del mese (e con lei la sua transazione).
 rotteSpese.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {

@@ -4,7 +4,7 @@ import { Barra, Esito, Etichetta, Interruttore, Pulsante, PulsanteIcona, Tessera
 import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
 import { ConfermaFinestra, Intestazione, NumeroChiave, RigaNumeri, Scheda, SelettorePeriodo, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
-import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
+import { opzioniCategorie, opzioniConti, useRiferimenti } from '../dati/contesto.tsx';
 import type { Budget as VoceBudget, ElencoBudget, UscitaBudget } from '../dati/tipi.ts';
 import { data, dataInTesto, dataOra, euro, importoInTesto, leggiData, leggiImporto, nomeMese, oggiIso } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
@@ -12,9 +12,9 @@ import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento } from './comuni.tsx';
 import { ConErrore, ErroreCampo, FinestraModulo, Riquadro, SezioneDivisione, serve, useDivisione, Voce } from './moduli.tsx';
 
-// Budget (decisioni 49, 57 e 59): uno per categoria. Una cifra da tenere sotto controllo, non un limite: lo speso sono le uscite scritte in
-// Movimenti con la sua categoria (o aggiunte da qui) nel mese, con qualunque conto o senza; se si sfora si conta tutto lo stesso, in rosso,
-// con di quanto si è sforato. Insieme ai movimenti è uno strumento a parte: le spese della pagina Spese non contano.
+// Budget (decisioni 49, 57 e 61): uno per categoria. Una cifra da tenere sotto controllo, non un limite: lo speso sono le uscite (i soldi che
+// escono dai conti verso fuori) del mese con la sua categoria: dalle spunte delle spese, scritte in Movimenti o aggiunte da qui, con qualunque
+// conto o senza. Gli spostamenti tra conti non contano mai. Se si sfora si conta tutto lo stesso, in rosso, con di quanto si è sforato.
 
 const speso = (b: VoceBudget) => Number(b.speso ?? 0);
 const tetto = (b: VoceBudget) => Number(b.importo);
@@ -63,7 +63,7 @@ export function Budget() {
           </View>
         </View>
         <Testo stile="dettaglio-normale" colore="testo-secondario">
-          {`Conta le uscite scritte in Movimenti con la categoria «${b.categoria}», con qualunque conto o senza. Non è un limite: se lo superi si conta tutto lo stesso.`}</Testo>
+          {`Conta le uscite con la categoria «${b.categoria}»: spese spuntate, movimenti scritti a mano e uscite aggiunte da qui. Non è un limite: se lo superi si conta tutto lo stesso.`}</Testo>
         {b.attivo ? <Pulsante tipo="secondario" icona="plus" etichetta="Aggiungi uscita" onPress={() => setUscitaPer(b)} /> : null}
         {b.uscite.length ? (
           <View>{b.uscite.map((u) => <RigaUscita key={u.id} u={u} />)}</View>
@@ -103,7 +103,7 @@ export function Budget() {
   );
 }
 
-// Una riga dell'elenco delle uscite: data e ora, descrizione, conto (etichetta), chi, importo; il cestino solo per chi l'ha scritta.
+// Una riga dell'elenco delle uscite: data e ora, descrizione, conto da cui è uscita, chi, importo; il cestino solo per chi l'ha scritta.
 function RigaUscita({ u }: { u: UscitaBudget }) {
   const compatto = useCompatto();
   const [chiede, setChiede] = useState(false);
@@ -130,7 +130,7 @@ function RigaUscita({ u }: { u: UscitaBudget }) {
   );
 }
 
-// «Aggiungi uscita»: importo, descrizione, giorno (di base oggi, con l'ora di adesso) e conto come etichetta (facoltativo).
+// «Aggiungi uscita»: importo, descrizione, giorno (di base oggi, con l'ora di adesso) e il conto da cui esce (facoltativo: ne abbassa il saldo).
 function FinestraUscita({ budget, onChiudi }: { budget: VoceBudget | null; onChiudi: () => void }) {
   const rif = useRiferimenti();
   const [importo, setImporto] = useState('');
@@ -141,7 +141,6 @@ function FinestraUscita({ budget, onChiudi }: { budget: VoceBudget | null; onChi
     if (!budget) return;
     setImporto(''); setDescrizione(''); setGiorno(dataInTesto(oggiIso())); setConto('');
   }, [budget]);
-  const conti = rif.conti.filter((c) => !c.archiviato);
   const salva = async () => {
     if (!budget) return;
     const corpo = { importo: serve(leggiImporto(importo), 'Scrivi quanto hai speso, es. 12,50', 'importo'), descrizione: descrizione.trim() || undefined,
@@ -155,8 +154,9 @@ function FinestraUscita({ budget, onChiudi }: { budget: VoceBudget | null; onChi
       <Campo etichetta="Descrizione (facoltativa)" valore={descrizione} onCambia={setDescrizione} segnaposto={budget ? `Es. ${budget.categoria.toLowerCase()}` : ''} />
       <CampoData etichetta="Giorno" valore={giorno} onCambia={setGiorno} aiuto="Oggi vale l'ora di adesso." />
       <Testo stile="dettaglio-normale" colore="testo-secondario">{budget ? `Categoria: ${nomeCategoria(budget)}. Si vede anche in Movimenti.` : ''}</Testo>
-      <Tendina etichetta="Conto (facoltativo)" valore={conto} segnaposto="Nessun conto" iconaPrima="landmark"
-        opzioni={[{ valore: '', testo: 'Nessun conto' }, ...conti.map((c) => ({ valore: c.id, testo: c.nome, icona: c.icona }))]} onCambia={setConto} />
+      <Tendina etichetta="Da quale conto (facoltativo)" valore={conto} segnaposto="Nessun conto" iconaPrima="landmark"
+        opzioni={[{ valore: '', testo: 'Nessun conto' }, ...opzioniConti(rif.conti, { tenere: [conto] })]} onCambia={setConto} />
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{conto ? 'L’uscita abbassa il saldo di questo conto.' : 'Senza conto conta nel budget ma non tocca nessun saldo.'}</Testo>
     </FinestraModulo>
   );
 }
@@ -219,7 +219,7 @@ export function FinestraBudget({ budget, categoriaId, aperta, onChiudi }: { budg
         <ConErrore campo="importo"><Campo etichetta="Cifra mensile" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus={!budget} /></ConErrore>
       </Riquadro>
       <Riquadro titolo="Cosa conta" nota="Vale per tutto il mese: non serve una data.">
-        <Testo stile="dettaglio-normale" colore="testo-secondario">Contano le uscite con questa categoria scritte in Movimenti o aggiunte dalla pagina Budget, con qualunque conto o senza. Le spese della pagina Spese non contano.</Testo>
+        <Testo stile="dettaglio-normale" colore="testo-secondario">Contano le uscite con questa categoria: le spese spuntate nella pagina Spese, i movimenti scritti a mano e le uscite aggiunte dalla pagina Budget. Gli spostamenti tra conti non contano.</Testo>
       </Riquadro>
       {!budget || budget.mia ? <SezioneDivisione stato={div} cosa="budget" cifra={leggiImporto(importo)} testoCondividi="Condividi questo budget con un'altra persona" />
       : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condiviso con te: la tua quota è ${budget.mia_percentuale}%. Può cambiarla solo chi l'ha creato.`}</Testo>}

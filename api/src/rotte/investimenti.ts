@@ -27,13 +27,14 @@ rotteInvestimenti.get('/portafoglio', async (req, res) => {
 });
 
 // Valore e soldi messi dentro alla fine di ogni mese (?mesi=12), oppure ogni settimana (?settimane=5).
-// ?portafoglio_id= per uno solo.
+// ?portafoglio_id= per uno solo. ?escludi=t:<titolo>:<portafoglio>,b:<bene> toglie degli asset dal guadagno (decisione 66).
 rotteInvestimenti.get('/andamento', async (req, res) => {
   const q = req.query as Record<string, unknown>;
   const settimane = v.intero(q, 'settimane', 2, 26);
   const mesi = v.intero(q, 'mesi', 1, 600) ?? 12;
   const id = v.id(q, 'portafoglio_id');
-  res.json(await conUtente(res.locals.utenteId, (db) => andamento(db, mesi, settimane, id)));
+  const esclusi = new Set((v.testo(q, 'escludi', false, 8000) ?? '').split(',').filter(Boolean));
+  res.json(await conUtente(res.locals.utenteId, (db) => andamento(db, mesi, settimane, id, esclusi)));
 });
 
 // Esposizione per classe, area o settore, pesata sul valore. Contano le posizioni che hanno un prezzo.

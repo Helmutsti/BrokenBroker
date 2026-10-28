@@ -7,7 +7,7 @@ import { ErroreApi } from './errori.ts';
 // (Dalla decisione 50 una spesa non crea né paga più un salvadanaio.)
 
 // Campi della spesa che si cambiano solo dal salvadanaio (categoria, note, attiva e divisione restano liberi).
-export const CAMPI_SPESA_PROMEMORIA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'giorno_mese', 'tipo', 'alimenta_obiettivo_id', 'conto_id'] as const;
+export const CAMPI_SPESA_PROMEMORIA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'giorno_mese', 'tipo', 'alimenta_obiettivo_id', 'conto_id', 'a_conto_id'] as const;
 export const CAMPI_SPESA_CREATA = ['nome', 'importo', 'ogni_mesi', 'prossima_scadenza', 'senza_giorno', 'giorno_mese', 'tipo', 'alimenta_obiettivo_id'] as const;
 
 const json = (xs: readonly string[]) => `'${JSON.stringify(xs)}'::jsonb`;
@@ -16,9 +16,9 @@ const json = (xs: readonly string[]) => `'${JSON.stringify(xs)}'::jsonb`;
 export const sqlBloccoSpesa = (s: string) => `
   case when ${s}.alimenta_obiettivo_id is not null
        then jsonb_build_object('tipo', 'salvadanaio', 'id', ${s}.alimenta_obiettivo_id,
-              'nome', coalesce((select ob.nome from obiettivi ob where ob.id = ${s}.alimenta_obiettivo_id), 'un salvadanaio'), 'campi', ${json(CAMPI_SPESA_PROMEMORIA)})
+              'nome', coalesce((select ob.nome from conti ob where ob.id = ${s}.alimenta_obiettivo_id), 'un salvadanaio'), 'campi', ${json(CAMPI_SPESA_PROMEMORIA)})
        else (select jsonb_build_object('tipo', 'salvadanaio', 'id', ob.id, 'nome', ob.nome, 'campi', ${json(CAMPI_SPESA_CREATA)})
-               from obiettivi ob where ob.spesa_creata_id = ${s}.id) end`;
+               from conti ob where ob.spesa_creata_id = ${s}.id) end`;
 
 export type Blocco = { tipo: 'salvadanaio'; id: string; nome: string; campi: string[] };
 

@@ -1,28 +1,29 @@
-import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { PoolClient } from 'pg';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { alberoObiettivi, cent, type Nodo, trova } from '../albero.ts';
+import { alberoObiettivi, cent, haTempo, type Nodo, trova } from '../albero.ts';
 import { inizioMese, meseDi, mesiFino, oggi, periodoRichiesto } from '../periodo.ts';
 import { speseDelMese } from '../spese.ts';
+import { transazioneDaSpunta } from '../transazioni.ts';
 import * as v from '../valida.ts';
 
-// Obiettivi annidabili (decisione 20) con versamenti, traguardi di copertura e
-// "crea spesa al raggiungimento" (decisione 21).
+// Salvadanai = sotto-conti (decisione 61, terza tappa), con traguardo, scadenza, traguardi di copertura e «crea la spesa al traguardo»
+// (decisioni 20 e 21). L'indirizzo resta /obiettivi. Mettere via o prelevare è uno SPOSTAMENTO tra il salvadanaio e il conto che lo
+// contiene: il totale del contenitore non cambia, cambia solo quanto è «non assegnato». I soldi da un altro conto arrivano con il promemoria.
 
 export const rotteObiettivi = Router();
 
-// Quanto serve ogni mese a un obiettivo per arrivare al traguardo in tempo
-// (senza scadenza: tutto quello che manca, come peso).
+// Quanto serve ogni mese a un salvadanaio per arrivare al traguardo in tempo (con una durata: il traguardo diviso la durata, al massimo
+// quanto manca; senza scadenza né durata: tutto quello che manca, come peso).
 function bisogno(n: Nodo, da: string, inizio: number): number {
   const manca = n.traguardo_effettivo === null ? 0 : Math.max(0, Number(n.traguardo_effettivo) - Number(n.saldo));
+  if (n.durata_mesi && n.traguardo_effettivo !== null) return Math.min(manca, Number(n.traguardo_effettivo) / n.durata_mesi);
   return n.scadenza && meseDi(n.scadenza, inizio) >= meseDi(da, inizio) ? manca / mesiFino(n.scadenza, da, inizio) : manca;
 }
 
-// Un versamento in un obiettivo con sotto-obiettivi si divide tra loro in
-// proporzione a quanto serve a ciascuno ogni mese, senza superare quanto gli
-// manca; il resto resta nell'obiettivo. Senza sotto-obiettivi va tutto lì.
+// Un versamento in un salvadanaio con sotto-salvadanai si divide tra loro in proporzione a quanto serve a ciascuno ogni mese, senza superare
+// quanto gli manca; il resto resta nel salvadanaio. Senza sotto-salvadanai va tutto lì.
 export async function dividiVersamento(db: PoolClient, id: string, importo: number): Promise<{ obiettivo_id: string; importo: string }[]> {
   const n = trova(await alberoObiettivi(db), id);
   if (!n || !n.figli.length || importo <= 0) return [{ obiettivo_id: id, importo: cent(importo) }];
@@ -39,22 +40,19 @@ export async function dividiVersamento(db: PoolClient, id: string, importo: numb
   return parti;
 }
 
-// Dopo un versamento: gli obiettivi (e gli antenati) che arrivano al traguardo con
-// "crea spesa" attiva generano la loro spesa una tantum, una volta sola.
-// Un sotto-obiettivo senza traguardo conta come non completo.
+// Dopo un movimento: i salvadanai (e i superiori) che arrivano al traguardo con «crea spesa» generano la loro spesa una tantum, una volta
+// sola; la spesa esce dal salvadanaio stesso. Un sotto-salvadanaio senza traguardo conta come non completo.
 export async function creaSpeseRaggiunte(db: PoolClient, id: string) {
   const radici = await alberoObiettivi(db);
   for (let n = trova(radici, id); n; n = n.padre_id ? trova(radici, n.padre_id) : undefined) {
     if (!n.crea_spesa || n.spesa_creata_id || !n.traguardo_effettivo) continue;
     if (Number(n.saldo) < Number(n.traguardo_effettivo)) continue;
-    // Con il traguardo preso dai sotto-obiettivi servono tutti completi: la somma
-    // cresce quando se ne aggiungono, e un solo figlio pieno non basta.
     if (n.traguardo === null && n.figli.some((f) => (f.percentuale ?? 0) < 100)) continue;
     const { rows } = await db.query<{ id: string }>(
-      `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza)
-       select fp_me(), nome, $2, null, $3 from obiettivi where id = $1 returning id`,
+      `insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, conto_id)
+       select fp_me(), nome, $2, null, $3, id from conti where id = $1 returning id`,
       [n.id, n.traguardo_effettivo, n.scadenza && n.scadenza > oggi() ? n.scadenza : oggi()]);
-    if (rows[0]) await db.query('update obiettivi set spesa_creata_id = $2 where id = $1', [n.id, rows[0].id]);
+    if (rows[0]) await db.query('update conti set spesa_creata_id = $2 where id = $1', [n.id, rows[0].id]);
   }
 }
 
@@ -62,53 +60,61 @@ rotteObiettivi.get('/', async (_req, res) => {
   res.json(await conUtente(res.locals.utenteId, alberoObiettivi));
 });
 
+// Il dettaglio con i movimenti del salvadanaio («versamenti»): + entrano, − escono; `spostamento_con` è l'altro conto (o null = fuori).
 rotteObiettivi.get('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
     const n = trova(await alberoObiettivi(db), id);
     if (!n) return undefined;
     const versamenti = (await db.query(
-      `select x.id, x.data, x.importo::text as importo, x.utente_id, u.nome as utente,
-              sp.con as spostamento_con, coalesce(sp.con_padre, false) as spostamento_con_padre
-         from versamenti x join utenti u on u.id = x.utente_id
-         left join lateral (
-           select string_agg(distinct o2.nome, ', ') as con, bool_or(o2.id = (select padre_id from obiettivi where id = x.obiettivo_id)) as con_padre
-             from versamenti y join obiettivi o2 on o2.id = y.obiettivo_id
-            where x.spostamento_id is not null and y.spostamento_id = x.spostamento_id and y.id <> x.id and sign(y.importo) <> sign(x.importo)) sp on true
-        where x.obiettivo_id = $1 order by x.data desc, x.id desc`, [id])).rows;
+      `select m.id, m.momento::date as data, (case when m.a_conto_id = $1 then m.importo else -m.importo end)::text as importo,
+              m.utente_id, u.nome as utente, k.nome as spostamento_con, (k.id = (select padre_id from conti where id = $1)) as spostamento_con_padre,
+              m.spunta_id is not null as da_spunta, m.descrizione
+         from movimenti m join utenti u on u.id = m.utente_id
+         left join conti k on k.id = case when m.a_conto_id = $1 then m.da_conto_id else m.a_conto_id end
+        where m.a_conto_id = $1 or m.da_conto_id = $1 order by m.momento desc, m.id desc`, [id])).rows;
     return { ...n, versamenti };
   });
   if (!obiettivo) throw nonTrovato('Obiettivo');
   res.json(obiettivo);
 });
 
+// Scadenza e durata non stanno insieme (decisione 63): chi ne scrive una e non nomina l'altra toglie l'altra.
 function leggi(c: Record<string, unknown>, nuovo: boolean) {
   const traguardo = v.annullabile(c, 'traguardo', () => v.importo(c, 'traguardo'));
   if (traguardo && Number(traguardo) <= 0) throw new ErroreApi(400, 'Il traguardo deve essere positivo');
+  if (c.scadenza != null && c.durata_mesi != null) throw new ErroreApi(400, 'Un salvadanaio ha una scadenza oppure una durata che si ripete, non tutte e due');
   return {
     nome: v.testo(c, 'nome', nuovo, 120),
-    padre_id: v.annullabile(c, 'padre_id', () => v.id(c, 'padre_id')),
     traguardo,
     scadenza: v.annullabile(c, 'scadenza', () => v.data(c, 'scadenza')),
+    durata_mesi: v.annullabile(c, 'durata_mesi', () => v.intero(c, 'durata_mesi', 1, 120)),
     crea_spesa: v.booleano(c, 'crea_spesa'),
     icona: v.annullabile(c, 'icona', () => v.testo(c, 'icona', false, 60)),
-    conto_id: v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')),
     nascosto: v.booleano(c, 'nascosto'),
   };
 }
+const unaSola = <T extends { scadenza?: string | null; durata_mesi?: number | null }>(x: T): T =>
+  x.scadenza && x.durata_mesi === undefined ? { ...x, durata_mesi: null } : x.durata_mesi && x.scadenza === undefined ? { ...x, scadenza: null } : x;
 
-// Il conto scelto deve essere uno che si vede (le chiavi esterne non guardano la visibilità).
-async function verificaConto(db: PoolClient, contoId: string | null | undefined): Promise<void> {
-  if (contoId && !(await db.query('select 1 from conti where id = $1', [contoId])).rowCount) throw nonTrovato('Conto');
+// Dove sta il salvadanaio: dentro un salvadanaio superiore (`padre_id`) o, in cima, dentro un conto (`conto_id`). Uno dei due serve.
+async function contenitore(db: PoolClient, c: Record<string, unknown>): Promise<string | null | undefined> {
+  if (!('padre_id' in c) && !('conto_id' in c)) return undefined;
+  const scelto = v.annullabile(c, 'padre_id', () => v.id(c, 'padre_id')) ?? v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')) ?? null;
+  if (!scelto) throw new ErroreApi(400, 'Scegli in quale conto sta il salvadanaio');
+  if (!(await db.query('select 1 from conti where id = $1', [scelto])).rowCount) throw nonTrovato('Conto');
+  return scelto;
 }
 
 rotteObiettivi.post('/', async (req, res) => {
-  const campi = leggi(v.corpo(req.body), true);
+  const c = v.corpo(req.body);
+  const campi = unaSola(leggi(c, true));
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
-    await verificaConto(db, campi.conto_id);
-    const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
+    const padre = await contenitore(db, c);
+    if (!padre) throw new ErroreApi(400, 'Scegli in quale conto sta il salvadanaio');
+    const voci = Object.entries({ ...campi, icona: campi.icona ?? 'piggy-bank', padre_id: padre }).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
-      `insert into obiettivi (proprietario_id, ${voci.map(([k]) => k).join(', ')})
+      `insert into conti (proprietario_id, ${voci.map(([k]) => k).join(', ')})
        values (fp_me(), ${voci.map((_, i) => `$${i + 1}`).join(', ')}) returning id`, voci.map(([, x]) => x));
     return trova(await alberoObiettivi(db), rows[0].id);
   });
@@ -118,12 +124,16 @@ rotteObiettivi.post('/', async (req, res) => {
 rotteObiettivi.patch('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
-  const campi = leggi(c, false);
-  const set = v.setParziale(campi, 2);
+  const campi = unaSola(leggi(c, false));
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
-    await verificaConto(db, campi.conto_id);
-    const { rowCount } = await db.query(`update obiettivi set ${set.sql} where id = $1`, [id, ...set.valori]);
-    if (!rowCount) return undefined;
+    const padre = await contenitore(db, c);
+    const set = v.setParziale({ ...campi, padre_id: padre }, 2);
+    try {
+      if (!(await db.query(`update conti set ${set.sql} where id = $1 and padre_id is not null`, [id, ...set.valori])).rowCount) return undefined;
+    } catch (e) {
+      if ((e as Error).message.includes('sotto-conto')) throw new ErroreApi(400, 'Un salvadanaio non può stare dentro un suo sotto-salvadanaio');
+      throw e;
+    }
     await creaSpeseRaggiunte(db, id);
     return trova(await alberoObiettivi(db), id);
   });
@@ -131,22 +141,23 @@ rotteObiettivi.patch('/:id', async (req, res) => {
   res.json(obiettivo);
 });
 
-// Cancellare un obiettivo cancella anche quelli che contiene (decisione 16: solo il proprietario).
+// Solo il proprietario cancella; un salvadanaio con dei soldi o con sotto-salvadanai no (prima si svuota o si spostano i sotto).
 rotteObiettivi.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    if ((await db.query('delete from obiettivi where id = $1', [id])).rowCount) return;
-    const visibile = (await db.query('select 1 from obiettivi where id = $1', [id])).rowCount;
-    throw visibile ? new ErroreApi(403, "Solo chi ha creato l'obiettivo può cancellarlo") : nonTrovato('Obiettivo');
+    const n = trova(await alberoObiettivi(db), id);
+    if (!n) throw nonTrovato('Obiettivo');
+    if (n.figli.length) throw new ErroreApi(409, 'Il salvadanaio contiene dei sotto-salvadanai: spostali o eliminali prima');
+    if (Math.abs(Number(n.saldo)) >= 0.005) throw new ErroreApi(409, 'Nel salvadanaio ci sono ancora dei soldi: rimettili nel conto prima di eliminarlo');
+    await db.query('delete from spese_previste where alimenta_obiettivo_id = $1', [id]);
+    if (!(await db.query('delete from conti where id = $1', [id])).rowCount) throw new ErroreApi(403, "Solo chi ha creato il salvadanaio può cancellarlo");
   });
   res.status(204).end();
 });
 
-// Il promemoria del salvadanaio, «Mostra nelle spese come promemoria» (decisione 51): una voce in Spese con la quota del mese, fuori dai
-// totali delle spese. Con una scadenza e un traguardo la quota è (traguardo - già messo) / mesi personali rimasti (minimo 0) e la
-// calcola l'API; altrimenti serve la cifra fissa (`importo`). È una spesa come le altre (decisione 59): la spunta è solo un segno e il
-// versamento si scrive a mano nel salvadanaio; `conto_id` è l'etichetta (di base quella del salvadanaio). Si accende, si cambia e si
-// spegne da qui (dalla spesa è bloccato, decisione 37).
+// Il promemoria del salvadanaio, «Mostra nelle spese come promemoria»: una spesa ogni mese DA un conto (`conto_id`, di base il conto
+// principale) DENTRO il salvadanaio; la spunta fa lo spostamento (decisione 61). Con una scadenza o una durata e un traguardo (suoi o dei
+// sotto-salvadanai) la quota la calcola l'API (quotaPromemoria); altrimenti serve la cifra fissa (`importo`).
 rotteObiettivi.put('/:id/promemoria', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
@@ -156,21 +167,24 @@ rotteObiettivi.put('/:id/promemoria', async (req, res) => {
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     const n = trova(await alberoObiettivi(db), id);
     if (!n) throw nonTrovato('Obiettivo');
-    const automatica = !!n.scadenza && n.traguardo_effettivo !== null;
+    const conTempo = (x: Nodo): boolean => x.figli.some((f) => haTempo(f) || conTempo(f));
+    const automatica = haTempo(n) || conTempo(n);
     const esistente = (await db.query<{ id: string; importo: string; conto_id: string | null }>('select id, importo::text, conto_id from spese_previste where alimenta_obiettivo_id = $1 limit 1', [id])).rows[0];
     if (!automatica && fisso === undefined && !(esistente && Number(esistente.importo) > 0)) {
-      throw new ErroreApi(400, 'Il salvadanaio non ha una scadenza con un traguardo: scrivi la cifra fissa da ricordare ogni mese');
+      throw new ErroreApi(400, 'Il salvadanaio non ha un traguardo con una scadenza o una durata: scrivi la cifra fissa da ricordare ogni mese');
     }
-    await verificaConto(db, contoScelto);
-    const conto = contoScelto !== undefined ? contoScelto : esistente ? esistente.conto_id : n.conto_id;
+    if (contoScelto && !(await db.query('select 1 from conti where id = $1', [contoScelto])).rowCount) throw nonTrovato('Conto');
+    if (contoScelto === id) throw new ErroreApi(400, 'I soldi devono venire da un altro conto');
+    const principale = (await db.query<{ id: string | null }>('select conto_principale_id as id from utenti where id = fp_me()')).rows[0]?.id ?? null;
+    const conto = contoScelto !== undefined ? contoScelto : esistente ? esistente.conto_id : principale;
     const importo = fisso ?? esistente?.importo ?? '0';
     // La quota è mensile (ogni mese, senza giorno): vale per tutto il mese personale (decisione 41).
     const spesaId = esistente
-      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = 1, conto_id = $4, tipo = 'investimento',
+      ? (await db.query<{ id: string }>(`update spese_previste set nome = $2, importo = $3, ogni_mesi = 1, conto_id = $4, a_conto_id = $5, tipo = 'investimento',
             giorno_mese = null, prossima_scadenza = null, senza_giorno = false where id = $1 returning id`,
-          [esistente.id, n.nome, importo, conto])).rows[0].id
-      : (await db.query<{ id: string }>(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, senza_giorno, tipo, alimenta_obiettivo_id, conto_id)
-          values (fp_me(), $1, $2, 1, null, false, 'investimento', $3, $4) returning id`, [n.nome, importo, id, conto])).rows[0].id;
+          [esistente.id, n.nome, importo, conto, id])).rows[0].id
+      : (await db.query<{ id: string }>(`insert into spese_previste (proprietario_id, nome, importo, ogni_mesi, prossima_scadenza, senza_giorno, tipo, alimenta_obiettivo_id, conto_id, a_conto_id)
+          values (fp_me(), $1, $2, 1, null, false, 'investimento', $3, $4, $3) returning id`, [n.nome, importo, id, conto])).rows[0].id;
     return (await speseDelMese(db, await periodoRichiesto(db, undefined), spesaId))[0];
   });
   res.json(spesa);
@@ -184,83 +198,53 @@ rotteObiettivi.delete('/:id/promemoria', async (req, res) => {
   res.status(204).end();
 });
 
-// Versamenti: importo positivo = metto via, negativo = prelevo. Si scrivono a mano, come i «piazzati» dell'Excel: nessun conto si muove
-// (decisione 59).
+// Mettere via (importo positivo) o prelevare (negativo): uno spostamento tra il salvadanaio e il conto che lo contiene. Con dividi = true un
+// versamento positivo si divide tra i sotto-salvadanai. Con promemoria = true («Aggiungi quota mensile») si spunta invece il promemoria del
+// mese, che fa lui lo spostamento dal suo conto (se c'è e non è già spuntato). `da_liberi` non serve più: i soldi vengono sempre dal contenitore.
 rotteObiettivi.post('/:id/versamenti', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
   const importo = v.importo(c, 'importo', true)!;
   if (Number(importo) === 0) throw new ErroreApi(400, "L'importo non può essere zero");
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
-    if (!(await db.query('select 1 from obiettivi where id = $1', [id])).rowCount) throw nonTrovato('Obiettivo');
-    // "Aggiungi quota mensile": il versamento spunta anche il promemoria del mese, se c'è e non è già spuntato.
-    let spuntaId: string | null = null;
+    const n = (await db.query<{ padre_id: string | null; nome: string }>('select padre_id, nome from conti where id = $1', [id])).rows[0];
+    if (!n?.padre_id) throw nonTrovato('Obiettivo');
     if (v.booleano(c, 'promemoria')) {
       const voce = (await db.query<{ id: string }>('select id from spese_previste where alimenta_obiettivo_id = $1 and attiva', [id])).rows[0];
       const p = await periodoRichiesto(db, undefined);
       const s = voce && (await speseDelMese(db, p, voce.id))[0];
       if (s && s.nel_mese && !s.uscita) {
         const giorno = oggi() >= p.dal && oggi() <= p.al ? oggi() : s.scadenza ?? p.dal;
-        spuntaId = (await db.query<{ id: string }>('insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id', [voce.id, giorno])).rows[0].id;
+        const spunta = (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [voce.id, giorno])).rows[0];
+        await transazioneDaSpunta(db, { spunta, da: s.conto_id, a: s.a_conto_id, intero: Number(s.importo), mia: Number(s.mia_quota), descrizione: s.nome, categoria: null });
+        await creaSpeseRaggiunte(db, id);
+        return trova(await alberoObiettivi(db), id);
       }
     }
-    const data = v.data(c, 'data') ?? null;
-    const inserisci = async (obiettivoId: string, x: string, spunta: string | null, spostamento: string | null): Promise<void> => {
-      await db.query(
-        'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id, spostamento_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4, $5)',
-        [obiettivoId, data, x, spunta, spostamento]);
-    };
-    if (v.booleano(c, 'da_liberi')) {
-      // Spostamento (decisione 46): i soldi passano tra i liberi del salvadanaio superiore e questo sotto-salvadanaio,
-      // il totale del superiore non cambia. Importo positivo = dai liberi al sotto-salvadanaio, negativo = dal sotto-salvadanaio ai liberi.
-      const padre = (await db.query<{ padre_id: string | null }>('select padre_id from obiettivi where id = $1', [id])).rows[0].padre_id;
-      if (!padre) throw new ErroreApi(400, 'Solo un sotto-salvadanaio ha i liberi di un salvadanaio superiore');
-      // Blocco le due righe (sempre nello stesso ordine) così due spostamenti insieme non spendono due volte gli stessi liberi.
-      await db.query('select id from obiettivi where id = any($1::uuid[]) order by id for update', [[id, padre]]);
-      const propri = async (oid: string) => Number((await db.query<{ t: string }>('select coalesce(sum(importo), 0)::text as t from versamenti where obiettivo_id = $1', [oid])).rows[0].t);
-      const quanto = Math.abs(Number(importo)), gruppo = randomUUID();
-      if (Number(importo) > 0) {
-        const liberi = await propri(padre);
-        if (quanto > liberi + 0.005) throw new ErroreApi(400, `Nei liberi ci sono solo ${cent(Math.max(0, liberi)).replace('.', ',')} €`);
-        const parti = v.booleano(c, 'dividi') ? await dividiVersamento(db, id, quanto) : [{ obiettivo_id: id, importo: cent(quanto) }];
-        await inserisci(padre, cent(-quanto), null, gruppo);
-        for (const [k, x] of parti.entries()) await inserisci(x.obiettivo_id, x.importo, k === 0 ? spuntaId : null, gruppo);
-      } else {
-        const proprio = await propri(id);
-        if (quanto > proprio + 0.005) throw new ErroreApi(400, `Nel sotto-salvadanaio ci sono solo ${cent(Math.max(0, proprio)).replace('.', ',')} € di suoi: il resto è nei sotto-salvadanai`);
-        await inserisci(id, cent(-quanto), null, gruppo);
-        await inserisci(padre, cent(quanto), null, gruppo);
-      }
-    } else {
-      // Con dividi = true un versamento positivo si divide tra i sotto-obiettivi.
-      const parti = v.booleano(c, 'dividi') && Number(importo) > 0 ? await dividiVersamento(db, id, Number(importo)) : [{ obiettivo_id: id, importo }];
-      for (const [k, x] of parti.entries()) await inserisci(x.obiettivo_id, x.importo, k === 0 ? spuntaId : null, null);
-    }
+    const momento = v.data(c, 'data') ?? null;
+    const sposta = async (da: string, a: string, x: number, descrizione: string) => db.query(
+      `insert into movimenti (utente_id, da_conto_id, a_conto_id, importo, momento, descrizione)
+       values (fp_me(), $1, $2, $3, case when $4::date is null or $4::date = current_date then now() else ($4::date + time '12:00')::timestamptz end, $5)`,
+      [da, a, cent(x), momento, descrizione]);
+    if (Number(importo) > 0) {
+      const parti = v.booleano(c, 'dividi') ? await dividiVersamento(db, id, Number(importo)) : [{ obiettivo_id: id, importo }];
+      for (const x of parti) await sposta(n.padre_id, x.obiettivo_id, Number(x.importo), `Messo via in ${n.nome}`);
+    } else await sposta(id, n.padre_id, -Number(importo), `Tolto da ${n.nome}`);
     await creaSpeseRaggiunte(db, id);
     return trova(await alberoObiettivi(db), id);
   });
   res.status(201).json(obiettivo);
 });
 
+// Toglie un movimento del salvadanaio: se nasce da una spunta toglie la spunta (e con lei il movimento), altrimenti solo chi l'ha fatto.
 rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    const eliminato = (await db.query<{ spunta: string | null; spostamento: string | null }>('delete from versamenti where id = $1 returning promemoria_spunta_id as spunta, spostamento_id as spostamento', [id])).rows[0];
-    if (eliminato) {
-      if (eliminato.spunta) await db.query('delete from spunte where id = $1', [eliminato.spunta]);
-      // Uno spostamento si annulla per intero: spariscono anche gli altri versamenti dello stesso spostamento.
-      if (eliminato.spostamento) {
-        const altri = await db.query<{ spunta: string | null; obiettivo_id: string }>('delete from versamenti where spostamento_id = $1 returning promemoria_spunta_id as spunta, obiettivo_id', [eliminato.spostamento]);
-        for (const x of altri.rows) if (x.spunta) await db.query('delete from spunte where id = $1', [x.spunta]);
-        // Se i soldi spostati sono già stati usati (i liberi o il sotto-salvadanaio andrebbero sotto zero) lo spostamento non si annulla.
-        const coinvolti = [...new Set(altri.rows.map((x) => x.obiettivo_id))];
-        const sotto = await db.query('select obiettivo_id from versamenti where obiettivo_id = any($1::uuid[]) group by obiettivo_id having sum(importo) < -0.005', [coinvolti]);
-        if (sotto.rowCount) throw new ErroreApi(409, 'Non si può annullare lo spostamento: i soldi spostati sono già stati usati');
-      }
-      return;
-    }
-    const visibile = (await db.query('select 1 from versamenti where id = $1', [id])).rowCount;
-    throw visibile ? new ErroreApi(403, "Può cancellarlo chi l'ha fatto o il proprietario dell'obiettivo") : nonTrovato('Versamento');
+    const m = (await db.query<{ spunta_id: string | null; mio: boolean }>('select spunta_id, utente_id = fp_me() as mio from movimenti where id = $1', [id])).rows[0];
+    if (!m) throw nonTrovato('Versamento');
+    if (m.spunta_id) { await db.query('delete from spunte where id = $1', [m.spunta_id]); return; }
+    if (!m.mio) throw new ErroreApi(403, "Può cancellarlo solo chi l'ha fatto");
+    await db.query('delete from movimenti where id = $1', [id]);
   });
   res.status(204).end();
 });
@@ -272,9 +256,9 @@ rotteObiettivi.post('/:id/traguardi', async (req, res) => {
   const importo = v.importo(c, 'importo', true)!;
   if (Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
   const traguardo = await conUtente(res.locals.utenteId, async (db) => (await db.query(
-    `insert into traguardi_copertura (obiettivo_id, nome, importo, ordine)
-     values ($1, $2, $3, coalesce($4, (select count(*) from traguardi_copertura where obiettivo_id = $1)))
-     returning id, obiettivo_id, nome, importo::text as importo, ordine`,
+    `insert into traguardi_copertura (conto_id, nome, importo, ordine)
+     values ($1, $2, $3, coalesce($4, (select count(*) from traguardi_copertura where conto_id = $1)))
+     returning id, conto_id as obiettivo_id, nome, importo::text as importo, ordine`,
     [id, v.testo(c, 'nome', true, 120), importo, v.intero(c, 'ordine', 0, 1000) ?? null])).rows[0]);
   res.status(201).json(traguardo);
 });
@@ -287,7 +271,7 @@ rotteObiettivi.patch('/traguardi/:id', async (req, res) => {
   const set = v.setParziale({ nome: v.testo(c, 'nome', false, 120), importo, ordine: v.intero(c, 'ordine', 0, 1000) }, 2);
   const traguardo = await conUtente(res.locals.utenteId, async (db) => (await db.query(
     `update traguardi_copertura set ${set.sql} where id = $1
-     returning id, obiettivo_id, nome, importo::text as importo, ordine`, [id, ...set.valori])).rows[0]);
+     returning id, conto_id as obiettivo_id, nome, importo::text as importo, ordine`, [id, ...set.valori])).rows[0]);
   if (!traguardo) throw nonTrovato('Traguardo');
   res.json(traguardo);
 });

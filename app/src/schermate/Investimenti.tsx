@@ -26,6 +26,11 @@ export function Investimenti() {
   const portafogli = useDati<Portafoglio[]>('/investimenti/portafogli');
   const [vista, setVista] = useState<string>('tutti');
   const [periodo, setPeriodo] = useState<Periodo>('12');
+  // Il grafico mostra il guadagno nel tempo, in euro o in percentuale (decisione 65).
+  const [unita, setUnita] = useState<'€' | '%'>('€');
+  // Gli asset tolti dal guadagno (decisione 66): solo mentre si guarda la pagina, non si salvano. Restano nel valore.
+  const [esclusi, setEsclusi] = useState<Set<string>>(new Set());
+  const cambiaEscluso = (k: string) => setEsclusi((x) => { const n = new Set(x); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [composizioneDi, setComposizioneDi] = useState<'classe' | 'area' | 'settore'>('classe');
   const [aggiungi, setAggiungi] = useState<PartenzaAggiunta | null>(null);
   const [modifica, setModifica] = useState<Portafoglio | 'nuovo' | null>(null);
@@ -41,13 +46,20 @@ export function Investimenti() {
   const primo = [...lottiVista.map((l) => l.data), ...(p?.beni ?? []).map((b) => b.data_acquisto ?? b.valore_al ?? '').filter(Boolean)].sort()[0];
   // Un mese: un punto a settimana. Altrimenti un punto al mese, "da sempre" dal primo investimento.
   const mesi = periodo === 'tutto' ? Math.min(600, Math.max(2, primo ? mesiFino(oggiIso(), primo) : 12)) : Number(periodo) + 1;
-  const andamento = useDati<PuntoAndamento[]>(`/investimenti/andamento?${periodo === '1' ? 'settimane=5' : `mesi=${mesi}`}${filtro ? `&${filtro}` : ''}`).dati ?? [];
+  const andamento = useDati<PuntoAndamento[]>(`/investimenti/andamento?${periodo === '1' ? 'settimane=5' : `mesi=${mesi}`}${filtro ? `&${filtro}` : ''}${esclusi.size ? `&escludi=${encodeURIComponent([...esclusi].join(','))}` : ''}`).dati ?? [];
   const etichetta = (x: PuntoAndamento) => (periodo === '1' ? data(x.al, 'corta') : mesi > 12 ? `${meseCorto(x.mese)} ${x.mese.slice(2, 4)}` : meseCorto(x.mese));
   const esposizione = useDati<Esposizione>(`/investimenti/esposizione${filtro ? `?${filtro}` : ''}`).dati;
 
   if (!portafogli.dati || !p) return <Caricamento errore={portafogli.errore ?? gen.errore} />;
   const scelto = elenco.find((x) => x.id === vista);
-  const guadagno = Number(p.guadagno);
+  // Il guadagno di ogni punto: c'è appena si possiede qualcosa (anche un regalo, costato 0); in percentuale serve un costo.
+  const puntiGuadagno = andamento.map((x) => {
+    const valore = Number(x.valore), messo = Number(x.messo_dentro), g = valore - messo;
+    const c = unita === '€' ? (valore > 0 || messo > 0 ? g : null) : messo > 0 ? (g / messo) * 100 : null;
+    return { etichetta: etichetta(x), valore: c };
+  });
+  const tolti = guadagnoSenza(p.posizioni, p.beni, esclusi);
+  const guadagno = tolti ? tolti.guadagno : Number(p.guadagno);
   const totale = Number(p.valore);
   const ordinati = [...elenco].sort((a, b) => Number(b.conta_nel_patrimonio) - Number(a.conta_nel_patrimonio));
   const voceComposizione = (esposizione?.[composizioneDi] ?? []).map((x) => ({ nome: x.voce, icona: composizioneDi === 'classe' ? 'layers' : composizioneDi === 'area' ? 'globe' : 'factory', peso: x.peso }));
@@ -78,7 +90,7 @@ export function Investimenti() {
               <View style={{ flex: compatto ? undefined : 1, gap: d['spazio-testo'] }}>
                 <Testo stile="etichetta-gruppo" colore="testo-secondario">{scelto ? 'VALORE OGGI' : 'VALORE DI TUTTI I PORTAFOGLI OGGI'}</Testo>
                 <Testo stile="numero-grande">{euro(p.valore)}</Testo>
-                <Testo stile="corpo-forte" colore={guadagno >= 0 ? 'testo-ok' : 'testo-errore'}>{`${guadagnoTesto(guadagno, p.guadagno_percentuale)} da sempre`}</Testo>
+                <Testo stile="corpo-forte" colore={guadagno >= 0 ? 'testo-ok' : 'testo-errore'}>{`${guadagnoTesto(guadagno, tolti ? tolti.percentuale : p.guadagno_percentuale)} da sempre${tolti ? ` · senza ${tolti.quanti} asset` : ''}`}</Testo>
                 <Testo colore="testo-secondario">{`Investiti ${euro(p.messo_dentro)}`}</Testo>
                 {scelto && !scelto.conta_nel_patrimonio ? <Testo stile="dettaglio-normale" colore="testo-secondario">Portafoglio di prova: non conta nei totali generali né nel patrimonio.</Testo> : null}
                 {p.incompleto ? <Esito tono="attenzione" testo={`Alcuni prezzi mancano (${senza}): il valore è parziale e quegli asset non contano nel guadagno.`} /> : null}
@@ -86,9 +98,17 @@ export function Investimenti() {
               <SceltaSegmenti etichetta="Periodo del grafico" larghezzaPiena={compatto} valore={periodo} onCambia={setPeriodo}
                 opzioni={[{ valore: '1', testo: '1 mese' }, { valore: '6', testo: '6 mesi' }, { valore: '12', testo: '1 anno' }, { valore: 'tutto', testo: 'Da sempre' }]} />
             </View>
-            {andamento.length > 1 && (totale > 0 || Number(p.costo) > 0)
-              ? <GraficoLinea punti={andamento.map((x) => ({ etichetta: etichetta(x), valore: Number(x.valore), messo: Number(x.messo_dentro) }))} />
-              : <Vuoto testo="Il grafico compare quando c'è almeno un investimento." />}
+            {andamento.length > 1 && (totale > 0 || Number(p.costo) > 0) ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: d['spazio-colonne'] }}>
+                  <Testo stile="corpo-forte">Guadagno nel tempo</Testo>
+                  <SceltaSegmenti etichetta="Guadagno in" valore={unita} onCambia={setUnita} opzioni={[{ valore: '€', testo: '€' }, { valore: '%', testo: '%' }]} />
+                </View>
+                {puntiGuadagno.some((x) => x.valore !== null)
+                  ? <GraficoLinea unita={unita} punti={puntiGuadagno} />
+                  : <Vuoto testo="In percentuale non si può calcolare: gli asset che contano non sono costati niente (per esempio un regalo). Guardalo in euro." />}
+              </>
+            ) : <Vuoto testo="Il grafico compare quando c'è almeno un investimento." />}
           </View>
           <View style={{ width: compatto ? undefined : 300, gap: d['spazio-elenco'] }}>
             <SceltaSegmenti etichetta="Composizione" larghezzaPiena valore={composizioneDi} onCambia={setComposizioneDi}
@@ -100,15 +120,30 @@ export function Investimenti() {
         </View>
       </Scheda>
       {ordinati.length === 0 ? <Scheda><Vuoto testo="Nessun portafoglio. Creane uno, poi aggiungi titoli, fondi pensione o metalli preziosi." /></Scheda> : null}
-      {ordinati.map((x) => <SchedaPortafoglio key={x.id} p={x} portafogli={ordinati} onModifica={() => setModifica(x)} onAggiungi={setAggiungi} />)}
+      {ordinati.map((x) => <SchedaPortafoglio key={x.id} p={x} portafogli={ordinati} onModifica={() => setModifica(x)} onAggiungi={setAggiungi} esclusi={esclusi} onEscludi={cambiaEscluso} />)}
       <FinestraPortafoglio portafoglio={modifica === 'nuovo' ? null : modifica} aperta={!!modifica} onChiudi={() => setModifica(null)} />
       <FinestraAggiungi aperta={!!aggiungi} partenza={aggiungi ?? {}} onChiudi={() => setAggiungi(null)} />
     </>
   );
 }
 
+// La chiave di un asset per «togli dal guadagno» (come la vuole l'API dell'andamento).
+const chiaveTitolo = (x: Posizione) => `t:${x.titolo_id}:${x.portafoglio_id}`;
+const chiaveBene = (b: Bene) => `b:${b.id}`;
+// Il guadagno senza gli asset tolti, come lo calcola l'API: solo le voci con un valore. Null se non ne è tolto nessuno di questi.
+function guadagnoSenza(posizioni: Posizione[], beni: Bene[], esclusi: Set<string>) {
+  const voci = [...posizioni.map((x) => ({ k: chiaveTitolo(x), valore: x.valore, costo: x.costo })), ...beni.map((b) => ({ k: chiaveBene(b), valore: b.valore, costo: b.costo }))];
+  const quanti = voci.filter((x) => esclusi.has(x.k)).length;
+  if (!quanti) return null;
+  const tenute = voci.filter((x) => !esclusi.has(x.k) && x.valore !== null);
+  const valore = tenute.reduce((t, x) => t + Number(x.valore), 0), costo = tenute.reduce((t, x) => t + Number(x.costo), 0);
+  return { guadagno: Math.round((valore - costo) * 100) / 100, percentuale: costo > 0 ? Math.round(((valore - costo) / costo) * 10000) / 100 : null, quanti };
+}
+
 // Un portafoglio: testata (nome, valore, guadagno), avviso se mancano prezzi, poi titoli e beni.
-function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi }: { p: Portafoglio; portafogli: Portafoglio[]; onModifica: () => void; onAggiungi: (x: PartenzaAggiunta) => void }) {
+function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi, esclusi, onEscludi }: {
+  p: Portafoglio; portafogli: Portafoglio[]; onModifica: () => void; onAggiungi: (x: PartenzaAggiunta) => void; esclusi: Set<string>; onEscludi: (k: string) => void;
+}) {
   const compatto = useCompatto();
   const dett = useDati<PortafoglioDettaglio>(p.vuoto ? null : `/investimenti/portafogli/${p.id}`).dati;
   const [sopra, setSopra] = useState(false);
@@ -122,7 +157,8 @@ function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi }: { p: Porta
   useEffect(() => { if (posId && dett && !posizione) setPosId(null); }, [posId, dett, posizione]);
   useEffect(() => { if (beneId && dett && !bene) setBeneId(null); }, [beneId, dett, bene]);
 
-  const g = Number(p.guadagno);
+  const tolti = guadagnoSenza(posizioni, beni, esclusi);
+  const g = tolti ? tolti.guadagno : Number(p.guadagno);
   const costo = Number(p.costo);
   const senza = VOCI_SENZA_PREZZO(p), vecchi = VOCI_VECCHIE(p);
 
@@ -137,6 +173,7 @@ function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi }: { p: Porta
       prezzo: prezzoDi(x.prezzo), valore: x.valore === null ? '—' : euro(x.valore), peso: pesoTesto(x.peso),
       guadagno: x.guadagno === null ? '—' : guadagnoTesto(Number(x.guadagno), x.guadagno_percentuale), positivo: x.guadagno === null ? null : Number(x.guadagno) >= 0,
       avviso: avviso(x.stato, x.prezzo_al, 'prezzo'), onApri: () => setPosId(x.titolo_id),
+      conta: { attiva: !esclusi.has(chiaveTitolo(x)), onCambia: () => onEscludi(chiaveTitolo(x)) },
     },
   }));
   const righeBeni = beni.map((b): { riga: RigaTabellaPortafoglio; valore: number | null } => {
@@ -151,6 +188,7 @@ function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi }: { p: Porta
         chiave: `b-${b.id}`, nome: b.nome, dettaglio, prezzo: mercato ? (b.euro_grammo ? `${euro(b.euro_grammo)}/g` : '—') : '—',
         valore: b.valore === null ? '—' : euro(b.valore), peso: pesoTesto(b.peso ?? null), guadagno: b.guadagno === null ? '—' : guadagnoTesto(Number(b.guadagno), b.guadagno_percentuale),
         positivo: b.guadagno === null ? null : Number(b.guadagno) >= 0, avviso: mercato ? avviso(b.stato, b.valore_al, 'quotazione') : undefined, onApri: () => setBeneId(b.id),
+        conta: { attiva: !esclusi.has(chiaveBene(b)), onCambia: () => onEscludi(chiaveBene(b)) },
       },
     };
   });
@@ -158,7 +196,7 @@ function SchedaPortafoglio({ p, portafogli, onModifica, onAggiungi }: { p: Porta
   const righe = [...righePosizioni, ...righeBeni].sort((a, b) => (b.valore ?? -Infinity) - (a.valore ?? -Infinity)).map((x) => x.riga);
   const matita = <PulsanteIcona icona="pencil" etichetta={`Modifica ${p.nome}`} fantasma nascosto={!compatto && !sopra} onPress={onModifica} />;
   const cifre = [['Valore', euro(p.valore), 'testo-primario'], ['Investiti', euro(costo), 'testo-primario'],
-    ['Guadagno', p.vuoto ? '—' : guadagnoTesto(g, p.guadagno_percentuale), p.vuoto ? 'testo-secondario' : g >= 0 ? 'testo-ok' : 'testo-errore']] as const;
+    [tolti ? `Guadagno senza ${tolti.quanti} asset` : 'Guadagno', p.vuoto ? '—' : guadagnoTesto(g, tolti ? tolti.percentuale : p.guadagno_percentuale), p.vuoto ? 'testo-secondario' : g >= 0 ? 'testo-ok' : 'testo-errore']] as const;
 
   return (
     <View {...{ onMouseEnter: () => setSopra(true), onMouseLeave: () => setSopra(false) }} style={{ width: '100%' }}>

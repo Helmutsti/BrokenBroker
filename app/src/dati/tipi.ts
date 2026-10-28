@@ -1,31 +1,41 @@
 // Forme delle risposte dell'API (importi come testo decimale, date AAAA-MM-GG).
 
 export type Profilo = { id: string; email: string; nome: string; stipendio_netto: string | null; giorno_paga: number | null; inizio_mese: number; creato_il: string;
-  sul_conto: string | null; sul_conto_al: string | null }; // il saldo in alto, scritto a mano (decisione 59)
+  sul_conto: string | null; sul_conto_al: string | null; // vecchio saldo scritto a mano (decisione 59): ora vale il saldo del conto principale
+  // Decisione 61: il conto che segue la pagina Spese e il conto dove va ogni mese la quota delle annuali.
+  conto_principale_id: string | null };
 
-// Un conto è solo un'etichetta (decisione 59): nome e icona, per dire dove sta una spesa, una rata, un salvadanaio o un movimento.
-export type Conto = { id: string; nome: string; icona: string; archiviato: boolean };
-// Un movimento (decisione 59): un'entrata o un'uscita scritta a mano (o registrata da un budget), `importo` positivo. Il conto è solo
-// un'etichetta; `modificabile` = scritto da chi guarda; la categoria c'è solo per le uscite.
-export type TipoMovimento = 'entrata' | 'uscita';
+// Un conto (decisione 61): un albero (conto → sotto-conti). `saldo_scritto` è il saldo scritto a mano (al momento `saldo_scritto_il`),
+// `saldo` quello di adesso, mosso dalle transazioni. Il saldo di un contenitore comprende i sotto-conti; `non_assegnato` = saldo − sotto-conti
+// (null senza sotto-conti o senza saldo). `condiviso`: condiviso da chi l'ha creato (i sotto-conti seguono il contenitore).
+export type Conto = { id: string; nome: string; icona: string; archiviato: boolean; padre_id: string | null; mio: boolean; condiviso: boolean;
+  saldo_scritto: string | null; saldo_scritto_il: string | null; saldo: string | null; non_assegnato: string | null };
+// Una transazione (decisione 61): da un conto a un altro (spostamento), da fuori (entrata) o verso fuori (uscita); `importo` positivo.
+// `da_spunta`: nata dalla spunta di una spesa o di una rata (si cambia togliendo la spunta); `modificabile` = scritta a mano da chi guarda.
+// La categoria c'è solo per entrate e uscite.
+export type TipoMovimento = 'entrata' | 'uscita' | 'spostamento';
 export type Movimento = { id: string; tipo: TipoMovimento; importo: string; momento: string; data: string; descrizione: string;
-  conto_id: string | null; conto: string | null; conto_icona: string | null; categoria_id: string | null; categoria: string | null; budget_id: string | null;
+  da_conto_id: string | null; da: string | null; a_conto_id: string | null; a: string | null;
+  categoria_id: string | null; categoria: string | null; budget_id: string | null; da_spunta: boolean;
   utente: string | null; modificabile: boolean };
 export type ElencoMovimenti = { movimenti: Movimento[]; mesi: string[]; mese_in_corso: string };
 
 export type Categoria = { id: string; proprietario_id: string; padre_id: string | null; nome: string; tipo: 'uscita' | 'entrata'; colore: string | null; icona: string | null; ordine: number; figli?: Categoria[];
   budget?: { id: string; importo: string; attivo: boolean } | null }; // il budget della categoria, se c'è (decisioni 49 e 51)
 
-// Voci collegate (decisioni 37 e 50): il promemoria di un salvadanaio e la spesa creata al raggiungimento si cambiano dal salvadanaio; `campi` sono quelli bloccati.
+// Voci collegate (decisioni 37, 50 e 61): il promemoria di un salvadanaio e la spesa creata al raggiungimento si cambiano dal salvadanaio;
+// la quota delle annuali la calcola l'app (i suoi conti si scelgono in Impostazioni). `campi` sono quelli bloccati.
 export type Blocco = { tipo: 'salvadanaio'; id: string; nome: string; campi: string[] };
 export type TipoSpesa = 'fissa' | 'investimento';
 export type Spesa = {
   id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; conto_id: string | null; conto: string | null;
+  // Promemoria di una transazione (decisione 61): esce da `conto_id` e va su `a_conto_id` (vuoto = i soldi escono: è una spesa vera).
+  a_conto_id: string | null; a_conto: string | null;
   categoria_id: string | null; categoria: string | null; categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: TipoSpesa; attiva: boolean; note: string | null; mia: boolean; condivisa: boolean;
   nuova: boolean; creata_da: string | null; // ricevuta e non ancora aperta né categorizzata (decisione 43); chi l'ha creata
-  alimenta_obiettivo_id: string | null; // promemoria di questo salvadanaio: la spunta è solo un segno (decisione 59)
-  bloccato_da: Blocco | null; // nasce da un salvadanaio: promemoria o spesa creata al raggiungimento
+  alimenta_obiettivo_id: string | null; // promemoria di questo salvadanaio
+  bloccato_da: Blocco | null; // nasce da un salvadanaio (promemoria o spesa creata al raggiungimento) o è la quota delle annuali
   scadenza: string | null; nel_mese: boolean; uscita: boolean;
   mia_percentuale: number; mia_quota: string; quote?: { utente_id: string; nome: string; percentuale: string }[];
 };
@@ -44,16 +54,20 @@ export type Budget = {
 export type ElencoBudget = { periodo: Periodo; budget: Budget[] };
 
 export type Traguardo = { id: string; nome: string; importo: string; ordine: number; percentuale: number };
+// Un salvadanaio (decisione 61): un sotto-conto. `padre_id` è il salvadanaio superiore (null in cima); `conto_id` il conto in cima che
+// lo contiene (per i sotto-salvadanai quello del superiore, `conto_ereditato`). `saldo` comprende i sotto-salvadanai, `versato` è la parte propria.
 export type Obiettivo = {
-  id: string; padre_id: string | null; nome: string; traguardo: string | null; scadenza: string | null; crea_spesa: boolean; spesa_creata_id: string | null; icona: string | null; nascosto: boolean;
-  // Conto del salvadanaio: quello scelto (conto_proprio_id) o, se manca, quello del padre (conto_ereditato).
+  // Una scadenza (una data) oppure una durata che si ripete in mesi, oppure niente (decisione 63).
+  id: string; padre_id: string | null; nome: string; traguardo: string | null; scadenza: string | null; durata_mesi: number | null; crea_spesa: boolean; spesa_creata_id: string | null; icona: string | null; nascosto: boolean;
   conto_proprio_id: string | null; conto_id: string | null; conto: string | null; conto_icona: string | null; conto_ereditato: boolean;
   mio: boolean; condiviso: boolean; versato: string; saldo: string; traguardo_effettivo: string | null; percentuale: number | null;
   traguardi: Traguardo[]; figli: Obiettivo[];
-  // Il promemoria «Mostra nelle spese»: `importo` è la quota di questo mese, `importo_fisso` la cifra scritta (usata senza scadenza o traguardo).
+  // Il promemoria «Mostra nelle spese»: `importo` è la quota di questo mese, `importo_fisso` la cifra scritta (usata senza scadenza o traguardo);
+  // `conto_id` è il conto da cui partono i soldi verso il salvadanaio.
   alimentato_da: { id: string; importo: string; importo_fisso: string; automatica: boolean; ogni_mesi: number | null; conto_id: string | null } | null;
-  // Se è uno spostamento tra i liberi del superiore e un sotto-salvadanaio (decisione 46): l'altro salvadanaio e se è il superiore di questo.
-  versamenti?: { id: string; data: string; importo: string; utente: string; spostamento_con?: string | null; spostamento_con_padre?: boolean }[];
+  // Con GET /obiettivi/:id: i movimenti del salvadanaio (+ entrano, − escono); `spostamento_con` è l'altro conto (null = fuori),
+  // `da_spunta` se nasce dalla spunta del promemoria in Spese.
+  versamenti?: { id: string; data: string; importo: string; utente: string; spostamento_con: string | null; spostamento_con_padre: boolean; da_spunta: boolean; descrizione: string | null }[];
 };
 
 export type Rata = {
@@ -110,5 +124,5 @@ export type VoceCatalogo = {
 };
 
 export type Persona = { id: string; nome: string; email: string; io: boolean };
-export type Condivisione = { id: string; mia: boolean; voce: 'spesa' | 'obiettivo' | 'budget'; voce_id: string; nome: string | null; proprietario: string; condiviso_con: string; condiviso_con_id: string; proprietario_id: string };
+export type Condivisione = { id: string; mia: boolean; voce: 'conto' | 'spesa' | 'budget'; voce_id: string; nome: string | null; proprietario: string; condiviso_con: string; condiviso_con_id: string; proprietario_id: string };
 export type PersonaSistema = { id: string; nome: string };

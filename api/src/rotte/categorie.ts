@@ -63,7 +63,7 @@ rotteCategorie.get('/spese', async (req, res) => {
     const p = await periodoRichiesto(db, req.query.mese);
     const per = new Map<string, number>();
     for (const s of await speseDelMese(db, p)) {
-      if (s.categoria_id && s.attiva && s.nel_mese && !s.alimenta_obiettivo_id) per.set(s.categoria_id, (per.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
+      if (s.categoria_id && s.attiva && s.nel_mese && !s.alimenta_obiettivo_id && !s.a_conto_id) per.set(s.categoria_id, (per.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
     }
     for (const r of await leggiRate(db)) {
       if (r.categoria_id && r.attiva && scadenzaRata(r, p)) per.set(r.categoria_id, (per.get(r.categoria_id) ?? 0) + Number(r.importo_rata));

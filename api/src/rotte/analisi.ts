@@ -28,7 +28,8 @@ async function stipendio(db: PoolClient): Promise<number> {
 
 // Il mese pianificato: le spese pesano per intero nel mese in cui cadono (le annuali solo a marzo, se escono a marzo). I budget (decisione 58) non entrano: sono solo una lente sui movimenti.
 async function pianoDelMese(db: PoolClient, p: Periodo) {
-  const spese = (await speseDelMese(db, p)).filter((s) => s.attiva);
+  // Gli spostamenti tra conti (quota delle annuali compresa) non sono spese (decisione 61): le annuali contano quando escono.
+  const spese = (await speseDelMese(db, p)).filter((s) => s.attiva && !s.a_conto_id);
   const rate = (await leggiRate(db)).filter((r) => scadenzaRata(r, p));
   const quota = (s: (typeof spese)[number], importo: number) => (importo * s.mia_percentuale) / 100;
   const fisse = spese.filter((s) => s.tipo === 'fissa' && s.nel_mese);

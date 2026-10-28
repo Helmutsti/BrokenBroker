@@ -48,6 +48,10 @@ export function quando(s: Spesa, inizio = 1): string {
   return `${nome} · ${s.ogni_mesi === 12 ? 'ogni anno' : s.ogni_mesi === 24 ? 'ogni 2 anni' : `ogni ${s.ogni_mesi} mesi`}`;
 }
 
+// Da dove esce una spesa (decisione 61): il conto, o «BPER → Deposito» se va su un altro conto (uno spostamento, non una spesa).
+export const daA = (s: Pick<Spesa, 'conto' | 'a_conto_id' | 'a_conto'>): string | null =>
+  s.a_conto_id ? `${s.conto ?? 'Senza conto'} → ${s.a_conto ?? 'un altro conto'}` : s.conto;
+
 // Quota scritta accanto all'importo: "58,90 € · ½" quando la spesa è divisa a metà.
 export const segnoQuota = (s: Spesa) => (s.mia_percentuale === 50 ? ' · ½' : s.mia_percentuale > 0 && s.mia_percentuale < 100 ? ` · ${s.mia_percentuale}%` : '');
 
@@ -73,7 +77,7 @@ export function vociDelMese(el: ElencoSpese, perUscita?: (a: Spesa, b: Spesa) =>
   if (perUscita) delMese.sort(perUscita);
   const fisse = delMese.filter((s) => s.tipo === 'fissa');
   const investimenti = delMese.filter((s) => s.tipo === 'investimento' && !s.alimenta_obiettivo_id);
-  // «Ricordami»: la spunta è solo un segno.
+  // «Ricordami» dei salvadanai.
   const salvadanai = delMese.filter((s) => s.alimenta_obiettivo_id);
   return { fisse, investimenti, salvadanai, delConto: [...fisse, ...investimenti, ...salvadanai] };
 }
@@ -132,7 +136,8 @@ export function proposta(o: Obiettivo, ogni: number, inizio = 1): number | null 
     const parti = o.figli.map((f) => proposta(f, ogni, inizio)).filter((x): x is number => x !== null);
     return parti.length ? parti.reduce((t, x) => t + x, 0) : null;
   }
-  const { mancano } = ritmoObiettivo(o, inizio);
+  const { mancano, traguardo } = ritmoObiettivo(o, inizio);
+  if (o.durata_mesi && traguardo !== null) return (traguardo / o.durata_mesi) * ogni;
   if (mancano === null || !o.scadenza || meseDi(o.scadenza, inizio) < meseDi(oggiIso(), inizio)) return null;
   const mesi = mesiFino(o.scadenza, oggiIso(), inizio);
   return ogni === 1 ? mancano / mesi : mancano / Math.max(1, Math.ceil(mesi / ogni));
@@ -148,10 +153,10 @@ export function divisioneTraSotto(o: Obiettivo, importo: number, inizio = 1) {
   return { parti, resto: Math.max(0, importo - parti.reduce((t, p) => t + p.importo, 0)) };
 }
 
-// Quanto manca al traguardo e quanto versare ogni mese per arrivarci in tempo.
+// Quanto manca al traguardo e quanto versare ogni mese per arrivarci in tempo (con una durata che si ripete: il traguardo diviso la durata).
 export function ritmoObiettivo(o: Obiettivo, inizio = 1) {
   const traguardo = o.traguardo_effettivo === null ? null : Number(o.traguardo_effettivo);
   const mancano = traguardo === null ? null : Math.max(0, traguardo - Number(o.saldo));
-  const alMese = mancano !== null && o.scadenza && meseDi(o.scadenza, inizio) >= meseDi(oggiIso(), inizio) ? mancano / mesiFino(o.scadenza, oggiIso(), inizio) : null;
+  const alMese = traguardo !== null && o.durata_mesi ? traguardo / o.durata_mesi : mancano !== null && o.scadenza && meseDi(o.scadenza, inizio) >= meseDi(oggiIso(), inizio) ? mancano / mesiFino(o.scadenza, oggiIso(), inizio) : null;
   return { traguardo, mancano, alMese };
 }

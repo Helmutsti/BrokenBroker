@@ -9,7 +9,8 @@ import { inizioMese, oggi, type Periodo, scadenzaNelPeriodo } from './periodo.ts
 
 export type SpesaDelMese = {
   id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null;
-  conto_id: string | null; conto: string | null; categoria_id: string | null; categoria: string | null;
+  // Promemoria di una transazione (decisione 61): esce da `conto_id` e va su `a_conto_id` (vuoto = fuori: è una spesa vera).
+  conto_id: string | null; conto: string | null; a_conto_id: string | null; a_conto: string | null; categoria_id: string | null; categoria: string | null;
   categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: 'fissa' | 'investimento'; attiva: boolean; note: string | null;
   // Il promemoria «Ricordami» di un salvadanaio (la spunta è solo un segno).
@@ -29,6 +30,7 @@ const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string): Promise<SpesaDelMese[]> {
   const { rows } = await db.query(
     `select s.id, s.nome, s.importo::text as importo, s.ogni_mesi, s.prossima_scadenza, s.senza_giorno, s.giorno_mese, s.conto_id, co.nome as conto,
+            s.a_conto_id, ca.nome as a_conto,
             c.id as categoria_id, c.nome as categoria, pc.nome as categoria_padre,
             (with recursive su as (
                select id, padre_id, icona from categorie where id = c.id
@@ -44,10 +46,11 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
             (select q.percentuale::text from quote q where q.spesa_prevista_id = s.id and q.utente_id = fp_me()) as percentuale_scritta,
             ${sqlBloccoSpesa('s')} as bloccato_da,
             exists (select 1 from spunte x where x.spesa_prevista_id = s.id and x.data between $1 and $2) as spuntata,
-            (select sum(v.importo)::text from versamenti v join spunte x on x.id = v.promemoria_spunta_id
-              where x.spesa_prevista_id = s.id and x.data between $1 and $2) as versato_con_spunta
+            (select sum(m.importo)::text from movimenti m join spunte x on x.id = m.spunta_id
+              where x.spesa_prevista_id = s.id and x.data between $1 and $2) as mosso_con_spunta
        from spese_previste s
        left join conti co on co.id = s.conto_id
+       left join conti ca on ca.id = s.a_conto_id
        left join spese_dati_utente d on d.spesa_prevista_id = s.id and d.utente_id = fp_me()
        left join categorie c on c.proprietario_id = fp_me()
                             and c.id = case when s.proprietario_id = fp_me() then s.categoria_id else d.categoria_id end
@@ -61,26 +64,30 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
   const radici = conPromemoria ? await alberoObiettivi(db) : [];
   const inizio = conPromemoria ? await inizioMese(db) : 1;
   const da = oggi() >= p.dal && oggi() <= p.al ? oggi() : p.dal;
-  const quotaDelMese = (s: { alimenta_obiettivo_id: string | null; importo: string; spuntata: boolean; versato_con_spunta: string | null }): string => {
+  // Spuntato, il promemoria di un salvadanaio vale quanto è stato spostato con la spunta.
+  const quotaDelMese = (s: { alimenta_obiettivo_id: string | null; importo: string; spuntata: boolean; mosso_con_spunta: string | null }): string => {
     if (!s.alimenta_obiettivo_id) return s.importo;
-    if (s.spuntata && s.versato_con_spunta !== null) return s.versato_con_spunta;
+    if (s.spuntata && s.mosso_con_spunta !== null) return s.mosso_con_spunta;
     const n: Nodo | undefined = trova(radici, s.alimenta_obiettivo_id);
     return n ? cent(quotaPromemoria(n, Number(s.importo), da, inizio).importo) : s.importo;
   };
 
-  return rows.map((s) => {
+  const lista: SpesaDelMese[] = rows.map((r) => {
+    const { mosso_con_spunta: _m, ...s } = r;
     const scadenza = scadenzaNelPeriodo(s.prossima_scadenza, s.ogni_mesi, p, s.senza_giorno, s.giorno_mese);
     const pct = s.percentuale_scritta !== null ? Number(s.percentuale_scritta) : s.condivisa ? 50 : s.mia ? 100 : 0;
-    const importo = Number(quotaDelMese(s));
+    const importo = Number(quotaDelMese(r));
     return {
       ...s,
       importo: cent(importo),
       scadenza,
       nel_mese: s.attiva && scadenza !== null,
-      // Uscita: spuntata (la spunta è un segno nel mese).
+      // Uscita: spuntata nel mese (la spunta crea la transazione, decisione 61).
       uscita: s.spuntata,
       mia_percentuale: pct,
       mia_quota: cent(importo * pct / 100),
     };
   });
+
+  return lista;
 }

@@ -25,8 +25,8 @@ import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 // La sezione delle spese del mese si chiama "Spese" (richiesta di Manuel, prima "Mese").
 const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
   { chiave: 'mese', testo: 'Spese', icona: 'calendar-check', percorso: '', schermata: Panoramica },
-  { chiave: 'budget', testo: 'Budget', icona: 'chart-column', percorso: 'budget', schermata: Budget },
   { chiave: 'salvadanai', testo: 'Salvadanai', breve: 'Salvad.', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
+  { chiave: 'budget', testo: 'Budget', icona: 'chart-column', percorso: 'budget', schermata: Budget },
   { chiave: 'investimenti', testo: 'Investimenti', breve: 'Invest.', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
   { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
   { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti },

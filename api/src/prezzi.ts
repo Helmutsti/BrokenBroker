@@ -14,6 +14,8 @@ import { aggiungiGiorni, oggi } from './periodo.ts';
 // Un prezzo scritto a mano per oggi vale fino a domani.
 
 export type PrezzoFonte = { prezzo: number; valuta: string };
+// Un prezzo di chiusura per giorno (data YYYY-MM-DD), dal più vecchio.
+export type SerieFonte = { valuta: string; punti: { data: string; prezzo: number }[] };
 
 export interface FontePrezzi {
   nome: string;
@@ -21,6 +23,10 @@ export interface FontePrezzi {
   prezzo(simbolo: string): Promise<PrezzoFonte | null>;
   // Euro per 1 unità di `valuta`.
   cambio(valuta: string): Promise<number | null>;
+  // Chiusure giornaliere dal giorno `dal` a oggi (valuta normalizzata come per `prezzo`).
+  storico(simbolo: string, dal: string): Promise<SerieFonte | null>;
+  // Euro per 1 unità di `valuta`, giorno per giorno dal giorno `dal`.
+  storicoCambio(valuta: string, dal: string): Promise<Map<string, number> | null>;
 }
 
 async function graficoYahoo(simbolo: string) {
@@ -36,20 +42,58 @@ async function graficoYahoo(simbolo: string) {
   }
 }
 
+// Le chiusure giornaliere di un simbolo dal giorno `dal`: il giorno è quello della borsa (con il suo fuso).
+async function serieYahoo(simbolo: string, dal: string): Promise<{ valuta: string; punti: { data: string; prezzo: number }[] } | null> {
+  try {
+    const da = Math.floor(Date.parse(`${dal}T00:00:00Z`) / 1000);
+    const r = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(simbolo)}?period1=${da}&period2=${Math.floor(Date.now() / 1000)}&interval=1d`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return null;
+    const ris = (await r.json())?.chart?.result?.[0];
+    const tempi: number[] = ris?.timestamp ?? [];
+    const chiusure: (number | null)[] = ris?.indicators?.quote?.[0]?.close ?? [];
+    const scarto = Number(ris?.meta?.gmtoffset ?? 0);
+    if (typeof ris?.meta?.currency !== 'string') return null;
+    const punti = tempi.flatMap((t, i) => {
+      const p = Number(chiusure[i]);
+      return Number.isFinite(p) && p > 0 ? [{ data: new Date((t + scarto) * 1000).toISOString().slice(0, 10), prezzo: p }] : [];
+    });
+    return { valuta: ris.meta.currency as string, punti };
+  } catch {
+    return null;
+  }
+}
+
+// Londra e Johannesburg quotano in centesimi (GBp, GBX, ZAc).
+function normalizza(valuta: string): { valuta: string; diviso: number } {
+  if (valuta === 'GBp' || valuta === 'GBX') return { valuta: 'GBP', diviso: 100 };
+  if (valuta === 'ZAc') return { valuta: 'ZAR', diviso: 100 };
+  return { valuta: valuta.toUpperCase(), diviso: 1 };
+}
+
 export const fonteYahoo: FontePrezzi = {
   nome: 'yahoo',
   async prezzo(simbolo) {
     const g = await graficoYahoo(simbolo);
     if (!g) return null;
-    // Londra e Johannesburg quotano in centesimi (GBp, GBX, ZAc).
-    if (g.valuta === 'GBp' || g.valuta === 'GBX') return { prezzo: g.prezzo / 100, valuta: 'GBP' };
-    if (g.valuta === 'ZAc') return { prezzo: g.prezzo / 100, valuta: 'ZAR' };
-    return { prezzo: g.prezzo, valuta: g.valuta.toUpperCase() };
+    const n = normalizza(g.valuta);
+    return { prezzo: g.prezzo / n.diviso, valuta: n.valuta };
   },
   async cambio(valuta) {
     if (valuta === 'EUR') return 1;
     const g = await graficoYahoo(`EUR${valuta}=X`);   // unità di valuta per 1 euro
     return g ? 1 / g.prezzo : null;
+  },
+  async storico(simbolo, dal) {
+    const s = await serieYahoo(simbolo, dal);
+    if (!s) return null;
+    const n = normalizza(s.valuta);
+    return { valuta: n.valuta, punti: s.punti.map((p) => ({ data: p.data, prezzo: p.prezzo / n.diviso })) };
+  },
+  async storicoCambio(valuta, dal) {
+    if (valuta === 'EUR') return new Map();
+    const s = await serieYahoo(`EUR${valuta}=X`, dal);
+    return s ? new Map(s.punti.map((p) => [p.data, 1 / p.prezzo])) : null;
   },
 };
 
@@ -136,6 +180,63 @@ export async function aggiornaPrezzi(db: PoolClient, ids: string[]) {
   // Le richieste alla fonte sono in parallelo; le scritture sul database una alla volta (stessa connessione).
   const letti = await Promise.all(daFare.map(async (t) => ({ t, l: await lettura(t, false) })));
   for (const { t, l } of letti) await salva(db, t, l, false);
+}
+
+// Lo storico dei prezzi (decisione 65): per ogni titolo comprato, le chiusure giornaliere dal primo acquisto (al massimo 10 anni) a
+// ieri; il prezzo di oggi resta quello letto da aggiornaPrezzi. Si scarica da `dal` quando lo storico manca o un acquisto più vecchio lo
+// anticipa, altrimenti solo i giorni dopo l'ultimo prezzo salvato. Non sovrascrive i prezzi già salvati (anche quelli scritti a mano).
+// In valuta estera ogni giorno usa il cambio di quel giorno (o l'ultimo prima). Un titolo si riscarica al massimo ogni 6 ore (nei fine
+// settimana l'ultimo prezzo resta prima di ieri), 10 minuti dopo un errore.
+const RIPROVA_STORICO_MS = 10 * 60 * 1000;
+const RILEGGI_STORICO_MS = 6 * 60 * 60 * 1000;
+const prossimoStorico = new Map<string, number>();
+export async function aggiornaStorico(db: PoolClient, ids: string[]) {
+  if (!ids.length) return;
+  const ieri = aggiungiGiorni(oggi(), -1);
+  const limite = aggiungiGiorni(oggi(), -3650);
+  const titoli = (await db.query<{ id: string; simbolo: string; storico_dal: string | null; primo: string; ultimo: string | null }>(
+    `select t.id, t.simbolo, to_char(t.storico_dal, 'YYYY-MM-DD') as storico_dal,
+            to_char(greatest(min(l.acquistato_il)::date, $2::date), 'YYYY-MM-DD') as primo,
+            (select to_char(max(p.data), 'YYYY-MM-DD') from prezzi p where p.titolo_id = t.id and p.data < current_date) as ultimo
+       from titoli t join lotti l on l.titolo_id = t.id
+      where t.id = any($1) and t.simbolo is not null
+      group by t.id`, [ids, limite])).rows;
+  const daFare = titoli.flatMap((t) => {
+    if ((prossimoStorico.get(t.id) ?? 0) > Date.now()) return [];
+    const completo = t.storico_dal !== null && t.storico_dal <= t.primo;
+    if (completo && t.ultimo !== null && t.ultimo >= ieri) return [];
+    return [{ ...t, dal: completo && t.ultimo ? aggiungiGiorni(t.ultimo, 1) : t.primo, completo }];
+  });
+  if (!daFare.length) return;
+  const serie = await Promise.all(daFare.map(async (t) => ({ t, s: await fonte.storico(t.simbolo, t.dal) })));
+  const valute = [...new Set(serie.flatMap(({ s }) => (s && s.valuta !== 'EUR' ? [s.valuta] : [])))];
+  const dalMinimo = daFare.map((t) => t.dal).sort()[0];
+  const cambi = new Map(await Promise.all(valute.map(async (v) => [v, await fonte.storicoCambio(v, aggiungiGiorni(dalMinimo, -10))] as const)));
+  for (const { t, s } of serie) {
+    const cambio = s ? (s.valuta === 'EUR' ? new Map<string, number>() : cambi.get(s.valuta)) : null;
+    if (!s || !cambio) { prossimoStorico.set(t.id, Date.now() + RIPROVA_STORICO_MS); continue; }
+    prossimoStorico.set(t.id, Date.now() + RILEGGI_STORICO_MS);
+    const giorniCambio = [...cambio.keys()].sort();
+    const cambioAl = (data: string) => {
+      if (s.valuta === 'EUR') return 1;
+      let ultimo: number | null = null;
+      for (const g of giorniCambio) { if (g > data) break; ultimo = cambio.get(g)!; }
+      return ultimo;
+    };
+    const righe = s.punti.filter((p) => p.data >= t.dal && p.data <= ieri).flatMap((p) => {
+      const c = cambioAl(p.data);
+      return c ? [[p.data, (p.prezzo * c).toFixed(4), p.prezzo.toFixed(4), c.toFixed(6)]] : [];
+    });
+    if (righe.length) {
+      await db.query(
+        `insert into prezzi (titolo_id, data, prezzo, valuta, prezzo_valuta, cambio, fonte, aggiornato_il)
+         select $1, r.data::date, r.prezzo::numeric, $2, r.prezzo_valuta::numeric, r.cambio::numeric, $3, now()
+           from jsonb_to_recordset($4::jsonb) as r(data text, prezzo text, prezzo_valuta text, cambio text)
+         on conflict (titolo_id, data) do nothing`,
+        [t.id, s.valuta, fonte.nome, JSON.stringify(righe.map(([data, prezzo, prezzo_valuta, cambio]) => ({ data, prezzo, prezzo_valuta, cambio })))]);
+    }
+    if (!t.completo) await db.query('update titoli set storico_dal = $2 where id = $1', [t.id, t.primo]);
+  }
 }
 
 export type PrezzoLetto = { prezzo: string; prezzo_valuta: string | null; valuta: string; data: string; fonte: string | null; aggiornato_il: string | null; stato: StatoPrezzo };

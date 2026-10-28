@@ -3,6 +3,7 @@ import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { mesiTra, oggi, periodoRichiesto } from '../periodo.ts';
 import { leggiRate, scadenzaRata } from '../rate.ts';
+import { transazioneDaSpunta } from '../transazioni.ts';
 import * as v from '../valida.ts';
 
 // Rate (private). Si indica il numero di rate oppure la data dell'ultima,
@@ -40,7 +41,7 @@ rotteRate.get('/', async (req, res) => {
   }));
 });
 
-// La spunta "pagata" è solo un segno nel mese (decisione 59): non muove nessun saldo.
+// La spunta "pagata" crea la transazione della rata (decisione 61): dal conto della rata verso fuori, con la sua categoria.
 rotteRate.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
@@ -54,7 +55,10 @@ rotteRate.post('/:id/spunta', async (req, res) => {
     if (gia.rowCount) throw new ErroreApi(409, 'Questa rata è già pagata in questo mese');
     const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : scadenza);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
-    return (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
+    const spunta = (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
+    const rata = Number(r.importo_rata);
+    await transazioneDaSpunta(db, { spunta, da: r.conto_id, a: null, intero: rata, mia: rata, descrizione: r.oggetto, categoria: r.categoria_id });
+    return spunta;
   });
   res.status(201).json(spunta);
 });

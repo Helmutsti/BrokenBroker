@@ -52,6 +52,37 @@ export function useRiferimenti(): Riferimenti {
   return r;
 }
 
+// L'albero dei conti (decisione 61) in ordine: ogni conto seguito dai suoi sotto-conti, con il livello. Un conto il cui contenitore
+// non c'è nell'elenco (archiviato o non visibile) sta in cima.
+export function alberoConti(conti: Conto[]): { conto: Conto; livello: number }[] {
+  const ids = new Set(conti.map((c) => c.id));
+  const out: { conto: Conto; livello: number }[] = [];
+  const visita = (padre: string | null, livello: number) => {
+    for (const c of conti.filter((x) => (padre === null ? !x.padre_id || !ids.has(x.padre_id) : x.padre_id === padre)).sort((a, b) => a.nome.localeCompare(b.nome, 'it'))) {
+      out.push({ conto: c, livello });
+      visita(c.id, livello + 1);
+    }
+  };
+  visita(null, 0);
+  return out;
+}
+
+// Opzioni per le tendine dei conti, con rientro per i sotto-conti. Gli archiviati solo se sono in `tenere` (già scelti); `escludi` li toglie.
+export function opzioniConti(conti: Conto[], { tenere = [], escludi = [] }: { tenere?: (string | null | undefined)[]; escludi?: (string | null | undefined)[] } = {}) {
+  return alberoConti(conti.filter((c) => (!c.archiviato || tenere.includes(c.id)) && !escludi.includes(c.id)))
+    .map(({ conto, livello }) => ({ valore: conto.id, testo: conto.nome, icona: conto.icona, rientro: livello }));
+}
+
+// Un conto è condiviso se lo è lui o un conto che lo contiene, o se è di un'altra persona: la spunta muove allora l'importo intero (decisione 61).
+export function contoCondiviso(conti: Conto[], id: string | null | undefined): boolean {
+  const visti = new Set<string>();
+  for (let c = conti.find((x) => x.id === id); c && !visti.has(c.id); c = conti.find((x) => x.id === c!.padre_id)) {
+    if (c.condiviso || !c.mio) return true;
+    visti.add(c.id);
+  }
+  return false;
+}
+
 // Albero per le tendine: categorie con rientro, di un tipo.
 export function opzioniCategorie(categorie: Categoria[], tipo?: 'uscita' | 'entrata') {
   const out: { valore: string; testo: string; icona?: string; rientro: number }[] = [];

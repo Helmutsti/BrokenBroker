@@ -470,18 +470,26 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
 }
 
 // ---- CMP-28 Scheda conto ----
-// Un conto è solo un'etichetta (decisione 59): nome, icona e una nota facoltativa; niente saldo né condivisione.
-export function SchedaConto({ nome, nota, icona, onApri }: { nome: string; nota?: string; icona: string; onApri: () => void }) {
+// Un conto (decisione 61): nome, icona, saldo (rosso se negativo), una nota e, per un contenitore, `dettaglio` («Non assegnato …», rosso se
+// negativo); «Condiviso» se lo vedono tutti e due. `rientro`: livello nell'albero (sotto-conti), la scheda si stringe di 24 px per livello.
+export function SchedaConto({ nome, nota, saldo, saldoNegativo, dettaglio, dettaglioNegativo, condiviso, icona, rientro = 0, onApri }: {
+  nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; dettaglio?: string; dettaglioNegativo?: boolean; condiviso?: boolean; icona: string; rientro?: number; onApri: () => void;
+}) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={nome} onPress={onApri}
-      style={(s: StatoPressione) => [{ width: compatto ? '100%' : 352, minHeight: 44, padding: compatto ? 12 : d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c[s.hovered ? 'sfondo-hover' : 'sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, anelloFocus(c, s.focused)]}>
+      style={(s: StatoPressione) => [{ width: compatto ? '100%' : 352 - 24 * rientro, minHeight: 44, padding: compatto ? 12 : d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c[s.hovered ? 'sfondo-hover' : 'sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, anelloFocus(c, s.focused)]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-        <Tessera icona={icona} misura="grande" />
-        <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-          <Testo stile="titolo-scheda">{nome}</Testo>
+        <Tessera icona={icona} misura={rientro ? 'media' : 'grande'} />
+        <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+          <Testo stile="titolo-scheda" numberOfLines={1}>{nome}</Testo>
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
+          {dettaglio ? <Testo stile="dettaglio-normale" colore={dettaglioNegativo ? 'testo-errore' : 'testo-secondario'}>{dettaglio}</Testo> : null}
+        </View>
+        <View style={{ alignItems: 'flex-end', gap: d['spazio-testo'] }}>
+          {saldo ? <Testo stile="corpo-forte" colore={saldoNegativo ? 'testo-errore' : 'testo-primario'}>{saldo}</Testo> : null}
+          {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
         </View>
         <Icona nome="chevron-right" misura={16} colore="icona-tenue" />
       </View>
@@ -680,23 +688,31 @@ function tacche(lo: number, hi: number): { min: number; max: number; valori: num
 }
 
 // ---- CMP-37 Grafico a linea ----
-export function GraficoLinea({ punti, altezza = 200 }: { punti: { etichetta: string; valore: number; messo: number }[]; altezza?: number }) {
+// Una linea sola con lo zero in evidenza: il guadagno nel tempo, in euro o in percentuale (decisione 65). Un punto `null` (quando non
+// c'era ancora niente di investito) non si disegna: la linea parte dal primo punto che c'è.
+const percentoAsse = (v: number) => `${numero(v, Math.abs(v) < 10 && v % 1 ? 1 : 0)} %`;
+export function GraficoLinea({ punti, unita, altezza = 200 }: { punti: { etichetta: string; valore: number | null }[]; unita: '€' | '%'; altezza?: number }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const larghezza = 1000;
-  const valori = punti.flatMap((p) => [p.valore, p.messo]).filter(Number.isFinite);
-  const { min, max, valori: ticks } = tacche(valori.length ? Math.min(...valori) : 0, Math.max(1, ...valori));
-  const etichetteY = ticks.map(euroAsse);
+  const valori = punti.flatMap((p) => (p.valore !== null && Number.isFinite(p.valore) ? [p.valore] : []));
+  const lo = Math.min(0, ...valori), hi = Math.max(0, ...valori);
+  const { min, max, valori: ticks } = tacche(lo, hi > lo ? hi : lo + 1);
+  const etichetteY = ticks.map(unita === '€' ? euroAsse : percentoAsse);
   const largAsse = Math.max(...etichetteY.map((t) => t.length)) * (compatto ? 6.5 : 7.5) + 8;
   const x = (i: number) => (punti.length < 2 ? 0 : (i / (punti.length - 1)) * larghezza);
   const y = (v: number) => altezza - ((v - min) / (max - min || 1)) * (altezza - 8) - 4;
-  const linea = (k: 'valore' | 'messo') => punti.map((p, i) => `${x(i)},${y(p[k])}`).join(' ');
+  // I tratti senza buchi: un punto mancante spezza la linea.
+  const tratti = punti.reduce<string[][]>((acc, p, i) => {
+    if (p.valore === null || !Number.isFinite(p.valore)) { if (acc.at(-1)?.length) acc.push([]); return acc; }
+    acc.at(-1)!.push(`${x(i)},${y(p.valore)}`);
+    return acc;
+  }, [[]]).filter((t) => t.length);
   // Al massimo 12 etichette (6 su telefono), distribuite in modo uniforme dal primo all'ultimo punto.
   const quante = Math.min(punti.length, compatto ? 6 : 12);
   const etichette = quante < 2 ? punti.map((_, i) => i) : [...new Set(Array.from({ length: quante }, (_, k) => Math.round((k * (punti.length - 1)) / (quante - 1))))];
   return (
     <View style={{ gap: d['spazio-blocco'] }}>
-      <View style={{ flexDirection: 'row', gap: d['spazio-blocco'] }}><VoceLegenda testo="Valore" colore="avanzamento-accento" /><VoceLegenda testo="Investiti" colore="testo-terziario" tratteggio /></View>
       <View style={{ flexDirection: 'row', gap: d['spazio-testo'] }}>
         <View style={{ width: largAsse, height: altezza }} aria-hidden>
           {ticks.map((t, i) => <Testo key={i} stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}
@@ -704,9 +720,10 @@ export function GraficoLinea({ punti, altezza = 200 }: { punti: { etichetta: str
         </View>
         <View style={{ flex: 1, minWidth: 0, gap: d['spazio-blocco'] }}>
           <Svg width="100%" height={altezza} viewBox={`0 0 ${larghezza} ${altezza}`} preserveAspectRatio="none" aria-hidden>
-            {ticks.map((t, i) => <Line key={i} x1={0} x2={larghezza} y1={y(t)} y2={y(t)} stroke={c['bordo-separatore']} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
-            <Polyline points={linea('messo')} fill="none" stroke={c['testo-terziario']} strokeWidth={d['misura-bordo-forte']} strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
-            <Polyline points={linea('valore')} fill="none" stroke={c['avanzamento-accento']} strokeWidth={d['misura-bordo-forte']} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+            {ticks.map((t, i) => <Line key={i} x1={0} x2={larghezza} y1={y(t)} y2={y(t)} stroke={t === 0 ? c['testo-terziario'] : c['bordo-separatore']} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
+            {tratti.map((t, i) => t.length === 1
+              ? <Line key={i} x1={Number(t[0].split(',')[0]) - 4} x2={Number(t[0].split(',')[0]) + 4} y1={Number(t[0].split(',')[1])} y2={Number(t[0].split(',')[1])} stroke={c['avanzamento-accento']} strokeWidth={d['misura-bordo-forte']} vectorEffect="non-scaling-stroke" />
+              : <Polyline key={i} points={t.join(' ')} fill="none" stroke={c['avanzamento-accento']} strokeWidth={d['misura-bordo-forte']} strokeLinejoin="round" vectorEffect="non-scaling-stroke" />)}
           </Svg>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>{etichette.map((i) => <Testo key={i} stile="dettaglio-normale" colore="testo-secondario">{punti[i].etichetta}</Testo>)}</View>
         </View>
@@ -986,11 +1003,22 @@ export function RigaObiettivo({ nome, scadenza, messo, cifra, avanzamento, tonoB
 // Tabella arrotondata: prima la voce (nome in evidenza, dettaglio piccolo sotto),
 // poi i numeri allineati a destra.
 // `avviso`: riga piccola sotto il nome (prezzo vecchio o mancante); `azione`: testo premibile accanto (es. «Scrivi il prezzo»).
+// `conta`: la casella a inizio riga per tenere l'asset nel guadagno o toglierlo (decisione 66); tolto, il suo guadagno è in grigio.
 export type RigaTabellaPortafoglio = { chiave: string; nome: string; dettaglio: string; prezzo: string; valore: string; guadagno: string; peso: string; positivo: boolean | null; onApri?: () => void;
-  avviso?: { testo: string; tono: 'attenzione' | 'errore' }; azione?: { etichetta: string; onPress: () => void } };
+  avviso?: { testo: string; tono: 'attenzione' | 'errore' }; azione?: { etichetta: string; onPress: () => void }; conta?: { attiva: boolean; onCambia: () => void } };
 export function TabellaPortafoglio({ righe, titoloColonna = 'Asset', titoloPrezzo = 'Prezzo' }: { righe: RigaTabellaPortafoglio[]; titoloColonna?: string; titoloPrezzo?: string }) {
   const { c } = useTema();
-  const coloreGuadagno = (r: RigaTabellaPortafoglio): NomeColore => (r.positivo === null ? 'testo-secondario' : r.positivo ? 'testo-ok' : 'testo-errore');
+  const coloreGuadagno = (r: RigaTabellaPortafoglio): NomeColore => (r.positivo === null || (r.conta && !r.conta.attiva) ? 'testo-secondario' : r.positivo ? 'testo-ok' : 'testo-errore');
+  // La casella sta fuori dalla riga premibile (che apre l'asset), così toccarla non apre la finestra.
+  const conCasella = righe.some((r) => r.conta);
+  const compatto = useCompatto();
+  const largCasella = compatto ? 44 : d['misura-bersaglio'];
+  const casella = (r: RigaTabellaPortafoglio) => (conCasella ? (
+    <View style={{ justifyContent: 'center', paddingLeft: d['spazio-testo'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], backgroundColor: c['sfondo-scheda'] }}>
+      {r.conta ? <Spunta fatta={r.conta.attiva} onPress={r.conta.onCambia} etichetta={`Conta ${r.nome} nel guadagno`} /> : <View style={{ width: largCasella }} />}
+    </View>
+  ) : null);
+  const spazioCasella = conCasella ? <View style={{ width: largCasella + d['spazio-testo'] }} /> : null;
   const sotto = (r: RigaTabellaPortafoglio) => (r.avviso || r.azione ? (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: d['spazio-icona'] }}>
       {r.avviso ? <Testo stile="dettaglio-forte" colore={`testo-${r.avviso.tono}`}>{r.avviso.testo}</Testo> : null}
@@ -1000,15 +1028,17 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Asset', titoloPrezz
   const num = (testo: string, w: number, stile: 'dettaglio-forte' | 'corpo-normale' | 'corpo-forte', colore: NomeColore) => (
     <View style={{ width: w, alignItems: 'flex-end' }}><Testo stile={stile} colore={colore}>{testo}</Testo></View>
   );
-  if (useCompatto()) return (
+  if (compatto) return (
     <View style={{ borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-controllo'], overflow: 'hidden' }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], backgroundColor: c['sfondo-tenue'] }}>
-        <Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo>
+        <View style={{ flexDirection: 'row' }}>{spazioCasella}<Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo></View>
         <Testo stile="dettaglio-forte" colore="testo-secondario">Valore e guadagno</Testo>
       </View>
       {righe.map((r) => (
-        <Pressable key={r.chiave} accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
-          style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'],
+        <View key={r.chiave} style={{ flexDirection: 'row' }}>
+        {casella(r)}
+        <Pressable accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
+          style={(s: StatoPressione) => [{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'],
             borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], backgroundColor: c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <Testo stile="corpo-forte" numberOfLines={2}>{r.nome}</Testo>
@@ -1020,18 +1050,21 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Asset', titoloPrezz
             <Testo stile="dettaglio-forte" colore={coloreGuadagno(r)}>{r.guadagno}</Testo>
           </View>
         </Pressable>
+        </View>
       ))}
     </View>
   );
   return (
     <View style={{ borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'], borderRadius: d['raggio-controllo'], overflow: 'hidden' }}>
       <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], backgroundColor: c['sfondo-tenue'] }}>
-        <View style={{ flex: 1 }}><Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo></View>
+        <View style={{ flex: 1, flexDirection: 'row' }}>{spazioCasella}<Testo stile="dettaglio-forte" colore="testo-secondario">{titoloColonna}</Testo></View>
         {num(titoloPrezzo, 120, 'dettaglio-forte', 'testo-secondario')}{num('Valore', 130, 'dettaglio-forte', 'testo-secondario')}{num('Guadagno', 170, 'dettaglio-forte', 'testo-secondario')}{num('Peso', 60, 'dettaglio-forte', 'testo-secondario')}
       </View>
-      {righe.map((r, i) => (
-        <Pressable key={r.chiave} accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
-          style={(s: StatoPressione) => [{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-riga-v'], paddingHorizontal: d['margine-voce-h'],
+      {righe.map((r) => (
+        <View key={r.chiave} style={{ flexDirection: 'row' }}>
+        {casella(r)}
+        <Pressable accessibilityRole="button" accessibilityLabel={r.nome} onPress={r.onApri} disabled={!r.onApri}
+          style={(s: StatoPressione) => [{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-riga-v'], paddingHorizontal: d['margine-voce-h'],
             borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], backgroundColor: s.hovered ? c['sfondo-hover'] : c['sfondo-scheda'] }, anelloFocus(c, s.focused)]}>
           <View style={{ flex: 1, gap: d['spazio-testo'] }}>
             <Testo stile="corpo-forte" numberOfLines={1}>{r.nome}</Testo>
@@ -1043,6 +1076,7 @@ export function TabellaPortafoglio({ righe, titoloColonna = 'Asset', titoloPrezz
           {num(r.guadagno, 170, 'corpo-forte', coloreGuadagno(r))}
           {num(r.peso, 60, 'corpo-normale', 'testo-secondario')}
         </Pressable>
+        </View>
       ))}
     </View>
   );

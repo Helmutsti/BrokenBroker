@@ -5,18 +5,21 @@ import { ErroreApi, nonTrovato } from '../errori.ts';
 import { inizioMese, meseDi, periodoRichiesto } from '../periodo.ts';
 import * as v from '../valida.ts';
 
-// Movimenti (decisione 59): uno strumento a parte, insieme ai budget. Sono le entrate e le uscite scritte a mano (anche quelle registrate
-// da un budget); non toccano Spese, Panoramica o altre pagine. Il conto è solo un'etichetta: nessun saldo si muove.
-//   ?conto=<id> | senza   solo i movimenti con quell'etichetta (senza = senza conto)
+// Transazioni (decisione 61): da un conto a un altro, o da/verso «fuori». tipo: 'entrata' (da fuori), 'uscita' (verso fuori) o
+// 'spostamento' (tra due conti). Le categorie e i budget contano solo entrate e uscite: uno spostamento non è una spesa.
+// Le scrive la spunta di una spesa o di una rata (`da_spunta`: si cambiano togliendo la spunta) oppure si scrivono a mano.
+//   ?conto=<id> | senza   solo le transazioni da o verso quel conto (senza = nessun conto)
 //   ?mese=AAAA-MM         solo quel mese personale
 //   ?limite=              di base 200, al massimo 500
-// Si vedono i propri e le uscite dei budget condivisi; `modificabile` = scritto da chi guarda (solo lui lo cambia e lo toglie).
-// `mesi` sono i mesi personali che hanno movimenti (per il filtro).
+// `modificabile` = scritta a mano da chi guarda. `mesi` sono i mesi personali che hanno transazioni (per il filtro).
 
 export const rotteMovimenti = Router();
 
-const TIPI = ['entrata', 'uscita'] as const;
+const TIPI = ['entrata', 'uscita', 'spostamento'] as const;
 type Tipo = (typeof TIPI)[number];
+
+const TIPO_SQL = `case when m.da_conto_id is not null and m.a_conto_id is not null then 'spostamento'
+                      when m.a_conto_id is not null or m.verso = 'entrata' then 'entrata' else 'uscita' end`;
 
 rotteMovimenti.get('/', async (req, res) => {
   const conto = typeof req.query.conto === 'string' ? req.query.conto : undefined;
@@ -24,13 +27,14 @@ rotteMovimenti.get('/', async (req, res) => {
   const limite = Math.min(500, Math.max(1, Number(req.query.limite ?? 200) || 200));
   const risposta = await conUtente(res.locals.utenteId, async (db) => {
     const p = req.query.mese === undefined ? null : await periodoRichiesto(db, req.query.mese);
-    const filtro = `($1::text is null or ($1 = 'senza' and m.conto_id is null) or m.conto_id::text = $1)`;
+    const filtro = `($1::text is null or ($1 = 'senza' and m.da_conto_id is null and m.a_conto_id is null) or m.da_conto_id::text = $1 or m.a_conto_id::text = $1)`;
     const movimenti = (await db.query(
-      `select m.id, m.tipo, m.importo::text as importo, m.momento, m.momento::date as data, m.descrizione,
-              m.conto_id, c.nome as conto, c.icona as conto_icona, m.categoria_id, cat.nome as categoria, m.budget_id,
-              u.nome as utente, (m.utente_id = fp_me()) as modificabile
+      `select m.id, ${TIPO_SQL} as tipo, m.importo::text as importo, m.momento, m.momento::date as data, m.descrizione,
+              m.da_conto_id, cd.nome as da, m.a_conto_id, ca.nome as a, m.categoria_id, cat.nome as categoria, m.budget_id,
+              (m.spunta_id is not null) as da_spunta, u.nome as utente, (m.utente_id = fp_me() and m.spunta_id is null) as modificabile
          from movimenti m
-         left join conti c on c.id = m.conto_id
+         left join conti cd on cd.id = m.da_conto_id
+         left join conti ca on ca.id = m.a_conto_id
          left join categorie cat on cat.id = m.categoria_id
          left join utenti u on u.id = m.utente_id
         where ${filtro} and ($2::date is null or (m.momento >= $2::date and m.momento < $3::date + 1))
@@ -44,9 +48,9 @@ rotteMovimenti.get('/', async (req, res) => {
   res.json(risposta);
 });
 
-// ---- Scrivere, cambiare e togliere un movimento ----
-// Campi: tipo ('entrata' o 'uscita'), importo (positivo), conto_id (etichetta, facoltativa), data (AAAA-MM-GG) e ora (HH:MM) (di base
-// adesso; un altro giorno senza ora = mezzogiorno), descrizione, categoria_id (solo uscite: conta nel budget di quella categoria).
+// ---- Scrivere, cambiare e togliere una transazione a mano ----
+// Campi: tipo, importo (positivo), conto_id (entrata e uscita, facoltativo), da_conto_id e a_conto_id (spostamento, diversi), data
+// (AAAA-MM-GG) e ora (HH:MM) (di base adesso; un altro giorno senza ora = mezzogiorno), descrizione, categoria_id (entrate e uscite).
 
 function ora(c: Record<string, unknown>): string | undefined {
   const t = v.testo(c, 'ora', false, 5);
@@ -54,7 +58,6 @@ function ora(c: Record<string, unknown>): string | undefined {
   return t;
 }
 
-// Il momento scelto (testo per il database). Senza data né ora: quello che c'era (o adesso).
 async function momentoScelto(db: PoolClient, data: string | undefined, oraScelta: string | undefined, esistente: string | null) {
   const { rows } = await db.query<{ momento: string }>(
     `select (case when $1::date is null and $2::time is null then coalesce($3::timestamptz, now())
@@ -65,33 +68,53 @@ async function momentoScelto(db: PoolClient, data: string | undefined, oraScelta
   return rows[0].momento;
 }
 
-type Attuale = { tipo: Tipo; conto_id: string | null; importo: string; descrizione: string; categoria_id: string | null; momento: string };
+type Attuale = { tipo: Tipo; da_conto_id: string | null; a_conto_id: string | null; importo: string; descrizione: string; categoria_id: string | null; momento: string };
 
-// Legge e controlla il corpo (completo alla creazione, parziale nella modifica: i campi mancanti restano come sono).
+async function contoVisibile(db: PoolClient, id: string | null) {
+  if (id && !(await db.query('select 1 from conti where id = $1', [id])).rowCount) throw nonTrovato('Conto');
+}
+
 async function leggiCorpo(db: PoolClient, c: Record<string, unknown>, att: Attuale | null) {
   const tipo = v.scelta(c, 'tipo', TIPI, !att) ?? att!.tipo;
   const importo = v.importo(c, 'importo', !att) ?? att!.importo;
   if (!(Number(importo) > 0)) throw new ErroreApi(400, "L'importo deve essere positivo");
-  let conto = v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id'));
-  if (conto === undefined) conto = att?.conto_id ?? null;
-  if (conto && !(await db.query('select 1 from conti where id = $1', [conto])).rowCount) throw nonTrovato('Conto');
+  const prima = att ? (att.tipo === 'uscita' ? att.da_conto_id : att.tipo === 'entrata' ? att.a_conto_id : null) : null;
+  let da: string | null, a: string | null;
+  if (tipo === 'spostamento') {
+    da = v.id(c, 'da_conto_id') ?? att?.da_conto_id ?? null;
+    a = v.id(c, 'a_conto_id') ?? att?.a_conto_id ?? null;
+    if (!da) throw new ErroreApi(400, 'Il campo "da_conto_id" è obbligatorio');
+    if (!a) throw new ErroreApi(400, 'Il campo "a_conto_id" è obbligatorio');
+    if (da === a) throw new ErroreApi(400, 'I due conti devono essere diversi');
+  } else {
+    let conto = v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id'));
+    if (conto === undefined) conto = prima;
+    [da, a] = tipo === 'uscita' ? [conto ?? null, null] : [null, conto ?? null];
+  }
+  await contoVisibile(db, da);
+  await contoVisibile(db, a);
   let categoria = v.annullabile(c, 'categoria_id', () => v.id(c, 'categoria_id'));
   if (categoria === undefined) categoria = att?.categoria_id ?? null;
-  if (tipo !== 'uscita') {
-    if (c.categoria_id) throw new ErroreApi(400, 'La categoria serve solo alle uscite');
+  if (tipo === 'spostamento') {
+    if (c.categoria_id) throw new ErroreApi(400, 'Uno spostamento tra due conti non ha categoria: non è una spesa');
     categoria = null;
   }
   let nomeCategoria: string | null = null;
   if (categoria) {
-    const k = (await db.query<{ nome: string }>(`select nome from categorie where id = $1 and proprietario_id = fp_me() and tipo = 'uscita'`, [categoria])).rows[0];
+    const k = (await db.query<{ nome: string }>('select nome from categorie where id = $1 and proprietario_id = fp_me()', [categoria])).rows[0];
     if (!k) throw nonTrovato('Categoria');
     nomeCategoria = k.nome;
   }
   let descrizione = v.testo(c, 'descrizione', false, 120);
   if (descrizione === undefined && att && !('descrizione' in c)) descrizione = att.descrizione;
-  if (!descrizione) descrizione = tipo === 'entrata' ? 'Entrata' : nomeCategoria ?? 'Uscita';
+  if (!descrizione) {
+    if (tipo === 'spostamento') {
+      const nomi = (await db.query<{ id: string; nome: string }>('select id, nome from conti where id = any($1)', [[da, a]])).rows;
+      descrizione = `Spostamento: ${nomi.find((x) => x.id === da)?.nome} → ${nomi.find((x) => x.id === a)?.nome}`;
+    } else descrizione = nomeCategoria ?? (tipo === 'entrata' ? 'Entrata' : 'Uscita');
+  }
   const momento = await momentoScelto(db, v.data(c, 'data'), ora(c), att?.momento ?? null);
-  return { tipo, conto, importo, momento, descrizione, categoria };
+  return { tipo, da, a, verso: !da && !a ? tipo : null, importo, momento, descrizione, categoria };
 }
 
 rotteMovimenti.post('/', async (req, res) => {
@@ -99,20 +122,22 @@ rotteMovimenti.post('/', async (req, res) => {
   const id = await conUtente(res.locals.utenteId, async (db) => {
     const m = await leggiCorpo(db, c, null);
     return (await db.query<{ id: string }>(
-      `insert into movimenti (utente_id, tipo, importo, momento, descrizione, conto_id, categoria_id)
-       values (fp_me(), $1, $2, $3::timestamptz, $4, $5, $6) returning id`,
-      [m.tipo, m.importo, m.momento, m.descrizione, m.conto, m.categoria])).rows[0].id;
+      `insert into movimenti (utente_id, da_conto_id, a_conto_id, verso, importo, momento, descrizione, categoria_id)
+       values (fp_me(), $1, $2, $3, $4, $5::timestamptz, $6, $7) returning id`,
+      [m.da, m.a, m.verso, m.importo, m.momento, m.descrizione, m.categoria])).rows[0].id;
   });
   res.status(201).json({ id });
 });
 
-// Il movimento di chi chiama, com'è adesso (404 se non si vede; 403 se è di un altro).
+// La transazione a mano di chi chiama (404 se non si vede; 403 se è di un altro o nasce da una spunta).
 async function mioMovimento(db: PoolClient, id: string): Promise<Attuale> {
-  const r = (await db.query<Attuale & { mio: boolean }>(
-    `select tipo, utente_id = fp_me() as mio, importo::text as importo, descrizione, conto_id, categoria_id, momento::text as momento
-       from movimenti where id = $1`, [id])).rows[0];
+  const r = (await db.query<Attuale & { mio: boolean; da_spunta: boolean }>(
+    `select ${TIPO_SQL} as tipo, m.utente_id = fp_me() as mio, m.spunta_id is not null as da_spunta, m.importo::text as importo, m.descrizione,
+            m.da_conto_id, m.a_conto_id, m.categoria_id, m.momento::text as momento
+       from movimenti m where m.id = $1`, [id])).rows[0];
   if (!r) throw nonTrovato('Movimento');
-  if (!r.mio) throw new ErroreApi(403, 'Solo chi ha scritto il movimento lo può cambiare');
+  if (r.da_spunta) throw new ErroreApi(409, 'Questa transazione nasce dalla spunta di una spesa: si cambia togliendo la spunta');
+  if (!r.mio) throw new ErroreApi(403, 'Solo chi ha scritto la transazione la può cambiare');
   return r;
 }
 
@@ -122,9 +147,9 @@ rotteMovimenti.patch('/:id', async (req, res) => {
   await conUtente(res.locals.utenteId, async (db) => {
     const m = await leggiCorpo(db, c, await mioMovimento(db, id));
     await db.query(
-      `update movimenti set tipo = $2, importo = $3, momento = $4::timestamptz, descrizione = $5, conto_id = $6, categoria_id = $7,
-              budget_id = case when $2 = 'uscita' then budget_id end where id = $1`,
-      [id, m.tipo, m.importo, m.momento, m.descrizione, m.conto, m.categoria]);
+      `update movimenti set da_conto_id = $2, a_conto_id = $3, verso = $4, importo = $5, momento = $6::timestamptz, descrizione = $7, categoria_id = $8,
+              budget_id = case when $3::uuid is null then budget_id end where id = $1`,
+      [id, m.da, m.a, m.verso, m.importo, m.momento, m.descrizione, m.categoria]);
   });
   res.json({ id });
 });

@@ -1,8 +1,8 @@
 import type { PoolClient } from 'pg';
 import { nonTrovato } from './errori.ts';
-import { quotazioniMetalli, storicoMetalli } from './metalli.ts';
+import { aggiornaStoricoMetalli, quotazioniMetalli, storicoMetalli } from './metalli.ts';
 import type { Metallo, Quotazione } from './metalli.ts';
-import { aggiornaPrezzi, statoPrezzo } from './prezzi.ts';
+import { aggiornaPrezzi, aggiornaStorico, statoPrezzo } from './prezzi.ts';
 import { aggiungiGiorni, aggiungiMesi, oggi } from './periodo.ts';
 
 // Calcoli degli investimenti (privati). Un portafoglio contiene lotti di titoli
@@ -40,6 +40,8 @@ export async function caricaDati(db: PoolClient, conStorico = false) {
   const ids = [...new Set(lotti.map((o) => o.titolo_id))];
   // Il prezzo di oggi arriva da solo; resta valido l'ultimo noto se la fonte non risponde.
   await aggiornaPrezzi(db, ids);
+  // Per l'andamento servono anche i prezzi passati (decisione 65).
+  if (conStorico) await aggiornaStorico(db, ids);
   const titoli = new Map((await db.query<Titolo>('select id, isin, ticker, nome, tipo, simbolo, borsa, valuta from titoli where id = any($1)', [ids])).rows.map((t) => [t.id, t]));
   const portafogli = (await db.query<PortafoglioDb>('select id, nome, icona, conta_nel_patrimonio, creato_il from portafogli order by lower(nome), creato_il')).rows;
   const prezzi = (await db.query<{ titolo_id: string; data: string; prezzo: string; fonte: string | null; aggiornato_il: string | null }>(
@@ -47,6 +49,8 @@ export async function caricaDati(db: PoolClient, conStorico = false) {
     .map((p): Prezzo => ({ titolo_id: p.titolo_id, data: p.data, prezzo: Number(p.prezzo), fonte: p.fonte, aggiornato_il: p.aggiornato_il }));
   const beniDb = (await db.query<BeneDb>(`select ${CAMPI_BENE} from ${DA_BENI} order by b.nome`)).rows;
   const quotazioni = await quotazioniMetalli(db, [...new Set(beniDb.flatMap((b) => (b.metallo ? [b.metallo] : [])))]);
+  // Anche per i metalli servono le quotazioni passate, dal giorno in cui ogni bene è stato comprato (decisione 65).
+  if (conStorico) await aggiornaStoricoMetalli(db, beniDb.flatMap((b) => (b.metallo ? [{ metallo: b.metallo, dal: b.data_acquisto ?? b.creato }] : [])));
   const storico: Storico = conStorico ? await storicoMetalli(db) : new Map();
   const nomiPortafogli = new Map(portafogli.map((p) => [p.id, p.nome]));
   return { lotti, titoli, portafogli, nomiPortafogli, prezzi, beniDb, quotazioni, storico };
@@ -195,7 +199,8 @@ function beneAl(b: BeneDb, al: string, storico: Storico) {
 
 // Valore e soldi messi dentro alla fine di ogni mese (mesi) o ogni settimana (settimane). L'ultimo punto è oggi.
 // Per i titoli senza prezzo noto a quella data vale il PCM della riga.
-export async function andamento(db: PoolClient, mesi: number, settimane: number | undefined, portafoglioId?: string) {
+// `esclusi`: gli asset tolti dal guadagno mentre si guarda la pagina (decisione 66), «t:<titolo>:<portafoglio>» o «b:<bene>».
+export async function andamento(db: PoolClient, mesi: number, settimane: number | undefined, portafoglioId?: string, esclusi: Set<string> = new Set()) {
   const d = await caricaDati(db, true);
   const scelti = selezione(d, portafoglioId);
   const fine = oggi();
@@ -207,11 +212,12 @@ export async function andamento(db: PoolClient, mesi: number, settimane: number 
     let valore = 0;
     let messo = 0;
     for (const p of posizioniAl(d.lotti, al, scelti).values()) {
+      if (esclusi.has(`t:${p.titolo}:${p.portafoglio}`)) continue;
       const prezzo = prezzoAl(d.prezzi, p.titolo, al)?.prezzo ?? Number(d.lotti.filter((o) => o.titolo_id === p.titolo && o.data <= al).at(-1)?.prezzo ?? 0);
       valore += p.quantita * prezzo; messo += p.costo;
     }
     for (const b of d.beniDb) {
-      if (!scelti.has(b.portafoglio_id)) continue;
+      if (!scelti.has(b.portafoglio_id) || esclusi.has(`b:${b.id}`)) continue;
       const x = beneAl(b, al, d.storico);
       if (x) { valore += x.valore; messo += x.costo; }
     }
