@@ -3,13 +3,11 @@ import type { PoolClient } from 'pg';
 import { type BudgetDelMese, budgetDelMese } from '../budget.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { mesePassato, NIENTE } from '../movimenti.ts';
 import { meseDi, oggi, periodoRichiesto } from '../periodo.ts';
 import * as v from '../valida.ts';
 
-// Budget (decisioni 49, 51 e 57): uno per categoria, senza modi. È una cifra da tenere sotto controllo (non un limite): lo speso è tutto ciò che
-// esce con la categoria, da qualunque conto; se si sfora si conta tutto lo stesso e si mostra di quanto. Le uscite si registrano su
-// qualunque budget. Nessun promemoria (decisione 57): se servono soldi su un altro conto si fa un giroconto da Movimenti.
+// Budget (decisioni 49, 57 e 59): uno per categoria. È una cifra da tenere sotto controllo (non un limite): lo speso sono le uscite scritte in
+// Movimenti con la sua categoria; se si sfora si conta tutto lo stesso e si mostra di quanto. Insieme ai movimenti è uno strumento a parte.
 
 export const rotteBudget = Router();
 
@@ -120,9 +118,8 @@ rotteBudget.put('/:id/quote', async (req, res) => {
   res.status(204).end();
 });
 
-// Registra un'uscita con la categoria del budget (su qualunque budget): importo (positivo), descrizione (di base il nome della categoria),
-// data (di base adesso: oggi con l'ora di adesso, un altro giorno a mezzogiorno) e conto da cui esce (libero, facoltativo: il conto
-// del budget non c'entra). È un movimento dal conto a Niente: il conto scende e il budget si riempie. Non nei mesi passati (409).
+// Registra un'uscita con la categoria del budget: importo (positivo), descrizione (di base il nome della categoria), data (di base adesso:
+// oggi con l'ora di adesso, un altro giorno a mezzogiorno) e conto come etichetta (facoltativo). È un movimento come quelli scritti in Movimenti.
 rotteBudget.post('/:id/uscite', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
@@ -137,11 +134,10 @@ rotteBudget.post('/:id/uscite', async (req, res) => {
     if (!b) throw nonTrovato('Budget');
     await contoVisibile(db, contoId);
     const giorno = dataScelta ?? oggi();
-    if (await mesePassato(db, giorno)) throw new ErroreApi(409, 'Il passato non si cambia: non si registrano uscite in un mese passato');
     await db.query(
-      `insert into movimenti_conto (da_conto_id, a_conto_id, importo, momento, utente_id, causa, descrizione, budget_id, categoria_id)
-       values ($1, $2, $3, case when $4::date = $5::date then now() else ($4::date + time '12:00')::timestamptz end, fp_me(), 'budget', $6, $7, $8)`,
-      [contoId, NIENTE, importo, giorno, oggi(), descrizione || b.nome, id, b.categoria_id]);
+      `insert into movimenti (utente_id, tipo, conto_id, importo, momento, descrizione, budget_id, categoria_id)
+       values (fp_me(), 'uscita', $1, $2, case when $3::date = $4::date then now() else ($3::date + time '12:00')::timestamptz end, $5, $6, $7)`,
+      [contoId, importo, giorno, oggi(), descrizione || b.nome, id, b.categoria_id]);
     // Il budget mostrato è quello del mese personale in cui cade l'uscita.
     const adesso = await periodoRichiesto(db, undefined);
     return (await budgetDelMese(db, await periodoRichiesto(db, meseDi(giorno, adesso.inizio)), id))[0];
@@ -149,14 +145,12 @@ rotteBudget.post('/:id/uscite', async (req, res) => {
   res.status(201).json(risposta);
 });
 
-// Toglie un'uscita (se è tua, o se vedi il conto o il budget). Solo nel mese in corso o dopo.
+// Toglie un'uscita: solo chi l'ha scritta.
 rotteBudget.delete('/uscite/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    const u = (await db.query<{ data: string }>(`select momento::date::text as data from movimenti_conto where id = $1 and causa in ('budget', 'a_mano')`, [id])).rows[0];
-    if (!u) throw nonTrovato('Uscita');
-    if (await mesePassato(db, u.data)) throw new ErroreApi(409, 'Il passato non si cambia: un\'uscita di un mese passato non si toglie più');
-    if (!(await db.query(`delete from movimenti_conto where id = $1 and causa in ('budget', 'a_mano')`, [id])).rowCount) throw new ErroreApi(403, 'Non puoi togliere questa uscita');
+    if (!(await db.query(`select 1 from movimenti where id = $1 and tipo = 'uscita'`, [id])).rowCount) throw nonTrovato('Uscita');
+    if (!(await db.query('delete from movimenti where id = $1', [id])).rowCount) throw new ErroreApi(403, 'Solo chi ha scritto l\'uscita la può togliere');
   });
   res.status(204).end();
 });

@@ -4,8 +4,6 @@ import { bloccoSpesa, erroreSpesaBloccata, vietaCampi } from '../collegamenti.ts
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodoRichiesto } from '../periodo.ts';
-import { annullaSpunta, importoSulConto, muoviPerSpunta, vietaMesePassato } from '../movimenti.ts';
-import { versaPerPromemoria } from './obiettivi.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
 
@@ -167,17 +165,14 @@ rotteSpese.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// La spunta dice che la spesa è uscita nel mese e muove il saldo del conto (decisioni 47 e 50), come per le mensili e le una tantum:
-//  - spesa con conto: movimento negativo sul conto (conto condiviso: importo intero; conto solo tuo: la tua quota);
-//  - promemoria di un salvadanaio: fa il versamento della quota del mese nel salvadanaio (Dal conto, se la voce ha un conto); togliendo la spunta il versamento si annulla;
-//  - spesa senza conto: solo un segno.
-// Una spesa si spunta solo nel mese in cui cade (un'annuale a marzo, per intero). I mesi precedenti a quello in corso non si cambiano più (409).
+// La spunta dice che la spesa è uscita nel mese: è solo un segno, come la casella dell'Excel (decisione 59). Non muove nessun saldo e,
+// per il promemoria di un salvadanaio, non fa il versamento (si scrive a mano nel salvadanaio). Una spesa si spunta solo nel mese in cui
+// cade (un'annuale a marzo, per intero).
 rotteSpese.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
   const risultato = await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, c.mese);
-    await vietaMesePassato(db, p);
     const [s] = await speseDelMese(db, p, id);
     if (!s) throw nonTrovato('Spesa prevista');
     if (!s.nel_mese) throw new ErroreApi(400, 'Questa spesa non cade in questo mese');
@@ -185,34 +180,18 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     // Di base oggi se siamo nel mese, altrimenti il giorno della scadenza.
     const data = v.data(c, 'data') ?? (oggi() >= p.dal && oggi() <= p.al ? oggi() : s.scadenza ?? p.dal);
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
-    const spunta = (await db.query<{ id: string; data: string }>(
+    return (await db.query<{ id: string; data: string }>(
       'insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
-    if (s.alimenta_obiettivo_id) {
-      // Promemoria di un salvadanaio (decisione 51): la spunta fa il versamento della quota del mese, «Dal conto» se la voce ha un conto
-      // che si vede (conto -> Niente, il saldo scende), altrimenti «soldi nuovi». Lo fa solo chi ha acceso il promemoria.
-      if (s.mia && Number(s.mia_quota) > 0) {
-        const conto = s.conto_id && (await db.query('select 1 from conti where id = $1', [s.conto_id])).rowCount ? s.conto_id : null;
-        await versaPerPromemoria(db, s.alimenta_obiettivo_id, Number(s.mia_quota), spunta.id, spunta.data, conto);
-      }
-    } else if (s.conto_id) {
-      // Il movimento lo scrive il database (decisione 48 B): vale anche se il conto della spesa lo vede solo chi l'ha creata.
-      await muoviPerSpunta(db, spunta.id, { conto: await importoSulConto(db, s.conto_id, Number(s.importo), Number(s.mia_quota)), descrizione: s.nome });
-    }
-    return spunta;
   });
   res.status(201).json(risultato);
 });
 
-// Toglie la spunta del mese: i soldi tornano (sparisce il movimento sul conto, e il versamento del promemoria di un salvadanaio). Solo nel mese in corso o futuro.
+// Toglie la spunta del mese.
 rotteSpese.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
-    await vietaMesePassato(db, p);
-    const spunte = (await db.query<{ id: string }>('select id from spunte where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rows;
-    if (!spunte.length) throw nonTrovato('Spunta');
-    for (const x of spunte) await annullaSpunta(db, x.id);
-    await db.query('delete from spunte where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al]);
+    if (!(await db.query('delete from spunte where spesa_prevista_id = $1 and data between $2 and $3', [id, p.dal, p.al])).rowCount) throw nonTrovato('Spunta');
   });
   res.status(204).end();
 });

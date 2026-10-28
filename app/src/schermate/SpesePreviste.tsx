@@ -29,8 +29,8 @@ export function SpesePreviste() {
   if (!dati) return <Caricamento errore={errore} />;
 
   const inizio = rif.profilo?.inizio_mese ?? 1;
-  // I promemoria dei salvadanai (decisione 51) non sono spese: stanno in una scheda a parte, fuori dai totali.
-  const attive = dati.spese.filter((s) => s.attiva && !s.alimenta_obiettivo_id);
+  // I promemoria dei salvadanai stanno in una scheda a parte ma sono spese come le altre (decisione 59): contano nei totali (sono mensili, tipo investimento).
+  const attive = dati.spese.filter((s) => s.attiva);
   const mensili = attive.filter((s) => s.ogni_mesi === 1);
   const somma = (xs: Spesa[]) => xs.reduce((t, s) => t + Number(s.mia_quota), 0);
   const annuo = attive.filter(eAnnuale).reduce((t, s) => t + (Number(s.mia_quota) * 12) / s.ogni_mesi!, 0);
@@ -108,10 +108,10 @@ export function SpesePreviste() {
         </Scheda>
       ) : null}
       {promemoriaSalvadanai.length ? (
-        <Scheda titolo="Promemoria dei salvadanai" nota="Non sono spese: non entrano nei totali. La quota del mese si versa spuntandola in Panoramica." icona="piggy-bank">
+        <Scheda titolo="Promemoria dei salvadanai" nota="Fuori dai totali di questa pagina; in Panoramica sono nella lista da spuntare. La spunta è solo un segno: il versamento si scrive nel salvadanaio." icona="piggy-bank">
           <View>
-            <RigaSpesa tipo="intestazione" nome="Salvadanaio" categoria="Categoria" conto="Dal conto" quando="Quando" totale="Quota del mese" quota="Tua quota" />
-            {promemoriaSalvadanai.map((s) => <RigaSpesa key={s.id} nome={s.nome} categoria="Salvadanaio" conto={s.conto ?? 'Soldi nuovi'} quando="Tutto il mese" totale={euro(s.importo)} quota={euro(s.mia_quota)} icona="piggy-bank" onApri={() => setAperta(s)} />)}
+            <RigaSpesa tipo="intestazione" nome="Salvadanaio" categoria="Categoria" conto="Conto" quando="Quando" totale="Quota del mese" quota="Tua quota" />
+            {promemoriaSalvadanai.map((s) => <RigaSpesa key={s.id} nome={s.nome} categoria="Salvadanaio" conto={s.conto ?? '—'} quando="Tutto il mese" totale={euro(s.importo)} quota={euro(s.mia_quota)} icona="piggy-bank" onApri={() => setAperta(s)} />)}
           </View>
         </Scheda>
       ) : null}
@@ -170,6 +170,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const fisso = (campo: string) => !!bloc?.campi.includes(campo);
 
   const salva = async () => {
+    if (!spesa || spesa.mia) div.controlla();
     if (spesa && bloc) {
       const libero = { ...(fisso('conto_id') ? {} : { conto_id: conto }), categoria_id: categoria, note: note.trim() || null, attiva };
       await modifica<Spesa>(`/spese-previste/${spesa.id}`, libero);

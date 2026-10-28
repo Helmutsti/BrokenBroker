@@ -1,15 +1,15 @@
 # BrokenBroker
 
-App di finanza personale per capire il proprio tenore di vita: quanto si risparmia davvero, se una spesa è sostenibile, come vanno rate, obiettivi e investimenti. Pensata per due persone che vivono insieme: ognuna ha i suoi dati privati e può condividere conti, spese e obiettivi.
+App di finanza personale per capire il proprio tenore di vita: quanto si risparmia davvero, se una spesa è sostenibile, come vanno rate, obiettivi e investimenti. Pensata per due persone che vivono insieme: ognuna ha i suoi dati privati e può condividere spese, budget e obiettivi.
 
 Oggi c'è la versione per **computer** (pagina web). La versione per iPhone usa lo stesso codice ma va ancora provata su un Mac.
 
 ## Cosa fa
 
-- **Panoramica** del mese: le spese previste da spuntare quando escono, i budget che si riempiono con le spese, quanto resta davvero, dove vanno i soldi, cosa succede se nulla cambia.
+- **Panoramica** del mese, come il foglio Excel: il saldo che scrivi tu, le spese previste da spuntare quando escono (la spunta è solo un segno), quanto deve ancora uscire e quanto resta davvero.
 - **Spese previste** ogni mese, ogni N mesi o una volta sola, divise a metà o con altre quote con l'altra persona.
 - **Obiettivi** annidabili, con sotto-obiettivi e traguardi di copertura (es. il fondo di emergenza).
-- **Movimenti**, **conti** (anche condivisi), **investimenti** con prezzo medio di carico, **analisi** con "posso permettermelo?" e controllo delle rate, **categorie** con icone.
+- **Movimenti** e **budget** come strumento a parte, **conti** come etichette, **investimenti** con prezzo medio di carico, **analisi** con "posso permettermelo?" e controllo delle rate, **categorie** con icone.
 
 ## Installare su un computer
 

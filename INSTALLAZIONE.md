@@ -140,21 +140,19 @@ La versione per iPhone usa lo stesso codice (`app/index.js`); il progetto iOS va
 | POST | `/accesso/registrazione` | nuovo utente (email, nome, password ≥ 10 caratteri) + categorie standard; chiusa se `REGISTRAZIONE_APERTA` non è `si` |
 | POST | `/accesso/accesso` | accesso con email e password → token valido 30 giorni |
 | POST | `/accesso/uscita` | chiude la sessione |
-| GET, PATCH | `/profilo` | nome, stipendio netto, giorno di paga, giorno di inizio del mese (`inizio_mese`, 1-28) |
-| GET, POST | `/conti` | elenco con saldo attuale (`?archiviati=true` per vedere anche gli archiviati), nuovo conto |
-| GET, PATCH, DELETE | `/conti/:id` | dettaglio, modifica, cancellazione (solo il proprietario) |
+| GET, PATCH | `/profilo` | nome, stipendio netto, giorno di paga, giorno di inizio del mese (`inizio_mese`, 1-28), saldo scritto a mano (`sul_conto`) |
+| GET, POST | `/conti` | le etichette dei conti (`?archiviati=true` per vedere anche le archiviate), nuova etichetta |
+| GET, PATCH, DELETE | `/conti/:id` | dettaglio, modifica (nome, icona, archiviato), cancellazione |
 | GET, POST | `/categorie` | albero (`?formato=elenco` per la lista piatta), nuova categoria |
 | PATCH, DELETE | `/categorie/:id` | modifica (nome, padre, colore, icona, ordine), cancellazione (`?sposta_su=<id>` se in uso) |
-| GET, POST | `/movimenti` | elenco con filtri (`dal`, `al`, `conto_id`, `categoria_id`, `cerca`, `limite`, `salta`), inserimento veloce |
-| GET | `/movimenti/suggerimento?esercente=` | conto e categoria usati l'ultima volta con quell'esercente |
-| POST | `/movimenti/trasferimento` | spostamento tra due conti |
-| GET, PATCH, DELETE | `/movimenti/:id` | dettaglio, modifica, cancellazione |
+| GET, POST | `/movimenti` | entrate e uscite scritte a mano (`?conto=<id>\|senza`, `?mese=AAAA-MM`, `?limite=`), nuovo movimento; strumento a parte con i budget |
+| PATCH, DELETE | `/movimenti/:id` | modifica, cancellazione (solo chi l'ha scritto) |
 | GET | `/categorie/spese?mese=` | speso nel mese per categoria (senza sottocategorie) |
 | GET, POST | `/spese-previste` | elenco con lo stato nel mese (`?mese=AAAA-MM`, `?solo_mese=true`), nuova spesa (fissa, investimento; ogni N mesi o una volta sola) |
 | GET, PATCH, DELETE | `/spese-previste/:id` | dettaglio con le quote, modifica, cancellazione (solo chi l'ha creata) |
-| POST, DELETE | `/spese-previste/:id/spunta` | spunta "uscito" del mese (crea o toglie il movimento collegato; se la paga un obiettivo, preleva dall'obiettivo) |
+| POST, DELETE | `/spese-previste/:id/spunta` | spunta "uscito" del mese (solo un segno: non muove soldi) |
 | PUT | `/spese-previste/:id/quote` | divisione tra le persone (`[{utente_id, percentuale}]`, somma 100; vuoto = di base) |
-| GET, POST | `/condivisioni` | cosa è condiviso; condividere un conto, una spesa, un movimento o un obiettivo con un'email |
+| GET, POST | `/condivisioni` | cosa è condiviso; condividere una spesa, un budget o un obiettivo con un'email |
 | DELETE | `/condivisioni/:id` | smettere di condividere (solo chi ha condiviso) |
 | GET | `/persone` | io e le persone con cui c'è una condivisione |
 | GET, POST | `/obiettivi` | albero con saldo, traguardo, percentuale e traguardi di copertura; nuovo obiettivo |

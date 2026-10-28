@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { PoolClient } from 'pg';
 import { conUtente } from '../db.ts';
-import { movimentoDelVersamento } from '../movimenti.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { alberoObiettivi, cent, type Nodo, trova } from '../albero.ts';
 import { inizioMese, meseDi, mesiFino, oggi, periodoRichiesto } from '../periodo.ts';
@@ -145,9 +144,9 @@ rotteObiettivi.delete('/:id', async (req, res) => {
 
 // Il promemoria del salvadanaio, «Mostra nelle spese come promemoria» (decisione 51): una voce in Spese con la quota del mese, fuori dai
 // totali delle spese. Con una scadenza e un traguardo la quota è (traguardo - già messo) / mesi personali rimasti (minimo 0) e la
-// calcola l'API; altrimenti serve la cifra fissa (`importo`). La spunta fa il versamento «Dal conto» (`conto_id`, di base il conto del
-// salvadanaio; vuoto = «soldi nuovi»), togliendola nel mese in corso il versamento si annulla. Si accende, si cambia e si spegne da qui
-// (dalla spesa è bloccato, decisione 37).
+// calcola l'API; altrimenti serve la cifra fissa (`importo`). È una spesa come le altre (decisione 59): la spunta è solo un segno e il
+// versamento si scrive a mano nel salvadanaio; `conto_id` è l'etichetta (di base quella del salvadanaio). Si accende, si cambia e si
+// spegne da qui (dalla spesa è bloccato, decisione 37).
 rotteObiettivi.put('/:id/promemoria', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
@@ -177,21 +176,6 @@ rotteObiettivi.put('/:id/promemoria', async (req, res) => {
   res.json(spesa);
 });
 
-// Il versamento fatto spuntando il promemoria del mese: la quota si divide tra i sotto-salvadanai come ogni versamento, tutte le parti
-// legate alla spunta (togliendola spariscono insieme ai loro movimenti). Con un conto è «Dal conto» (decisione 52: nessun movimento se il salvadanaio sta su quel conto, giroconto se sta su un altro, conto -> Niente se non ha conto), uno per parte.
-export async function versaPerPromemoria(db: PoolClient, obiettivoId: string, importo: number, spuntaId: string, data: string, contoId: string | null): Promise<void> {
-  const parti = await dividiVersamento(db, obiettivoId, importo);
-  for (const x of parti) {
-    const { id: versamentoId } = (await db.query<{ id: string }>(
-      'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id) values ($1, fp_me(), $2, $3, $4) returning id', [x.obiettivo_id, data, x.importo, spuntaId])).rows[0];
-    if (contoId) {
-      const nome = (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [x.obiettivo_id])).rows[0].nome;
-      await movimentoDelVersamento(db, { contoScelto: contoId, obiettivoId: x.obiettivo_id, importo: Number(x.importo), versamentoId, nome });
-    }
-  }
-  await creaSpeseRaggiunte(db, obiettivoId);
-}
-
 rotteObiettivi.delete('/:id/promemoria', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
@@ -200,24 +184,15 @@ rotteObiettivi.delete('/:id/promemoria', async (req, res) => {
   res.status(204).end();
 });
 
-// Versamenti: importo positivo = metto via, negativo = prelevo.
-// `conto_id` (facoltativo, decisioni 47 G e 52): i soldi vengono dal conto (importo positivo) o tornano sul conto (importo negativo). Il
-// movimento dipende da dove sta il salvadanaio: sul conto scelto non si muove niente (sono solo messi da parte), su un altro conto è un
-// giroconto, senza conto va da/verso Niente; sempre nella stessa transazione e legato al versamento. Senza `conto_id` sono
-// «soldi nuovi» / «escono». Non si può unire a `da_liberi`. La data non può cadere in un mese passato (decisione 48 C).
+// Versamenti: importo positivo = metto via, negativo = prelevo. Si scrivono a mano, come i «piazzati» dell'Excel: nessun conto si muove
+// (decisione 59).
 rotteObiettivi.post('/:id/versamenti', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
   const importo = v.importo(c, 'importo', true)!;
   if (Number(importo) === 0) throw new ErroreApi(400, "L'importo non può essere zero");
-  const contoId = v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')) ?? null;
-  if (contoId && v.booleano(c, 'da_liberi')) throw new ErroreApi(400, 'I soldi vengono dal conto oppure dai liberi del salvadanaio superiore, non da tutti e due');
   const obiettivo = await conUtente(res.locals.utenteId, async (db) => {
     if (!(await db.query('select 1 from obiettivi where id = $1', [id])).rowCount) throw nonTrovato('Obiettivo');
-    if (contoId && !(await db.query('select 1 from conti where id = $1', [contoId])).rowCount) throw nonTrovato('Conto');
-    // Il passato non si cambia (decisione 48 C): nessun versamento, di nessun tipo, in un mese personale già finito.
-    const dataScelta = v.data(c, 'data');
-    if (dataScelta && dataScelta < (await periodoRichiesto(db, undefined)).dal) throw new ErroreApi(409, 'Il passato non si cambia: non si può versare o prelevare in un mese passato');
     // "Aggiungi quota mensile": il versamento spunta anche il promemoria del mese, se c'è e non è già spuntato.
     let spuntaId: string | null = null;
     if (v.booleano(c, 'promemoria')) {
@@ -230,17 +205,10 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
       }
     }
     const data = v.data(c, 'data') ?? null;
-    const inserisci = async (obiettivoId: string, x: string, spunta: string | null, spostamento: string | null): Promise<string> => {
-      const versamentoId = (await db.query<{ id: string }>(
-        'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id, spostamento_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4, $5) returning id',
-        [obiettivoId, data, x, spunta, spostamento])).rows[0].id;
-      // Dal conto: il movimento opposto, legato a questo versamento (se il versamento sparisce, sparisce anche lui).
-      if (contoId) {
-        const nome = (await db.query<{ nome: string }>('select nome from obiettivi where id = $1', [obiettivoId])).rows[0].nome;
-        // Decisione 52: stesso conto del salvadanaio = nessun movimento; altro conto = giroconto; nessun conto = conto <-> Niente.
-        await movimentoDelVersamento(db, { contoScelto: contoId, obiettivoId, importo: Number(x), versamentoId, nome });
-      }
-      return versamentoId;
+    const inserisci = async (obiettivoId: string, x: string, spunta: string | null, spostamento: string | null): Promise<void> => {
+      await db.query(
+        'insert into versamenti (obiettivo_id, utente_id, data, importo, promemoria_spunta_id, spostamento_id) values ($1, fp_me(), coalesce($2::date, current_date), $3, $4, $5)',
+        [obiettivoId, data, x, spunta, spostamento]);
     };
     if (v.booleano(c, 'da_liberi')) {
       // Spostamento (decisione 46): i soldi passano tra i liberi del salvadanaio superiore e questo sotto-salvadanaio,
@@ -277,9 +245,6 @@ rotteObiettivi.post('/:id/versamenti', async (req, res) => {
 rotteObiettivi.delete('/versamenti/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    // Un versamento si annulla (insieme al suo eventuale movimento) solo nel mese in corso o dopo: il passato non si cambia (decisione 48 C).
-    const mosso = (await db.query<{ data: string }>('select x.data from versamenti x where x.id = $1', [id])).rows[0];
-    if (mosso && mosso.data < (await periodoRichiesto(db, undefined)).dal) throw new ErroreApi(409, 'Il passato non si cambia: un versamento di un mese passato non si annulla più');
     const eliminato = (await db.query<{ spunta: string | null; spostamento: string | null }>('delete from versamenti where id = $1 returning promemoria_spunta_id as spunta, spostamento_id as spostamento', [id])).rows[0];
     if (eliminato) {
       if (eliminato.spunta) await db.query('delete from spunte where id = $1', [eliminato.spunta]);

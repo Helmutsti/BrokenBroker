@@ -1,10 +1,10 @@
 ﻿import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
+import { Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
 import { RigaAvanzamento, RigaSalvadanaio, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
-import type { Condivisione, Conto, Obiettivo, Traguardo } from '../dati/tipi.ts';
+import type { Condivisione, Obiettivo, Spesa, Traguardo } from '../dati/tipi.ts';
 import { data, dataInTesto, euro, euroTondi, importoInTesto, leggiData, leggiImporto, meseCorto, nomeMese, nomeMeseMinuscolo, oggiIso, percento } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { useRiferimenti } from '../dati/contesto.tsx';
@@ -43,7 +43,8 @@ const pctDi = (o: Obiettivo) => (o.traguardo_effettivo && o.percentuale !== null
 
 // Dentro Salvadanai: ogni salvadanaio ha il suo riquadro (richiesta di Manuel), con quanto
 // c'è, i traguardi di copertura e i sotto-salvadanai annidati, in ordine di scadenza.
-export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; filtro?: string }) {
+// `spese`: le spese del mese scelto, per dire nel riquadro se il promemoria del mese è spuntato (decisione 59).
+export function Obiettivi({ nuovo = 0, filtro = 'tutti', spese = [] }: { nuovo?: number; filtro?: string; spese?: Spesa[] }) {
   const tutti = useDati<Obiettivo[]>('/obiettivi');
   const dati = tutti.dati ?? null, errore = tutti.errore;
   const [modifica_, setModifica] = useState<{ obiettivo: Obiettivo | null; padre?: string } | null>(null);
@@ -93,7 +94,10 @@ export function Obiettivi({ nuovo = 0, filtro = 'tutti' }: { nuovo?: number; fil
   const scheda = (o: Obiettivo) => {
     const ordinatiTr = [...o.traguardi].sort((a, b) => Number(a.importo) - Number(b.importo));
     const visibili = aperti.has(o.id) ? ordinatiTr : ordinatiTr.slice(0, MAX);
-    const nota = o.alimentato_da ? `promemoria in Spese ${euro(o.alimentato_da.importo)} al mese` : '';
+    // Il promemoria è una spesa come le altre (decisione 59): se cade nel mese scelto se ne dice la quota e se è spuntato (solo un segno).
+    const delMese = o.alimentato_da ? spese.find((s) => s.alimenta_obiettivo_id === o.id && s.attiva && s.nel_mese) : undefined;
+    const nota = delMese ? `promemoria in Spese ${euro(delMese.mia_quota)} a ${nomeMeseMinuscolo(rif.mese)} · ${delMese.uscita ? 'spuntato' : 'da spuntare'}`
+      : o.alimentato_da ? `promemoria in Spese ${euro(o.alimentato_da.importo)} al mese` : '';
     // Con un conto scelto in alto: quanto di questo salvadanaio sta su quel conto (il resto è su altri conti).
     const notaFiltro = filtro === 'tutti' ? '' : `${filtro === 'senza' ? 'Senza conto' : `Su ${rif.conti.find((x) => x.id === filtro)?.nome ?? 'questo conto'}`}: ${euro(sommaSuConto([o], filtro))}`;
     return (
@@ -172,7 +176,8 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
   const [creaSpesa, setCreaSpesa] = useState(false);
   const [condiviso, setCondiviso] = useState(false);
   const [con, setCon] = useState<string | null>(null);
-  // «Mostra nelle spese come promemoria» (decisione 51): una voce in Spese con la quota del mese; spuntandola si versa «Dal conto».
+  // «Mostra nelle spese come promemoria» (decisioni 51 e 59): una voce in Spese con la quota del mese, come le altre spese; la spunta è solo
+  // un segno e il versamento si scrive a mano qui. Il conto è un'etichetta (di base quella del salvadanaio).
   // Con scadenza e traguardo la quota è quanto manca / mesi rimasti; senza, una cifra fissa scritta qui.
   const [daParte, setDaParte] = useState(false);
   const [quota, setQuota] = useState('');
@@ -247,7 +252,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
     return [
       dentro.length ? `Spariscono anche ${dentro.length} ${dentro.length === 1 ? 'sotto-salvadanaio' : 'sotto-salvadanai'}.` : null,
       promemoria ? `${promemoria === 1 ? 'Sparisce' : 'Spariscono'} anche ${promemoria} promemoria di versamento in Spese.` : null,
-      'Spariscono anche i versamenti segnati: quelli fatti dal conto spariscono con il loro movimento e i soldi tornano sul conto.',
+      'Spariscono anche i versamenti segnati.',
     ].filter(Boolean).join(' ');
   };
 
@@ -265,7 +270,7 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
           <Meta><ConErrore campo="scadenza"><CampoData facoltativa etichetta="Scadenza" valore={scadenza} onCambia={setScadenza} /></ConErrore></Meta>
         </Affiancati>
       ))}
-      {riquadro('Mostra nelle spese come promemoria', daParte ? 'Compare in Spese, fuori dai totali delle spese. Spuntandolo versi la quota del mese qui; togliendo la spunta (nel mese in corso) il versamento si annulla.' : 'Spento: nessuna voce in Spese. Accendilo per avere ogni mese la quota da mettere da parte.', daParte ? (
+      {riquadro('Mostra nelle spese come promemoria', daParte ? 'Compare in Spese con la quota del mese, come le altre spese. La spunta è solo un segno: il versamento lo scrivi qui.' : 'Spento: nessuna voce in Spese. Accendilo per avere ogni mese la quota da mettere da parte.', daParte ? (
           <>
             {automatica ? (
               <Testo stile="dettaglio-normale" colore="testo-secondario">{quotaCalcolata !== null
@@ -274,8 +279,8 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
             ) : (
               <ConErrore campo="quota"><Campo etichetta="Quanto al mese" valore={quota} onCambia={setQuota} inputMode="decimal" segnaposto="0,00" aiuto="Senza scadenza e traguardo la cifra la scrivi tu" /></ConErrore>
             )}
-            <Tendina etichetta="Dal conto" valore={conto} iconaPrima="landmark" onCambia={setConto}
-              opzioni={[{ valore: '', testo: 'Soldi nuovi (nessun conto)' }, ...rif.conti.filter((x) => !x.archiviato || x.id === conto).map((x) => ({ valore: x.id, testo: x.nome, icona: x.icona }))]} />
+            <Tendina etichetta="Conto in Spese" valore={conto} iconaPrima="landmark" onCambia={setConto}
+              opzioni={[{ valore: '', testo: 'Nessun conto' }, ...rif.conti.filter((x) => !x.archiviato || x.id === conto).map((x) => ({ valore: x.id, testo: x.nome, icona: x.icona }))]} />
           </>
         ) : null, <Interruttore acceso={daParte} onCambia={setDaParte} etichetta="Mostra nelle spese come promemoria" />, true)}
       {riquadro('Dove sta', 'Dentro un altro salvadanaio, oppure da solo; e su quale conto stanno i suoi soldi.',
@@ -301,60 +306,49 @@ function FinestraObiettivo({ stato, obiettivi, onChiudi, onTraguardo, onSotto }:
 
 // Cambiare la cifra di un salvadanaio: si scrive la cifra di oggi, oppure si aggiunge o si
 // toglie. Nel database resta un versamento della differenza, con la data.
-// Da dove arrivano i soldi (decisione 47 G): dal conto (versamento e movimento del conto insieme), dai liberi del salvadanaio
-// superiore (solo un sotto-salvadanaio, decisione 46) o «soldi nuovi»; togliendo: tornano sul conto, nei liberi, oppure escono.
+// Il versamento si scrive a mano e nessun conto si muove (decisione 59). Da dove arrivano i soldi: dai liberi del salvadanaio
+// superiore (solo un sotto-salvadanaio, decisione 46) o «soldi nuovi»; togliendo: tornano nei liberi, oppure escono.
 type ModoCifra = 'cifra' | 'aggiungi' | 'togli';
-type Origine = 'conto' | 'liberi' | 'altro';
+type Origine = 'liberi' | 'altro';
 export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | null; onChiudi: () => void }) {
-  const rif = useRiferimenti();
   const [modo, setModo] = useState<ModoCifra>('cifra');
   const [importo, setImporto] = useState('');
-  // null = la scelta di base: dal conto del salvadanaio se ce l'ha (quando i soldi entrano), «soldi nuovi» / «esce» negli altri casi.
+  // null = la scelta di base: «soldi nuovi» / «esce».
   const [scelta, setScelta] = useState<Origine | null>(null);
-  const [contoScelto, setContoScelto] = useState<string | null>(null);
   const dettaglio = useDati<Obiettivo>(obiettivo ? `/obiettivi/${obiettivo.id}` : null).dati;
   const tutti = useDati<Obiettivo[]>(obiettivo?.padre_id ? '/obiettivi' : null).dati;
   // Il superiore diretto (anche se è a sua volta un sotto-salvadanaio): i suoi «liberi» sono la parte messa direttamente in lui.
   const padre = obiettivo?.padre_id && tutti ? tuttiGliObiettivi(tutti).find((x) => x.id === obiettivo.padre_id) ?? null : null;
   const liberi = padre ? liberiDi(padre) : null;
-  const conti = rif.conti.filter((x) => !x.archiviato);
   // Con sotto-salvadanai la cifra è la somma: si cambia solo la parte messa nel padre.
   const attuale = Number(obiettivo?.saldo ?? 0), propria = Number(obiettivo?.versato ?? 0);
   useEffect(() => {
     if (!obiettivo) return;
     setModo('cifra'); setImporto(importoInTesto(obiettivo.saldo)); setScelta(null);
-    setContoScelto(conti.some((x) => x.id === obiettivo.conto_id) ? obiettivo.conto_id : null);
-  }, [obiettivo]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [obiettivo]);
   const v = leggiImporto(importo);
   const diff0 = pianoCifra({ modo, valore: v === null ? null : Number(v), saldo: attuale, propria, daLiberi: false, liberiPadre: null }).differenza;
   // I soldi entrano nel salvadanaio (aggiungi, o cifra più alta) o escono (togli, o cifra più bassa).
   const entra = modo === 'aggiungi' || (modo === 'cifra' && (diff0 === null || diff0 > 0));
-  const origine: Origine = scelta === 'liberi' && (!padre || (!entra && modo !== 'togli')) ? 'altro' : scelta ?? (entra && contoScelto ? 'conto' : 'altro');
+  const origine: Origine = scelta === 'liberi' && (!padre || (!entra && modo !== 'togli')) ? 'altro' : scelta ?? 'altro';
   const piano = pianoCifra({ modo, valore: v === null ? null : Number(v), saldo: attuale, propria, daLiberi: !!padre && origine === 'liberi', liberiPadre: liberi });
   const { differenza } = piano;
   // Scorciatoie: «Riempi» (quanto manca al traguardo) e «Metti 1/12» (quota mensile); impostano sempre «Aggiungi».
   const manca = obiettivo ? mancaAlTraguardo(obiettivo) : null;
   const mensile = obiettivo ? quotaMensileSalvadanaio(obiettivo) : null;
   const imposta = (x: number) => { setModo('aggiungi'); setImporto(importoInTesto(x.toFixed(2))); };
-  const conto = conti.find((x) => x.id === contoScelto) ?? null;
-  const dalConto = origine === 'conto';
-  // Il saldo del conto prima e dopo (i soldi dal conto escono dal suo saldo, quelli che tornano ci rientrano).
-  const saldoPrima = conto && conto.saldo !== null ? Number(conto.saldo) : null;
-  const saldoDopo = saldoPrima !== null && differenza !== null && Math.abs(differenza) >= 0.005 ? saldoPrima - differenza : null;
   const salva = async () => {
     serve(v, 'Scrivi l’importo', 'importo');
     if (modo !== 'cifra' && Number(v) <= 0) throw new ErroreCampo('importo', "L'importo deve essere maggiore di zero");
     if (modo === 'cifra' && Number(v) < 0) throw new ErroreCampo('importo', 'La cifra non può essere sotto zero');
     if (Math.abs(differenza!) < 0.005) return;
     if (piano.errore) throw new Error(piano.errore.tipo === 'liberi' ? `Nei liberi ci sono solo ${euro(piano.errore.massimo)}` : `Puoi togliere al massimo ${euro(piano.errore.massimo)}: il resto è nei sotto-salvadanai`);
-    if (dalConto && !contoScelto) throw new ErroreCampo('conto', 'Scegli il conto');
-    await crea(`/obiettivi/${obiettivo!.id}/versamenti`, { importo: differenza!.toFixed(2), data: oggiIso(), dividi: !!obiettivo?.figli.length, ...(piano.sposta ? { da_liberi: true } : {}), ...(dalConto ? { conto_id: contoScelto } : {}) });
+    await crea(`/obiettivi/${obiettivo!.id}/versamenti`, { importo: differenza!.toFixed(2), data: oggiIso(), dividi: !!obiettivo?.figli.length, ...(piano.sposta ? { da_liberi: true } : {}) });
   };
   // Le provenienze (o destinazioni) tra cui scegliere, secondo che i soldi entrino o escano.
-  const nomeConto = conto ? ` ${conto.nome}` : '';
   const opzioniOrigine: { valore: Origine; testo: string }[] = entra
-    ? [...(conti.length ? [{ valore: 'conto' as const, testo: `Dal conto${nomeConto}` }] : []), ...(padre ? [{ valore: 'liberi' as const, testo: `Dai liberi di ${padre.nome} · ${euro(liberi)}` }] : []), { valore: 'altro', testo: 'Soldi nuovi' }]
-    : [...(conti.length ? [{ valore: 'conto' as const, testo: `Torna sul conto${nomeConto}` }] : []), ...(padre && modo === 'togli' ? [{ valore: 'liberi' as const, testo: `Rimetti nei liberi di ${padre.nome}` }] : []), { valore: 'altro', testo: 'Esce' }];
+    ? [...(padre ? [{ valore: 'liberi' as const, testo: `Dai liberi di ${padre.nome} · ${euro(liberi)}` }] : []), { valore: 'altro', testo: 'Soldi nuovi' }]
+    : [...(padre && modo === 'togli' ? [{ valore: 'liberi' as const, testo: `Rimetti nei liberi di ${padre.nome}` }] : []), { valore: 'altro', testo: 'Esce' }];
   const mostraOrigine = differenza !== null ? Math.abs(differenza) >= 0.005 : modo !== 'cifra';
   const cosaSuccede = (): string | undefined => {
     if (differenza === null) return undefined;
@@ -365,21 +359,6 @@ export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | 
     if (modo === 'cifra') return Math.abs(differenza) >= 0.005 ? `${differenza > 0 ? 'Aggiungi' : 'Togli'} ${euro(Math.abs(differenza))}` : undefined;
     return `Diventano ${euro(attuale + differenza)}`;
   };
-  // Decisione 52: se il salvadanaio sta sul conto scelto il saldo non si muove (cambiano i liberi); se sta su un altro conto è un giroconto.
-  const sulContoStesso = !!conto && obiettivo?.conto_id === conto.id;
-  const altroConto = !sulContoStesso && obiettivo?.conto_id ? conti.find((x) => x.id === obiettivo.conto_id) ?? null : null;
-  const prima_dopo = (x: Conto, delta: number) => (x.saldo === null ? null : `${euro(x.saldo)} → ${euro(Number(x.saldo) + delta)}`);
-  const aiutoConto = dalConto && conto && mostraOrigine && sulContoStesso
-    ? (conto.liberi === null || differenza === null || Math.abs(differenza) < 0.005
-        ? `Il salvadanaio sta su ${conto.nome}: il saldo non cambia, i soldi restano sul conto.`
-        : `Il salvadanaio sta su ${conto.nome}: il saldo non cambia (${euro(conto.saldo)}), i soldi restano sul conto. Liberi: ${euro(conto.liberi)} → ${euro(Number(conto.liberi) - differenza)}`)
-    : dalConto && conto && mostraOrigine && altroConto && differenza !== null && Math.abs(differenza) >= 0.005
-      ? `Giroconto: ${conto.nome} ${prima_dopo(conto, -differenza) ?? 'senza saldo'}, ${altroConto.nome} ${prima_dopo(altroConto, differenza) ?? 'senza saldo'}`
-    : dalConto && conto && mostraOrigine
-    ? (saldoPrima === null ? `Il saldo di ${conto.nome} non è scritto: scrivilo in Conti per vederlo cambiare.`
-      : saldoDopo === null ? `Saldo di ${conto.nome}: ${euro(saldoPrima)}`
-        : `Saldo di ${conto.nome}: ${euro(saldoPrima)} → ${euro(saldoDopo)}`)
-    : undefined;
   const dettaglioVersamento = (x: NonNullable<Obiettivo['versamenti']>[number]) => {
     if (!x.spostamento_con) return '';
     const entra = Number(x.importo) > 0;
@@ -401,18 +380,11 @@ export function FinestraVersa({ obiettivo, onChiudi }: { obiettivo: Obiettivo | 
       {mostraOrigine && opzioniOrigine.length > 1 ? (
         <SceltaSegmenti etichetta={entra ? 'Da dove arrivano i soldi' : 'Dove vanno i soldi'} larghezzaPiena valore={origine} onCambia={setScelta} opzioni={opzioniOrigine} />
       ) : null}
-      {mostraOrigine && dalConto ? (
-        <ConErrore campo="conto">
-          <Tendina etichetta={entra ? 'Da quale conto' : 'Su quale conto'} valore={contoScelto} iconaPrima="landmark" onCambia={setContoScelto}
-            opzioni={conti.map((x) => ({ valore: x.id, testo: x.saldo !== null ? `${x.nome} · ${euro(x.saldo)}` : x.nome, icona: x.icona }))} />
-        </ConErrore>
-      ) : null}
       <ConErrore campo="importo">
         <Campo etichetta={modo === 'cifra' ? 'Cifra di oggi' : modo === 'aggiungi' ? 'Quanto aggiungi' : 'Quanto togli'} valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" autoFocus
           errore={piano.errore ? (piano.errore.tipo === 'liberi' ? `Nei liberi ci sono solo ${euro(piano.errore.massimo)}` : `Puoi togliere al massimo ${euro(piano.errore.massimo)}: il resto è nei sotto-salvadanai`) : undefined}
-          aiuto={[cosaSuccede(), aiutoConto].filter(Boolean).join(' · ') || undefined} />
+          aiuto={cosaSuccede()} />
       </ConErrore>
-      {saldoDopo !== null && saldoDopo < -0.005 && conto ? <Esito tono="attenzione" testo={`Il saldo di ${conto.nome} va sotto zero (${euro(saldoDopo)}). Si può fare: è quello che succede in banca.`} /> : null}
       {dettaglio?.versamenti?.length ? (
         <Voce etichetta="Ultimi versamenti">
           {dettaglio.versamenti.slice(0, 5).map((x) => (

@@ -228,7 +228,7 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, on
 // ---- CMP-23 Numero chiave ----
 export type ToneNumero = 'normale' | 'ok' | 'attenzione' | 'errore';
 // `titolo` sostituisce l'etichetta con un nodo (es. un selettore); `onPress` rende premibile cifra e nota (non il titolo).
-// `dettagli`: righe in più sotto la nota (es. «Liberi» e «Nei salvadanai» del saldo), ognuna può essere in rosso.
+// `dettagli`: righe in più sotto la nota, ognuna può essere in rosso.
 export function NumeroChiave({ etichetta, valore, nota, dettagli, icona, tono = 'normale', titolo, onPress, etichettaPressione }: { etichetta: string; valore: string; nota?: string; dettagli?: { testo: string; rosso?: boolean }[]; icona: string; tono?: ToneNumero; titolo?: ReactNode; onPress?: () => void; etichettaPressione?: string }) {
   const { c } = useTema();
   const compatto = useCompatto();
@@ -470,8 +470,8 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
 }
 
 // ---- CMP-28 Scheda conto ----
-// `liberi` e `neiSalvadanai` (decisione 52): i soldi che restano liberi sul conto e quelli messi da parte nei salvadanai che stanno su di lui; liberi in rosso se negativi.
-export function SchedaConto({ nome, nota, saldo, saldoNegativo, liberi, liberiNegativi, neiSalvadanai, condiviso, icona, onApri }: { nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; liberi?: string; liberiNegativi?: boolean; neiSalvadanai?: string; condiviso: boolean; icona: string; onApri: () => void }) {
+// Un conto è solo un'etichetta (decisione 59): nome, icona e una nota facoltativa; niente saldo né condivisione.
+export function SchedaConto({ nome, nota, icona, onApri }: { nome: string; nota?: string; icona: string; onApri: () => void }) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
@@ -482,15 +482,7 @@ export function SchedaConto({ nome, nota, saldo, saldoNegativo, liberi, liberiNe
         <View style={{ flex: 1, gap: d['spazio-testo'] }}>
           <Testo stile="titolo-scheda">{nome}</Testo>
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
-          {liberi && neiSalvadanai ? (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: d['spazio-colonne'], rowGap: d['spazio-testo'] }}>
-              <Testo stile="dettaglio-normale" colore={liberiNegativi ? 'testo-errore' : 'testo-secondario'}>{`Liberi ${liberi}`}</Testo>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">{`Nei salvadanai ${neiSalvadanai}`}</Testo>
-            </View>
-          ) : null}
         </View>
-        {saldo ? <Testo stile="corpo-forte" colore={saldoNegativo ? 'testo-errore' : 'testo-primario'}>{saldo}</Testo> : null}
-        {condiviso ? <Etichetta testo="Condiviso" icona="users" tono="accento" /> : null}
         <Icona nome="chevron-right" misura={16} colore="icona-tenue" />
       </View>
     </Pressable>

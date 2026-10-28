@@ -26,7 +26,6 @@ if ((await r('GET', '/conti', M)).length) { console.log('Dati di prova già pres
 
 const oggi = new Date();
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const giorno = (n) => { const d = new Date(oggi); d.setDate(d.getDate() - n); return iso(d); };
 const meseFa = (n, g) => { const d = new Date(oggi.getFullYear(), oggi.getMonth() - n, g); return iso(d); };
 
 await r('PATCH', '/profilo', M, { stipendio_netto: '1800', giorno_paga: 27, inizio_mese: 1 });
@@ -36,14 +35,14 @@ const cat = await r('GET', '/categorie?formato=elenco', M);
 // padre: nome della categoria padre; null = categoria principale; assente = la prima con quel nome.
 const C = (nome, padre) => cat.find((c) => c.nome === nome && (padre === undefined || (padre === null ? !c.padre_id : cat.find((p) => p.id === c.padre_id)?.nome === padre))).id;
 
-const conto = async (nome, tipo, saldo) => (await r('POST', '/conti', M, { nome, tipo, saldo_iniziale: saldo, data_saldo_iniziale: meseFa(6, 1) })).id;
-const bper = await conto('BPER', 'corrente', '2400');
-const intesa = await conto('Intesa', 'corrente', '3100');
-const comune = await conto('Revolut comune', 'corrente', '900');
-const revolut = await conto('Revolut', 'digitale', '600');
-const paypal = await conto('PayPal', 'digitale', '0');
-const tr = await conto('Trade Republic', 'investimenti', '1500');
-await r('POST', '/condivisioni', M, { voce: 'conto', id: comune, email: 'ele@brokenbroker.test' });
+// I conti sono solo etichette (decisione 59): un nome e un'icona.
+const conto = async (nome) => (await r('POST', '/conti', M, { nome })).id;
+const bper = await conto('BPER');
+const intesa = await conto('Intesa');
+const comune = await conto('Revolut comune');
+const revolut = await conto('Revolut');
+const paypal = await conto('PayPal');
+const tr = await conto('Trade Republic');
 
 const spesa = async (nome, importo, extra) => (await r('POST', '/spese-previste', M, { nome, importo, ...extra })).id;
 const meta = async (id) => r('POST', '/condivisioni', M, { voce: 'spesa', id, email: 'ele@brokenbroker.test' });
@@ -66,8 +65,10 @@ await spesa('Assicurazione auto', '430.86', { ogni_mesi: 6, conto_id: intesa, ca
 await spesa('Vacanze invernali', '300', { ogni_mesi: 12, conto_id: revolut, categoria_id: C('Viaggi e vacanze'), prossima_scadenza: meseFa(-2, 20) });
 await spesa('Bollo Aygo', '150.52', { ogni_mesi: 12, conto_id: intesa, categoria_id: C('Bollo'), prossima_scadenza: meseFa(-7, 10) });
 
-// Movimenti degli ultimi mesi (entrate, spese di budget e spunte).
-const mov = (conto_id, importo, esercente, categoria_id, data) => r('POST', '/movimenti', M, { conto_id, importo, esercente, categoria_id, data });
+// Movimenti scritti a mano negli ultimi mesi (entrate e uscite; le uscite con categoria contano nei budget) e spunte.
+const mov = (conto_id, importo, descrizione, categoria_id, data) => r('POST', '/movimenti', M, Number(importo) < 0
+  ? { tipo: 'uscita', conto_id, importo: String(-Number(importo)), descrizione, categoria_id, data }
+  : { tipo: 'entrata', conto_id, importo, descrizione, data });
 for (let m = 5; m >= 0; m--) {
   await mov(bper, '1800', 'Stipendio', C('Stipendio'), meseFa(m + 1, 27));
   for (const [c, imp, es, k, g] of [[comune, '-62.30', 'Esselunga', C('Supermercato'), 3], [comune, '-48.10', 'Coop', C('Supermercato'), 11], [comune, '-71.40', 'Esselunga', C('Supermercato'), 19],
@@ -78,7 +79,6 @@ for (let m = 5; m >= 0; m--) {
 // Spunte del mese in corso per alcune spese fisse.
 const mese = iso(oggi).slice(0, 7);
 for (const id of [affitto, box, luce, spotify]) await r('POST', `/spese-previste/${id}/spunta`, M, { mese });
-await r('POST', '/movimenti/trasferimento', M, { da_conto_id: intesa, a_conto_id: tr, importo: '500', data: giorno(1), descrizione: 'Versamento ETF' });
 
 // Rate.
 await r('POST', '/rate', M, { oggetto: 'American Express', finanziaria: 'Amex', importo_rata: '300', numero_rate: 10, prima_scadenza: meseFa(8, 15), conto_id: intesa, categoria_id: C('Rate') });

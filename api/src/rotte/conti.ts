@@ -5,29 +5,9 @@ import * as v from '../valida.ts';
 
 export const rotteConti = Router();
 
-// I conti hanno un saldo (decisione 47): UNO per conto, uguale per tutte le persone che lo vedono.
-// saldo = saldo di partenza (scritto a mano, con data e ora) + entrate verso il conto - uscite dal conto, registrate DOPO quel momento
-// (decisione 51: ogni movimento ha una sorgente e una destinazione; il conto speciale «Niente» non si vede mai).
-// saldo_partenza / saldo_partenza_il: quello scritto; saldo: l'attuale (null se il conto non ha un saldo di partenza);
-// saldo_aggiornato_il: l'ultima volta che è cambiato (saldo scritto o ultimo movimento che conta).
-// nei_salvadanai (decisione 52): i soldi dei salvadanai che stanno su questo conto (solo quelli che chi chiede vede: i suoi e i condivisi
-// con lui; `fp_nei_salvadanai`); liberi = saldo - nei_salvadanai (null se il conto non ha saldo), può essere negativo.
-const SELEZIONE = `
-  select c.id, c.proprietario_id, c.nome, c.icona, c.archiviato,
-         c.proprietario_id = fp_me() as mio,
-         exists (select 1 from condivisioni s where s.conto_id = c.id) as condiviso,
-         c.saldo_partenza::text as saldo_partenza, c.saldo_partenza_il,
-         case when c.saldo_partenza is null then null
-              else (c.saldo_partenza + coalesce(m.somma, 0))::text end as saldo,
-         case when c.saldo_partenza is null then null
-              else greatest(c.saldo_partenza_il, m.ultimo) end as saldo_aggiornato_il,
-         coalesce(n.totale, 0)::numeric(12,2)::text as nei_salvadanai,
-         case when c.saldo_partenza is null then null
-              else (c.saldo_partenza + coalesce(m.somma, 0) - coalesce(n.totale, 0))::text end as liberi
-    from conti c
-    left join fp_nei_salvadanai() n on n.conto_id = c.id
-    left join lateral (select sum(case when x.a_conto_id = c.id then x.importo else -x.importo end) as somma, max(x.momento) as ultimo from movimenti_conto x
-                        where (x.a_conto_id = c.id or x.da_conto_id = c.id) and x.momento > c.saldo_partenza_il) m on true`;
+// I conti sono solo etichette (decisione 59): un nome e un'icona per dire dove sta una spesa, una rata, un salvadanaio o un movimento.
+// Nessun saldo e nessuna condivisione: ognuno vede i suoi.
+const SELEZIONE = 'select c.id, c.nome, c.icona, c.archiviato from conti c';
 
 rotteConti.get('/', async (req, res) => {
   const archiviati = req.query.archiviati === 'true';
@@ -47,11 +27,8 @@ rotteConti.get('/:id', async (req, res) => {
 rotteConti.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const valori = [v.testo(c, 'nome', true, 80), v.testo(c, 'icona', false, 60) ?? 'landmark'];
-  const conto = await conUtente(res.locals.utenteId, async (db) => {
-    const { rows } = await db.query<{ id: string }>(
-      'insert into conti (proprietario_id, nome, icona) values (fp_me(), $1, $2) returning id', valori);
-    return (await db.query(`${SELEZIONE} where c.id = $1`, [rows[0].id])).rows[0];
-  });
+  const conto = await conUtente(res.locals.utenteId, async (db) =>
+    (await db.query('insert into conti (proprietario_id, nome, icona) values (fp_me(), $1, $2) returning id, nome, icona, archiviato', valori)).rows[0]);
   res.status(201).json(conto);
 });
 
@@ -63,66 +40,18 @@ rotteConti.patch('/:id', async (req, res) => {
     icona: v.testo(c, 'icona', false, 60),
     archiviato: v.booleano(c, 'archiviato'),
   }, 2);
-  const conto = await conUtente(res.locals.utenteId, async (db) => {
-    const { rowCount } = await db.query(`update conti set ${set.sql} where id = $1`, [id, ...set.valori]);
-    if (!rowCount) return undefined;
-    return (await db.query(`${SELEZIONE} where c.id = $1`, [id])).rows[0];
-  });
+  const conto = await conUtente(res.locals.utenteId, async (db) =>
+    (await db.query(`update conti set ${set.sql} where id = $1 returning id, nome, icona, archiviato`, [id, ...set.valori])).rows[0]);
   if (!conto) throw nonTrovato('Conto');
   res.json(conto);
 });
 
-// Il saldo di partenza del conto, come lo vedi in banca. `momento` (facoltativo, di base adesso, non nel futuro) dice a
-// quando vale: i movimenti prima di quel momento non si contano più (sono già nel saldo). Riscriverlo è il modo
-// di riallinearsi alla banca. importo null toglie il saldo.
-rotteConti.put('/:id/saldo', async (req, res) => {
-  const id = v.idPercorso(req.params.id);
-  const c = v.corpo(req.body);
-  const importo = v.annullabile(c, 'importo', () => v.importo(c, 'importo', true));
-  let momento: string | null = null;
-  if (c.momento !== undefined && c.momento !== null) {
-    const t = typeof c.momento === 'string' ? Date.parse(c.momento) : NaN;
-    if (Number.isNaN(t)) throw new ErroreApi(400, 'Il campo "momento" deve essere una data e ora');
-    if (t > Date.now() + 60_000) throw new ErroreApi(400, 'Il momento del saldo non può essere nel futuro');
-    momento = new Date(t).toISOString();
-  }
-  const conto = await conUtente(res.locals.utenteId, async (db) => {
-    if (!(await db.query('select 1 from conti where id = $1', [id])).rowCount) return undefined;
-    if (importo === null) await db.query('update conti set saldo_partenza = null, saldo_partenza_il = null where id = $1', [id]);
-    else await db.query('update conti set saldo_partenza = $2, saldo_partenza_il = coalesce($3::timestamptz, now()) where id = $1', [id, importo, momento]);
-    return (await db.query(`${SELEZIONE} where c.id = $1`, [id])).rows[0];
-  });
-  if (!conto) throw nonTrovato('Conto');
-  res.json(conto);
-});
-
-// Ultimi movimenti del conto (?limite=, di base 20), dal più recente. `importo` ha il segno visto da questo conto (+ se arrivano
-// soldi, - se escono); `da` e `a` sono i nomi dei due conti (null = «Niente», cioè entrata o uscita). `conta` dice se il movimento è
-// dopo il saldo di partenza (e quindi è nel saldo attuale); gli altri erano già nel saldo scritto.
-rotteConti.get('/:id/movimenti', async (req, res) => {
-  const id = v.idPercorso(req.params.id);
-  const limite = Math.min(200, Math.max(1, Number(req.query.limite ?? 20) || 20));
-  const righe = await conUtente(res.locals.utenteId, async (db) => {
-    if (!(await db.query('select 1 from conti where id = $1', [id])).rowCount) return undefined;
-    return (await db.query(
-      `select m.id, (case when m.a_conto_id = $1 then m.importo else -m.importo end)::text as importo, m.momento, m.momento::date as data, m.causa, m.descrizione, u.nome as utente,
-              cd.nome as da, ca.nome as a, (m.da_conto_id = fp_niente()) as da_niente, (m.a_conto_id = fp_niente()) as a_niente,
-              (c.saldo_partenza_il is not null and m.momento > c.saldo_partenza_il) as conta
-         from movimenti_conto m join conti c on c.id = $1 left join utenti u on u.id = m.utente_id
-         left join conti cd on cd.id = m.da_conto_id left join conti ca on ca.id = m.a_conto_id
-        where m.da_conto_id = $1 or m.a_conto_id = $1 order by m.momento desc, m.id desc limit $2`, [id, limite])).rows;
-  });
-  if (!righe) throw nonTrovato('Conto');
-  res.json(righe);
-});
-
-// Solo il proprietario può cancellare (decisione 16).
+// Eliminando un conto le voci che lo usavano restano, senza etichetta.
 rotteConti.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
     if ((await db.query('delete from conti where id = $1', [id])).rowCount) return;
-    const visibile = (await db.query('select 1 from conti where id = $1', [id])).rowCount;
-    throw visibile ? new ErroreApi(403, 'Solo chi ha creato il conto può cancellarlo') : nonTrovato('Conto');
+    throw (await db.query('select 1 from conti where id = $1', [id])).rowCount ? new ErroreApi(403, 'Non puoi cancellare questo conto') : nonTrovato('Conto');
   });
   res.status(204).end();
 });

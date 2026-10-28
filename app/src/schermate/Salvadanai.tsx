@@ -64,7 +64,7 @@ export function Salvadanai() {
         <NumeroChiave etichetta="Ogni mese in Spese" valore={euro(alMese)} icona="calendar-check"
           nota={alimentati.length ? `Da ${alimentati.length} ${alimentati.length === 1 ? 'salvadanaio' : 'salvadanai'}` : 'Nessun salvadanaio è ancora una voce di Spese'} />
       </RigaNumeri>
-      <Obiettivi nuovo={nuovo} filtro={filtro} />
+      <Obiettivi nuovo={nuovo} filtro={filtro} spese={sp.dati.spese} />
     </>
   );
 }

@@ -188,9 +188,17 @@ export function useDivisione({ aperta, voce, rotta, origine }: { aperta: boolean
   const nomeAltro = persone?.find((p) => p.id === conEff)?.nome ?? null;
   useEffect(() => { if (condiviso && !conEff && persone?.length === 1) setCon(persone[0].id); }, [condiviso, conEff, persone]);
 
-  const salva = async (id: string) => {
+  // Controlla la divisione PRIMA di salvare la voce (così un errore non lascia una voce salvata a metà) e dà la mia quota.
+  // Il campo % c'è solo con «Altra quota»: «No» è 100%, «Metà» 50%.
+  const controlla = (): number => {
     const mia = divisione === 'no' ? 100 : divisione === 'meta' ? 50 : Number(miaQuota.replace(',', '.'));
-    if (!(mia > 0 && mia < 100)) serve(null, 'La tua quota deve essere tra 1 e 99%', 'quota');
+    if (divisione === 'altra' && !(mia > 0 && mia < 100)) serve(null, 'La tua quota deve essere tra 1 e 99%', 'quota');
+    if (condiviso) serve(conEff, 'Scegli con chi condividi', 'condivisione');
+    return mia;
+  };
+
+  const salva = async (id: string) => {
+    const mia = controlla();
     const io = { utente_id: rif.profilo!.id, percentuale: String(mia) };
     if (!condiviso) {
       await salvaCondivisione(voce, id, false, null);
@@ -202,7 +210,7 @@ export function useDivisione({ aperta, voce, rotta, origine }: { aperta: boolean
     // Condivisa le quote vanno sempre scritte: senza, la divisione di base sarebbe metà e metà.
     await sostituisci(`${rotta}/${id}/quote`, { quote: mia === 100 ? [io] : [io, { utente_id: altroId, percentuale: String(100 - mia) }] });
   };
-  return { condiviso, divisione, setDivisione, miaQuota, setMiaQuota, conEff, bloccata, nomeAltro, persone, setCondiviso, setCon, salva };
+  return { condiviso, divisione, setDivisione, miaQuota, setMiaQuota, conEff, bloccata, nomeAltro, persone, setCondiviso, setCon, controlla, salva };
 }
 
 // Il modulo, uno sotto l'altro: «Come la dividete» (No / Metà / Altra quota, con il campo % se «Altra quota»), lo switch di condivisione
@@ -236,7 +244,7 @@ export function SezioneDivisione({ stato, cosa, cifra, testoCondividi }: { stato
 }
 
 // Crea o toglie la condivisione di una voce secondo l'interruttore; restituisce l'id dell'altra persona (o null).
-export async function salvaCondivisione(voce: 'conto' | 'spesa' | 'obiettivo' | 'budget', id: string, condiviso: boolean, con: string | null): Promise<string | null> {
+export async function salvaCondivisione(voce: 'spesa' | 'obiettivo' | 'budget', id: string, condiviso: boolean, con: string | null): Promise<string | null> {
   const esistente = (await leggi<Condivisione[]>('/condivisioni')).find((x) => x.voce === voce && x.voce_id === id && x.mia);
   if (condiviso && esistente && con && esistente.condiviso_con_id !== con) await cancella(`/condivisioni/${esistente.id}`);
   else if (condiviso && esistente) return esistente.condiviso_con_id;
