@@ -95,6 +95,8 @@ export type Posizione = Titolo & {
   titolo_id: string; portafoglio_id: string; portafoglio: string | null; quantita: string; prezzo_medio: string; costo: string;
   prezzo: string | null; prezzo_al: string | null; prezzo_fonte: 'yahoo' | 'mano' | null; prezzo_aggiornato_il: string | null;
   stato: StatoPrezzo; valore: string | null; guadagno: string | null; guadagno_percentuale: number | null; peso: number | null;
+  // Decisione 68: `prezzo_medio` e `prezzo` sono allineati alla banca se `allineata`; `pcm_borsa` e `prezzo_borsa` sono quelli di Yahoo.
+  pcm_borsa: string; prezzo_borsa: string | null; allineata: boolean;
 };
 export type PrezzoLetto = { prezzo: string; prezzo_valuta: string | null; valuta: string; data: string; fonte: string | null; aggiornato_il: string | null; stato: StatoPrezzo };
 export type TipoBene = 'fondo_pensione' | 'crowdfunding' | 'societa' | 'immobile' | 'altro' | 'metallo';

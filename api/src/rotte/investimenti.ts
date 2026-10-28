@@ -2,10 +2,11 @@ import { Router } from 'express';
 import type { PoolClient } from 'pg';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
-import { aggiornaPrezzi, rileggiPrezzo } from '../prezzi.ts';
+import { aggiornaPrezzi, prezzoDelGiorno, rileggiPrezzo } from '../prezzi.ts';
 import { andamento, caricaDati, portafoglio, riepilogo, selezione } from '../investimenti.ts';
 import { cercaSulMercato } from '../mercato.ts';
 import { METALLI } from '../metalli.ts';
+import { oggi } from '../periodo.ts';
 import * as v from '../valida.ts';
 import { rotteBeni } from './beni.ts';
 import { rottePortafogli } from './portafogli.ts';
@@ -26,15 +27,16 @@ rotteInvestimenti.get('/portafoglio', async (req, res) => {
   res.json(await conUtente(res.locals.utenteId, (db) => portafoglio(db, id)));
 });
 
-// Valore e soldi messi dentro alla fine di ogni mese (?mesi=12), oppure ogni settimana (?settimane=5).
+// Valore e soldi messi dentro alla fine di ogni mese (?mesi=12), oppure ogni settimana (?settimane=26) o ogni giorno (?giorni=31).
 // ?portafoglio_id= per uno solo. ?escludi=t:<titolo>:<portafoglio>,b:<bene> toglie degli asset dal guadagno (decisione 66).
 rotteInvestimenti.get('/andamento', async (req, res) => {
   const q = req.query as Record<string, unknown>;
-  const settimane = v.intero(q, 'settimane', 2, 26);
+  const giorni = v.intero(q, 'giorni', 2, 62);
+  const settimane = giorni ? undefined : v.intero(q, 'settimane', 2, 160);
   const mesi = v.intero(q, 'mesi', 1, 600) ?? 12;
   const id = v.id(q, 'portafoglio_id');
   const esclusi = new Set((v.testo(q, 'escludi', false, 8000) ?? '').split(',').filter(Boolean));
-  res.json(await conUtente(res.locals.utenteId, (db) => andamento(db, mesi, settimane, id, esclusi)));
+  res.json(await conUtente(res.locals.utenteId, (db) => andamento(db, mesi, giorni ? { giorni } : settimane ? { settimane } : undefined, id, esclusi)));
 });
 
 // Esposizione per classe, area o settore, pesata sul valore. Contano le posizioni che hanno un prezzo.
@@ -141,8 +143,9 @@ rotteInvestimenti.put('/titoli/:id/esposizioni', async (req, res) => {
   res.status(204).end();
 });
 
-// «Lotti» (nome storico della tabella): una riga per posizione, cioè per titolo + portafoglio, con quantità totale,
-// prezzo medio di carico (PCM) e data e ora dell'ultimo acquisto. Un nuovo acquisto aggiorna la riga esistente.
+// «Lotti» (nome storico della tabella): un acquisto per riga, con quantità, data e il prezzo di borsa di quel giorno, preso dall'app
+// (decisione 67, rivede la 42). La posizione (titolo + portafoglio) è la somma dei suoi acquisti; si allinea alla banca con
+// PUT /posizioni/allinea e torna a Yahoo con DELETE /posizioni/allinea («Sincronizza», decisione 68).
 const CAMPI_LOTTO = `l.id, l.titolo_id, t.nome as titolo, t.isin, t.ticker, l.portafoglio_id, p.nome as portafoglio,
   l.quantita::text as quantita, l.prezzo::numeric(14,4)::text as prezzo, (l.quantita * l.prezzo)::numeric(14,2)::text as controvalore,
   l.acquistato_il, to_char(l.acquistato_il, 'YYYY-MM-DD') as data, to_char(l.acquistato_il, 'HH24:MI') as ora`;
@@ -157,8 +160,7 @@ function leggiLotto_(c: Record<string, unknown>, nuovo: boolean) {
   const ora = v.testo(c, 'ora', false, 5);
   if (ora !== undefined && !ORA.test(ora)) throw new ErroreApi(400, 'L\'ora deve essere HH:MM');
   return {
-    titolo_id: v.id(c, 'titolo_id', nuovo), portafoglio_id: v.id(c, 'portafoglio_id', nuovo), quantita, prezzo: v.prezzo(c, 'prezzo', nuovo),
-    data: v.data(c, 'data'), ora,
+    titolo_id: v.id(c, 'titolo_id', nuovo), portafoglio_id: v.id(c, 'portafoglio_id', nuovo), quantita, data: v.data(c, 'data'), ora,
   };
 }
 
@@ -176,32 +178,34 @@ rotteInvestimenti.get('/lotti', async (req, res) => {
   const titolo = v.id(q, 'titolo_id') ?? null, port = v.id(q, 'portafoglio_id') ?? null;
   res.json(await conUtente(res.locals.utenteId, async (db) => (await db.query(
     `select ${CAMPI_LOTTO} from ${DA_LOTTI} where l.verso = 'acquisto' and ($1::uuid is null or l.titolo_id = $1) and ($2::uuid is null or l.portafoglio_id = $2)
-      order by t.nome, p.nome`, [titolo, port])).rows));
+      order by t.nome, p.nome, l.acquistato_il, l.id`, [titolo, port])).rows));
 });
 
-// Acquisto. Se il titolo è già nel portafoglio si unisce alla riga esistente (nella stessa istruzione, che ne blocca la riga):
-// quantità = somma, PCM = media pesata, data e ora = quelle dell'ultimo acquisto. Se non c'è, la riga si crea.
-// Senza data né ora vale adesso. Con la sola data: adesso se è oggi, altrimenti mezzogiorno. Con l'ora: quell'ora.
-// Risponde 201 se la riga è nuova, 200 se è stata aggiornata.
+// Il prezzo di borsa del giorno di un acquisto; se la fonte non risponde l'acquisto non si salva.
+async function prezzoAcquisto(db: PoolClient, titoloId: string, data: string | undefined) {
+  if (data && data > oggi()) throw new ErroreApi(400, 'La data di acquisto non può essere nel futuro');
+  const p = await prezzoDelGiorno(db, titoloId, data ?? oggi());
+  if (p === null) throw new ErroreApi(502, 'Non trovo il prezzo di borsa di quel giorno: la borsa non risponde o il titolo non ha un simbolo. Riprova tra poco');
+  return p.toFixed(8);
+}
+
+// Acquisto: data e quote; il prezzo è la chiusura di borsa di quel giorno. Una riga nuova anche se il titolo è già nel portafoglio
+// (la posizione è la somma degli acquisti). Senza data né ora vale adesso. Con la sola data: adesso se è oggi, altrimenti mezzogiorno.
 rotteInvestimenti.post('/lotti', async (req, res) => {
   const c = leggiLotto_(v.corpo(req.body), true);
-  const { lotto, nuova } = await conUtente(res.locals.utenteId, async (db) => {
+  const lotto = await conUtente(res.locals.utenteId, async (db) => {
     await controllaPortafoglio(db, c.portafoglio_id!);
     if (!(await db.query('select 1 from titoli where id = $1', [c.titolo_id])).rowCount) throw nonTrovato('Titolo');
-    const { rows } = await db.query<{ id: string; nuova: boolean }>(
-      `insert into lotti as l (proprietario_id, titolo_id, portafoglio_id, verso, quantita, prezzo, acquistato_il)
+    const prezzo = await prezzoAcquisto(db, c.titolo_id!, c.data);
+    const { rows } = await db.query<{ id: string }>(
+      `insert into lotti (proprietario_id, titolo_id, portafoglio_id, verso, quantita, prezzo, acquistato_il)
        values (fp_me(), $1, $2, 'acquisto', $3, $4,
          case when $5::date is null and $6::time is null then now()
               when $6::time is null and $5::date = current_date then now()
               else (coalesce($5::date, current_date) + coalesce($6::time, time '12:00')) at time zone current_setting('TimeZone') end)
-       on conflict (proprietario_id, titolo_id, portafoglio_id) where verso = 'acquisto' do update set
-         prezzo = (l.quantita * l.prezzo + excluded.quantita * excluded.prezzo) / (l.quantita + excluded.quantita),
-         quantita = l.quantita + excluded.quantita,
-         acquistato_il = greatest(l.acquistato_il, excluded.acquistato_il)
-       returning id, (xmax = 0) as nuova`, [c.titolo_id, c.portafoglio_id, c.quantita, c.prezzo, c.data ?? null, c.ora ?? null]);
-    // La data nuova non può stare nel futuro (si controlla sulla riga: se fallisce, l'unione si annulla).
+       returning id`, [c.titolo_id, c.portafoglio_id, c.quantita, prezzo, c.data ?? null, c.ora ?? null]);
     await nonNelFuturo(db, rows[0].id);
-    return { lotto: await leggiLotto(db, rows[0].id), nuova: rows[0].nuova };
+    return leggiLotto(db, rows[0].id);
   });
   // Il prezzo di un titolo che non ce l'ha per oggi si legge subito (al massimo 10 secondi: se la fonte
   // non risponde la risposta è comunque valida e lo stato resta «mancante»).
@@ -209,10 +213,10 @@ rotteInvestimenti.post('/lotti', async (req, res) => {
     conUtente(res.locals.utenteId, (db) => aggiornaPrezzi(db, [c.titolo_id!])).catch(() => undefined),
     new Promise((ok) => setTimeout(ok, 10000)),
   ]);
-  res.status(nuova ? 201 : 200).json(lotto);
+  res.status(201).json(lotto);
 });
 
-// Correzione diretta della riga: quantità totale, PCM (campo «prezzo»), data e ora dell'ultimo acquisto.
+// Correzione di un acquisto: quantità, data e ora. Cambiando la data il prezzo diventa quello di borsa del nuovo giorno.
 // Il titolo e il portafoglio non cambiano qui (per spostare c'è PATCH /posizioni).
 rotteInvestimenti.patch('/lotti/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
@@ -220,46 +224,48 @@ rotteInvestimenti.patch('/lotti/:id', async (req, res) => {
   if (Object.values(c).every((x) => x === undefined)) throw new ErroreApi(400, 'Nessun campo da modificare');
   const lotto = await conUtente(res.locals.utenteId, async (db) => {
     const fuso = `current_setting('TimeZone')`;
+    const titolo = (await db.query<{ titolo_id: string }>(`select titolo_id from lotti where id = $1 and verso = 'acquisto'`, [id])).rows[0]?.titolo_id;
+    if (!titolo) return undefined;
+    const prezzo = c.data ? await prezzoAcquisto(db, titolo, c.data) : null;
     const { rowCount } = await db.query(
       `update lotti set quantita = coalesce($2, quantita), prezzo = coalesce($3, prezzo),
          acquistato_il = least((coalesce($4::date, (acquistato_il at time zone ${fuso})::date) + coalesce($5::time, (acquistato_il at time zone ${fuso})::time)) at time zone ${fuso},
                                case when $5::time is null then now() else 'infinity'::timestamptz end)
-       where id = $1 and verso = 'acquisto'`, [id, c.quantita ?? null, c.prezzo ?? null, c.data ?? null, c.ora ?? null]);
+       where id = $1 and verso = 'acquisto'`, [id, c.quantita ?? null, prezzo, c.data ?? null, c.ora ?? null]);
     if (!rowCount) return undefined;
     if (c.data || c.ora) await nonNelFuturo(db, id);
     return leggiLotto(db, id);
   });
-  if (!lotto) throw nonTrovato('Posizione');
+  if (!lotto) throw nonTrovato('Acquisto');
   res.json(lotto);
 });
 
+// Toglie un acquisto. Se era l'ultimo del titolo nel portafoglio, sparisce anche l'allineamento alla banca.
 rotteInvestimenti.delete('/lotti/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
-  const n = await conUtente(res.locals.utenteId, async (db) => (await db.query(`delete from lotti where id = $1 and verso = 'acquisto'`, [id])).rowCount);
-  if (!n) throw nonTrovato('Posizione');
+  const n = await conUtente(res.locals.utenteId, async (db) => {
+    const tolto = (await db.query<{ titolo_id: string; portafoglio_id: string }>(`delete from lotti where id = $1 and verso = 'acquisto' returning titolo_id, portafoglio_id`, [id])).rows[0];
+    if (tolto) await db.query(`delete from allineamenti_banca s where titolo_id = $1 and portafoglio_id = $2
+                                 and not exists (select 1 from lotti l where l.titolo_id = s.titolo_id and l.portafoglio_id = s.portafoglio_id and l.verso = 'acquisto')`, [tolto.titolo_id, tolto.portafoglio_id]);
+    return tolto ? 1 : 0;
+  });
+  if (!n) throw nonTrovato('Acquisto');
   res.status(204).end();
 });
 
-// Sposta una posizione in un altro portafoglio: se là il titolo c'è già, le due righe si uniscono (stessa regola dell'acquisto).
+// Sposta un titolo in un altro portafoglio con tutti i suoi acquisti. L'allineamento alla banca va con lui, se là il titolo non ne ha già uno.
 rotteInvestimenti.patch('/posizioni', async (req, res) => {
   const c = v.corpo(req.body);
   const titolo = v.id(c, 'titolo_id', true)!, da = v.id(c, 'portafoglio_id', true)!, a = v.id(c, 'nuovo_portafoglio_id', true)!;
   const trovata = await conUtente(res.locals.utenteId, async (db) => {
     await controllaPortafoglio(db, a);
-    const origine = (await db.query<{ id: string }>(
-      `select id from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto' for update`, [titolo, da])).rows[0];
-    if (!origine) return false;
+    if (!(await db.query(`select 1 from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto'`, [titolo, da])).rowCount) return false;
     if (da === a) return true;
-    const destinazione = (await db.query<{ id: string }>(
-      `select id from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto' for update`, [titolo, a])).rows[0];
-    if (!destinazione) {
-      await db.query('update lotti set portafoglio_id = $2 where id = $1', [origine.id, a]);
+    await db.query(`update lotti set portafoglio_id = $3 where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto'`, [titolo, da, a]);
+    if ((await db.query('select 1 from allineamenti_banca where titolo_id = $1 and portafoglio_id = $2', [titolo, a])).rowCount) {
+      await db.query('delete from allineamenti_banca where titolo_id = $1 and portafoglio_id = $2', [titolo, da]);
     } else {
-      await db.query(
-        `update lotti d set prezzo = (d.quantita * d.prezzo + o.quantita * o.prezzo) / (d.quantita + o.quantita),
-           quantita = d.quantita + o.quantita, acquistato_il = greatest(d.acquistato_il, o.acquistato_il)
-           from lotti o where d.id = $1 and o.id = $2`, [destinazione.id, origine.id]);
-      await db.query('delete from lotti where id = $1', [origine.id]);
+      await db.query('update allineamenti_banca set portafoglio_id = $3 where titolo_id = $1 and portafoglio_id = $2', [titolo, da, a]);
     }
     return true;
   });
@@ -267,11 +273,49 @@ rotteInvestimenti.patch('/posizioni', async (req, res) => {
   res.status(204).end();
 });
 
-// Toglie un titolo da un portafoglio: cancella la sua riga.
+// Toglie un titolo da un portafoglio: tutti i suoi acquisti e l'allineamento alla banca.
 rotteInvestimenti.delete('/posizioni', async (req, res) => {
   const q = req.query as Record<string, unknown>;
   const titolo = v.id(q, 'titolo_id', true)!, port = v.id(q, 'portafoglio_id', true)!;
-  const n = await conUtente(res.locals.utenteId, async (db) => (await db.query(`delete from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto'`, [titolo, port])).rowCount);
+  const n = await conUtente(res.locals.utenteId, async (db) => {
+    await db.query('delete from allineamenti_banca where titolo_id = $1 and portafoglio_id = $2', [titolo, port]);
+    return (await db.query(`delete from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto'`, [titolo, port])).rowCount;
+  });
   if (!n) throw nonTrovato('Titolo nel portafoglio');
+  res.status(204).end();
+});
+
+// Allinea un titolo alla banca (decisione 68): PCM e/o prezzo di mercato come li mostra la banca. Ciascuno si confronta con quello di
+// Yahoo in questo momento (il PCM dei prezzi di borsa degli acquisti, l'ultimo prezzo di mercato) e se ne salva il rapporto: tutti i
+// prezzi di acquisto, e tutti i prezzi di mercato anche nel passato del grafico, si moltiplicano per lui finché non si sincronizza.
+rotteInvestimenti.put('/posizioni/allinea', async (req, res) => {
+  const c = v.corpo(req.body);
+  const titolo = v.id(c, 'titolo_id', true)!, port = v.id(c, 'portafoglio_id', true)!;
+  const pcm = v.prezzo(c, 'pcm'), prezzo = v.prezzo(c, 'prezzo');
+  if (!pcm && !prezzo) throw new ErroreApi(400, 'Scrivi il PCM o il prezzo di mercato della banca');
+  if ((pcm && Number(pcm) <= 0) || (prezzo && Number(prezzo) <= 0)) throw new ErroreApi(400, 'PCM e prezzo devono essere maggiori di zero');
+  const trovata = await conUtente(res.locals.utenteId, async (db) => {
+    const borsa = (await db.query<{ pcm: string | null }>(
+      `select (sum(quantita * prezzo) / nullif(sum(quantita), 0))::text as pcm from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto'`, [titolo, port])).rows[0]?.pcm;
+    if (borsa == null) return false;
+    const mercato = (await db.query<{ prezzo: string }>('select prezzo::text as prezzo from prezzi where titolo_id = $1 order by data desc limit 1', [titolo])).rows[0]?.prezzo;
+    if (prezzo && !mercato) throw new ErroreApi(409, 'Manca il prezzo di Yahoo di questo titolo: non c\'è niente da allineare. Riprova quando arriva');
+    const fPcm = pcm ? Number(pcm) / Number(borsa) : null, fPrezzo = prezzo ? Number(prezzo) / Number(mercato) : null;
+    await db.query(`insert into allineamenti_banca (proprietario_id, titolo_id, portafoglio_id, fattore_pcm, fattore_prezzo) values (fp_me(), $1, $2, $3, $4)
+                    on conflict (proprietario_id, titolo_id, portafoglio_id) do update set
+                      fattore_pcm = coalesce(excluded.fattore_pcm, allineamenti_banca.fattore_pcm),
+                      fattore_prezzo = coalesce(excluded.fattore_prezzo, allineamenti_banca.fattore_prezzo), salvato_il = now()`,
+      [titolo, port, fPcm?.toFixed(10) ?? null, fPrezzo?.toFixed(10) ?? null]);
+    return true;
+  });
+  if (!trovata) throw nonTrovato('Titolo nel portafoglio');
+  res.status(204).end();
+});
+
+// «Sincronizza»: toglie l'allineamento, PCM e prezzi tornano quelli di Yahoo.
+rotteInvestimenti.delete('/posizioni/allinea', async (req, res) => {
+  const q = req.query as Record<string, unknown>;
+  const titolo = v.id(q, 'titolo_id', true)!, port = v.id(q, 'portafoglio_id', true)!;
+  await conUtente(res.locals.utenteId, (db) => db.query('delete from allineamenti_banca where titolo_id = $1 and portafoglio_id = $2', [titolo, port]));
   res.status(204).end();
 });

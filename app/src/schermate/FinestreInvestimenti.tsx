@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Esito, Etichetta, Interruttore, Pulsante, SceltaSegmenti, type StatoPressione, Tessera } from '../componenti/base.tsx';
+import { Esito, Etichetta, Interruttore, Pulsante, PulsanteIcona, SceltaSegmenti, type StatoPressione, Tessera } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
 import { cancella, crea, ErroreRichiesta, modifica, sostituisci, useDati } from '../dati/api.ts';
 import type { Bene, Lotto, Portafoglio, Posizione, PrezzoLetto, Titolo, TipoBene, VoceCatalogo } from '../dati/tipi.ts';
@@ -39,13 +39,6 @@ const leggiQuantita = (testo: string, campo: string, intera = false) => {
   if (!/^\d+(\.\d{1,6})?$/.test(q) || Number(q) <= 0) throw new ErroreCampo(campo, intera ? 'Scrivi quanti pezzi, es. 3' : 'Scrivi la quantità, es. 3,5');
   if (intera && !Number.isInteger(Number(q))) throw new ErroreCampo(campo, 'Le monete si contano a pezzi interi');
   return q;
-};
-const leggiOra = (testo: string): string | undefined => {
-  const t = testo.trim();
-  if (!t) return undefined;
-  const m = /^(\d{1,2})[:.](\d{2})$/.exec(t);
-  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) throw new ErroreCampo('ora', 'Scrivi l\'ora come HH:MM, es. 14:30');
-  return `${m[1].padStart(2, '0')}:${m[2]}`;
 };
 const leggiGiorno = (testo: string, campo: string): string | undefined => {
   if (!testo.trim()) return undefined;
@@ -219,9 +212,7 @@ export function FinestraAggiungi({ aperta, partenza, onChiudi }: { aperta: boole
   const [titolo, setTitolo] = useState<string | null>(null);
   const [nuovo, setNuovo] = useState<NuovoTitolo>({ isin: '', nome: '', ticker: '' });
   const [quantita, setQuantita] = useState('');
-  const [pcm, setPcm] = useState('');
   const [giorno, setGiorno] = useState('');
-  const [ora, setOra] = useState('');
   // Non quotato
   const [nome, setNome] = useState('');
   const [tipo, setTipo] = useState<Exclude<TipoBene, 'metallo'>>('fondo_pensione');
@@ -237,7 +228,7 @@ export function FinestraAggiungi({ aperta, partenza, onChiudi }: { aperta: boole
   useEffect(() => {
     if (!aperta) return;
     setScelta(partenza.scelta ?? 'quotato'); setPortafoglio(partenza.portafoglioId ?? null);
-    setTitolo(partenza.titoloId ?? null); setNuovo({ isin: '', nome: '', ticker: '' }); setQuantita(''); setPcm(''); setGiorno(''); setOra('');
+    setTitolo(partenza.titoloId ?? null); setNuovo({ isin: '', nome: '', ticker: '' }); setQuantita(''); setGiorno('');
     setNome(''); setTipo('fondo_pensione'); setCosto(''); setValore(''); setCodice(null); setPurezza(''); setDove(''); setAcquisto('');
   }, [aperta, partenza]);
   // Senza un portafoglio di partenza si propone il primo.
@@ -247,16 +238,11 @@ export function FinestraAggiungi({ aperta, partenza, onChiudi }: { aperta: boole
   const pezzi = voce?.unita === 'pezzi';
   useEffect(() => { setPurezza(purezzaInTesto(voce?.purezza_predefinita)); }, [codice]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Titolo già nel portafoglio: la nota con quantità e PCM che si otterrebbero.
+  // Titolo già nel portafoglio: l'acquisto si aggiunge ai precedenti (decisione 67).
   const idReale = titolo && titolo !== 'nuovo' ? titolo : null;
   const lotti = useDati<Lotto[]>(aperta && scelta === 'quotato' && idReale && portafoglio ? `/investimenti/lotti?titolo_id=${idReale}&portafoglio_id=${portafoglio}` : null).dati ?? [];
-  const q = Number(quantita.trim().replace(',', '.')), u = Number(leggiPrezzo(pcm) ?? NaN);
-  const riga = lotti[0]; // una sola riga per titolo e portafoglio
-  const q0 = riga ? Number(riga.quantita) : 0, c0 = riga ? Number(riga.quantita) * Number(riga.prezzo) : 0;
-  const nuovaQ = q0 + q, nuovoPcm = (c0 + q * u) / nuovaQ;
-  const notaPosizione = !riga || !idReale ? null
-    : q > 0 && Number.isFinite(u) ? `Nuova quantità ${quantitaTesto(nuovaQ)}, nuovo PCM ${prezzoInTesto(nuovoPcm)} €`
-    : `Il titolo è già in questo portafoglio (${quantitaTesto(q0)}, PCM ${prezzoInTesto(c0 / q0)} €): l'acquisto si somma alla posizione.`;
+  const q0 = lotti.reduce((t, l) => t + Number(l.quantita), 0);
+  const notaPosizione = lotti.length && idReale ? `Il titolo è già in questo portafoglio (${quantitaTesto(q0)} quote): l'acquisto si aggiunge ai precedenti.` : null;
 
   const dataAcq = acquisto.trim() ? leggiData(acquisto) : null;
   const costoN = Number(leggiImporto(costo) ?? NaN);
@@ -268,9 +254,9 @@ export function FinestraAggiungi({ aperta, partenza, onChiudi }: { aperta: boole
     if (scelta === 'quotato') {
       const id = await idTitolo(titolo, nuovo);
       const qt = leggiQuantita(quantita, 'quantita');
-      const prezzo = serve(leggiPrezzo(pcm), 'Scrivi il prezzo medio di carico, es. 121,7623', 'prezzo');
-      const dt = leggiGiorno(giorno, 'data'), hh = leggiOra(ora);
-      await crea('/investimenti/lotti', { titolo_id: id, portafoglio_id: port, quantita: qt, prezzo, data: dt, ora: hh });
+      const dt = leggiGiorno(giorno, 'data');
+      // Il prezzo lo prende l'app: la chiusura di borsa del giorno dell'acquisto.
+      await crea('/investimenti/lotti', { titolo_id: id, portafoglio_id: port, quantita: qt, data: dt });
       return;
     }
     const dt = leggiGiorno(acquisto, 'data_acquisto');
@@ -293,7 +279,7 @@ export function FinestraAggiungi({ aperta, partenza, onChiudi }: { aperta: boole
   return (
     <FinestraModulo titolo="Aggiungi" icona="trending-up" aperta={aperta} onChiudi={onChiudi} onSalva={salva}>
       <Voce etichetta="Che cosa aggiungi?" aiuto={scelta === 'quotato'
-        ? 'Un acquisto di ETF, azioni, obbligazioni o crypto: quantità e prezzo medio di carico (PCM). Se il titolo c\'è già nel portafoglio, si somma alla posizione.'
+        ? 'Un acquisto di ETF, azioni, obbligazioni o crypto: quante quote e in che giorno. Il prezzo lo prende l\'app dalla borsa di quel giorno.'
         : scelta === 'non_quotato' ? 'Senza prezzo di mercato (fondo pensione, crowdfunding, immobile…): quanto hai pagato e quanto vale oggi, lo aggiorni tu.'
           : 'Oro, argento, platino, palladio o monete: il valore si calcola da solo con la quotazione del metallo.'}>
         <SceltaSegmenti etichetta="Che cosa aggiungi" larghezzaPiena valore={scelta} onCambia={setScelta}
@@ -305,15 +291,11 @@ export function FinestraAggiungi({ aperta, partenza, onChiudi }: { aperta: boole
           <ConErrore campo="titolo"><View style={{ gap: d['spazio-blocco'] }}><SceltaTitolo aperta={aperta} titolo={titolo} setTitolo={setTitolo} nuovo={nuovo} setNuovo={setNuovo} /></View></ConErrore>
           <Affiancati>
             <Meta><ConErrore campo="quantita"><Campo etichetta="Quantità" valore={quantita} onCambia={setQuantita} inputMode="decimal" segnaposto="Es. 7" /></ConErrore></Meta>
-            <Meta><ConErrore campo="prezzo"><Campo etichetta="Prezzo medio di carico (PCM)" valore={pcm} onCambia={setPcm} inputMode="decimal" segnaposto="0,00" /></ConErrore></Meta>
+            <Meta><ConErrore campo="data"><CampoData facoltativa etichetta="Giorno dell'acquisto" valore={giorno} onCambia={setGiorno} aiuto="Vuoto: oggi" /></ConErrore></Meta>
           </Affiancati>
           {tendinaPortafoglio}
-          <Affiancati>
-            <Meta><ConErrore campo="data"><CampoData facoltativa etichetta="Data (facoltativa)" valore={giorno} onCambia={setGiorno} aiuto="Vuota: adesso" /></ConErrore></Meta>
-            <Meta><ConErrore campo="ora"><Campo etichetta="Ora (facoltativa)" valore={ora} onCambia={setOra} segnaposto="HH:MM" inputMode="numeric" /></ConErrore></Meta>
-          </Affiancati>
           {notaPosizione ? <Esito tono="informazione" testo={notaPosizione} /> : null}
-          {q > 0 && Number.isFinite(u) ? <Esito tono="informazione" testo={`Costo dell'acquisto ${euro(q * u)}. Il valore di oggi si calcola dall'ultimo prezzo del titolo.`} /> : null}
+          <Esito tono="informazione" testo="Il prezzo di ogni quota è la chiusura di borsa di quel giorno. Se la tua banca ha un PCM diverso, lo correggi dopo nella finestra del titolo." />
         </>
       ) : scelta === 'non_quotato' ? (
         <>
@@ -434,44 +416,52 @@ export function FinestraBene({ bene, aperta, onChiudi }: { bene: Bene | null; ap
 const campoDoveBene = (dove: string, setDove: (v: string) => void) => <Campo etichetta="Dove si trova (facoltativo)" valore={dove} onCambia={setDove} segnaposto="Es. Cassetta di sicurezza" />;
 
 // ---------------------------------------------------------------- Posizione
-// Un titolo in un portafoglio: una sola riga con quantità, PCM e data dell'ultimo acquisto (si correggono qui),
-// lo spostamento in un altro portafoglio o l'eliminazione. Un nuovo acquisto si somma alla riga («Aggiungi acquisto»).
+// Un titolo in un portafoglio: gli acquisti (giorno e quote; il prezzo, nascosto, è la chiusura di Yahoo di quel giorno, decisione 67),
+// l'allineamento alla banca (decisione 68: PCM e prezzo di mercato come li mostra la banca allineano in proporzione tutti i prezzi del
+// titolo, anche nel passato del grafico, finché non premi «Sincronizza»), lo spostamento in un altro portafoglio o l'eliminazione.
 export function FinestraPosizione({ posizione, aperta, portafogli, onChiudi, onAggiungiAcquisto }: {
   posizione: Posizione | null; aperta: boolean; portafogli: Portafoglio[]; onChiudi: () => void; onAggiungiAcquisto: () => void;
 }) {
   const x = posizione;
-  const riga = useDati<Lotto[]>(x ? `/investimenti/lotti?titolo_id=${x.titolo_id}&portafoglio_id=${x.portafoglio_id}` : null).dati?.[0];
+  const acquisti = useDati<Lotto[]>(x ? `/investimenti/lotti?titolo_id=${x.titolo_id}&portafoglio_id=${x.portafoglio_id}` : null).dati;
   const [verso, setVerso] = useState<string | null>(null);
-  const [quantita, setQuantita] = useState('');
   const [pcm, setPcm] = useState('');
-  const [giorno, setGiorno] = useState('');
-  const [ora, setOra] = useState('');
-  const [prezzoMercato, setPrezzoMercato] = useState('');
+  const [prezzo, setPrezzo] = useState('');
+  // Gli acquisti come si stanno scrivendo: giorno e quote; `tolto` = da eliminare salvando.
+  const [righe, setRighe] = useState<{ id: string; giorno: string; quantita: string; tolto: boolean }[]>([]);
   const [leggendo, setLeggendo] = useState(false);
   const [erroreBorsa, setErroreBorsa] = useState<string | null>(null);
-  useEffect(() => { if (aperta) { setPrezzoMercato(prezzoInTesto(x?.prezzo ?? null)); setErroreBorsa(null); } }, [aperta, x?.prezzo, x?.prezzo_aggiornato_il]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (x) setVerso(x.portafoglio_id); }, [x?.titolo_id, x?.portafoglio_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (aperta && x) { setPcm(prezzoInTesto(x.prezzo_medio)); setPrezzo(prezzoInTesto(x.prezzo)); setErroreBorsa(null); } }, [aperta, x?.prezzo_medio, x?.prezzo]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (aperta && riga) { setQuantita(quantitaTesto(riga.quantita)); setPcm(prezzoInTesto(riga.prezzo)); setGiorno(dataInTesto(riga.data)); setOra(riga.ora); }
-  }, [aperta, riga?.id, riga?.quantita, riga?.prezzo, riga?.data, riga?.ora]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (aperta && acquisti) setRighe(acquisti.map((a) => ({ id: a.id, giorno: dataInTesto(a.data), quantita: quantitaTesto(a.quantita), tolto: false })));
+  }, [aperta, acquisti]);
+  const cambiaRiga = (id: string, campo: 'giorno' | 'quantita' | 'tolto', valore: string | boolean) => setRighe((rs) => rs.map((r) => (r.id === id ? { ...r, [campo]: valore } : r)));
+  const sincronizza = () => (x ? cancella(`/investimenti/posizioni/allinea?titolo_id=${x.titolo_id}&portafoglio_id=${x.portafoglio_id}`) : Promise.resolve());
   const salva = async () => {
-    if (riga) {
-      await modifica(`/investimenti/lotti/${riga.id}`, { quantita: leggiQuantita(quantita, 'quantita'), prezzo: serve(leggiPrezzo(pcm), 'Scrivi il prezzo medio di carico, es. 121,7623', 'prezzo'),
-        data: serve(leggiGiorno(giorno, 'data'), 'Scrivi la data come GG/MM/AAAA', 'data'), ora: leggiOra(ora) });
+    if (righe.length && righe.every((r) => r.tolto)) throw new ErroreCampo('acquisti', 'Resta almeno un acquisto: per togliere il titolo usa «Elimina posizione»');
+    // Prima gli acquisti (cambiano il PCM di Yahoo), poi l'allineamento alla banca, confrontato con i numeri di Yahoo aggiornati.
+    for (const r of righe) {
+      const prima = acquisti?.find((a) => a.id === r.id);
+      if (!prima) continue;
+      if (r.tolto) { await cancella(`/investimenti/lotti/${r.id}`); continue; }
+      const q = leggiQuantita(r.quantita, `quantita-${r.id}`), g = serve(leggiGiorno(r.giorno, `giorno-${r.id}`), 'Scrivi il giorno come GG/MM/AAAA', `giorno-${r.id}`);
+      if (Number(q) !== Number(prima.quantita) || g !== prima.data) await modifica(`/investimenti/lotti/${r.id}`, { quantita: q, ...(g !== prima.data ? { data: g } : {}) });
     }
-    // Il prezzo di mercato si salva solo se l'hai cambiato: vale per oggi, finché non premi «Leggi dalla borsa» o non arriva un giorno nuovo.
-    if (x && prezzoMercato.trim() && prezzoMercato.trim() !== prezzoInTesto(x.prezzo)) {
-      await sostituisci(`/investimenti/titoli/${x.titolo_id}/prezzi`, { prezzo: serve(leggiPrezzo(prezzoMercato), 'Scrivi il prezzo di mercato, es. 9,197', 'prezzo_mercato') });
+    if (x) {
+      const nuovoPcm = pcm.trim() && pcm.trim() !== prezzoInTesto(x.prezzo_medio) ? serve(leggiPrezzo(pcm), 'Scrivi il PCM, es. 121,7623', 'pcm') : undefined;
+      const nuovoPrezzo = prezzo.trim() && prezzo.trim() !== prezzoInTesto(x.prezzo) ? serve(leggiPrezzo(prezzo), 'Scrivi il prezzo di mercato, es. 131,80', 'prezzo') : undefined;
+      // Senza un prezzo di Yahoo non c'è niente da allineare: il prezzo scritto vale come prezzo di oggi.
+      if (nuovoPrezzo && x.stato === 'mancante') await sostituisci(`/investimenti/titoli/${x.titolo_id}/prezzi`, { prezzo: nuovoPrezzo });
+      const allinea = { ...(nuovoPcm ? { pcm: nuovoPcm } : {}), ...(nuovoPrezzo && x.stato !== 'mancante' ? { prezzo: nuovoPrezzo } : {}) };
+      if (Object.keys(allinea).length) await sostituisci('/investimenti/posizioni/allinea', { titolo_id: x.titolo_id, portafoglio_id: x.portafoglio_id, ...allinea });
     }
     if (x && verso && verso !== x.portafoglio_id) await modifica('/investimenti/posizioni', { titolo_id: x.titolo_id, portafoglio_id: x.portafoglio_id, nuovo_portafoglio_id: verso });
   };
   const leggiDallaBorsa = async () => {
     if (!x) return;
     setLeggendo(true); setErroreBorsa(null);
-    try {
-      const r = await crea<PrezzoLetto>(`/investimenti/titoli/${x.titolo_id}/prezzi/leggi`);
-      setPrezzoMercato(prezzoInTesto(r.prezzo));
-    } catch (e) {
+    try { await crea<PrezzoLetto>(`/investimenti/titoli/${x.titolo_id}/prezzi/leggi`); } catch (e) {
       setErroreBorsa(e instanceof Error ? e.message : 'La borsa non risponde: riprova tra poco');
     } finally { setLeggendo(false); }
   };
@@ -482,37 +472,44 @@ export function FinestraPosizione({ posizione, aperta, portafogli, onChiudi, onA
     ['Prezzo di mercato', x.prezzo ? prezzoDi(x.prezzo) : 'mancante', x.prezzo ? 'testo-primario' : 'testo-errore'], ['Valore', euro(x.valore), 'testo-primario'],
     ['Guadagno', g === null ? '—' : guadagnoTesto(g, x.guadagno_percentuale), g === null ? 'testo-secondario' : g >= 0 ? 'testo-ok' : 'testo-errore'],
   ] : [];
+  const yahoo = x ? `Yahoo dice PCM ${prezzoDi(x.pcm_borsa)} e prezzo ${x.prezzo_borsa ? prezzoDi(x.prezzo_borsa) : 'mancante'}` : '';
   return (
     <FinestraModulo titolo={x?.nome ?? ''} icona="globe" aperta={aperta} onChiudi={onChiudi} onSalva={salva} onElimina={elimina} etichettaElimina="Elimina posizione"
-      confermaElimina={{ nome: `«${x?.nome ?? 'questa posizione'}» da ${x?.portafoglio ?? 'questo portafoglio'}`, dettaglio: x ? 'Spariscono la quantità e il prezzo medio di carico.' : undefined }}>
+      confermaElimina={{ nome: `«${x?.nome ?? 'questa posizione'}» da ${x?.portafoglio ?? 'questo portafoglio'}`, dettaglio: x ? 'Spariscono tutti i suoi acquisti.' : undefined }}>
       {x ? (
         <>
           <Testo colore="testo-secondario">{[x.tipo.toUpperCase(), x.ticker, x.borsa, x.isin].filter(Boolean).join(' · ')}</Testo>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: d['spazio-gruppo'], rowGap: d['spazio-blocco'] }}>
             {cifre.map(([l, v, col]) => <View key={l} style={{ gap: d['spazio-testo'] }}><Testo stile="dettaglio-normale" colore="testo-secondario">{l}</Testo><Testo stile="corpo-forte" colore={col}>{v}</Testo></View>)}
           </View>
-          {x.stato !== 'ok' ? <Esito tono={x.stato === 'mancante' ? 'errore' : 'attenzione'} testo={x.stato === 'mancante' ? 'Prezzo mancante: il valore non si calcola. Premi «Leggi dalla borsa» o scrivilo qui sotto.' : `Il prezzo è del ${giornoMese(x.prezzo_al)}: non è aggiornato.`} /> : null}
-          <Voce etichetta="Posizione" aiuto="Quantità totale e prezzo medio di carico (PCM): correggili qui se non tornano. La data è quella dell'ultimo acquisto.">
+          {x.stato !== 'ok' ? <Esito tono={x.stato === 'mancante' ? 'errore' : 'attenzione'} testo={x.stato === 'mancante' ? 'Prezzo mancante: il valore non si calcola. Premi «Leggi dalla borsa» o scrivi il prezzo qui sotto.' : `Il prezzo è del ${giornoMese(x.prezzo_al)}: non è aggiornato.`} /> : null}
+          <Voce etichetta="Come la banca" aiuto={x.allineata
+            ? `Allineato alla banca: ${yahoo}. Tutti i prezzi del titolo, anche nel passato del grafico, sono spostati in proporzione finché non sincronizzi.`
+            : `${yahoo}. Se la tua banca mostra altri numeri, scrivili: tutto il grafico del titolo si allinea in proporzione.`}>
             <Affiancati>
-              <Meta><ConErrore campo="quantita"><Campo etichetta="Quantità" valore={quantita} onCambia={setQuantita} inputMode="decimal" /></ConErrore></Meta>
-              <Meta><ConErrore campo="prezzo"><Campo etichetta="Prezzo medio di carico (PCM)" valore={pcm} onCambia={setPcm} inputMode="decimal" /></ConErrore></Meta>
+              <Meta><ConErrore campo="pcm"><Campo etichetta="PCM" valore={pcm} onCambia={setPcm} inputMode="decimal" segnaposto="0,00" /></ConErrore></Meta>
+              <Meta><ConErrore campo="prezzo"><Campo etichetta="Prezzo di mercato" valore={prezzo} onCambia={setPrezzo} inputMode="decimal" segnaposto="0,00" /></ConErrore></Meta>
             </Affiancati>
-            <Affiancati>
-              <Meta><ConErrore campo="data"><CampoData etichetta="Data ultimo acquisto" valore={giorno} onCambia={setGiorno} /></ConErrore></Meta>
-              <Meta><ConErrore campo="ora"><Campo etichetta="Ora" valore={ora} onCambia={setOra} segnaposto="HH:MM" inputMode="numeric" /></ConErrore></Meta>
-            </Affiancati>
+            {erroreBorsa ? <Esito tono="errore" testo={erroreBorsa} /> : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
+              {x.allineata ? <Pulsante tipo="testo" icona="repeat" etichetta="Sincronizza" onPress={sincronizza} /> : null}
+              <Pulsante tipo="testo" icona="trending-up" etichetta={leggendo ? 'Leggo dalla borsa…' : 'Leggi dalla borsa'} onPress={leggiDallaBorsa} />
+            </View>
+          </Voce>
+          <Voce etichetta="Acquisti" aiuto="Giorno e quote di ogni acquisto: il prezzo lo prende l'app dalla borsa di quel giorno.">
+            <ConErrore campo="acquisti"><View style={{ gap: d['spazio-blocco'] }}>
+              {righe.filter((r) => !r.tolto).map((r) => (
+                <View key={r.id} style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
+                  <View style={{ flex: 1, minWidth: 0 }}><ConErrore campo={`giorno-${r.id}`}><CampoData etichetta="Giorno" valore={r.giorno} onCambia={(v) => cambiaRiga(r.id, 'giorno', v)} /></ConErrore></View>
+                  <View style={{ width: 120 }}><ConErrore campo={`quantita-${r.id}`}><Campo etichetta="Quote" valore={r.quantita} onCambia={(v) => cambiaRiga(r.id, 'quantita', v)} inputMode="decimal" /></ConErrore></View>
+                  <PulsanteIcona icona="trash-2" etichetta={`Togli l'acquisto del ${r.giorno}`} fantasma onPress={() => cambiaRiga(r.id, 'tolto', true)} />
+                </View>
+              ))}
+            </View></ConErrore>
             <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" icona="plus" etichetta="Aggiungi acquisto" onPress={onAggiungiAcquisto} /></View>
           </Voce>
           <Tendina etichetta="Sposta in un altro portafoglio" valore={verso} iconaPrima="briefcase" onCambia={setVerso}
             opzioni={portafogli.map((p) => ({ valore: p.id, testo: p.conta_nel_patrimonio ? p.nome : `${p.nome} (prova)`, icona: p.icona }))} />
-          <Voce etichetta="Prezzo di mercato" aiuto="Arriva da solo dalla borsa. Se lo scrivi tu vale finché non premi «Leggi dalla borsa» o non arriva un giorno nuovo.">
-            <ConErrore campo="prezzo_mercato"><Campo valore={prezzoMercato} onCambia={setPrezzoMercato} inputMode="decimal" segnaposto="0,00" aiuto="In euro" /></ConErrore>
-            <Testo stile="dettaglio-normale" colore="testo-secondario">
-              {x.prezzo ? `${x.prezzo_aggiornato_il ? 'aggiornato il' : 'del'} ${giornoOra(x.prezzo_aggiornato_il, x.prezzo_al)} · fonte: ${x.prezzo_fonte === 'mano' ? 'scritto a mano' : 'Borsa (Yahoo)'}` : 'nessun prezzo ancora'}
-            </Testo>
-            {erroreBorsa ? <Esito tono="errore" testo={erroreBorsa} /> : null}
-            <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" icona="repeat" etichetta={leggendo ? 'Leggo dalla borsa…' : 'Leggi dalla borsa'} onPress={leggiDallaBorsa} /></View>
-          </Voce>
         </>
       ) : null}
     </FinestraModulo>

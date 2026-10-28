@@ -46,8 +46,11 @@ export function Investimenti() {
   const primo = [...lottiVista.map((l) => l.data), ...(p?.beni ?? []).map((b) => b.data_acquisto ?? b.valore_al ?? '').filter(Boolean)].sort()[0];
   // Un mese: un punto a settimana. Altrimenti un punto al mese, "da sempre" dal primo investimento.
   const mesi = periodo === 'tutto' ? Math.min(600, Math.max(2, primo ? mesiFino(oggiIso(), primo) : 12)) : Number(periodo) + 1;
-  const andamento = useDati<PuntoAndamento[]>(`/investimenti/andamento?${periodo === '1' ? 'settimane=5' : `mesi=${mesi}`}${filtro ? `&${filtro}` : ''}${esclusi.size ? `&escludi=${encodeURIComponent([...esclusi].join(','))}` : ''}`).dati ?? [];
-  const etichetta = (x: PuntoAndamento) => (periodo === '1' ? data(x.al, 'corta') : mesi > 12 ? `${meseCorto(x.mese)} ${x.mese.slice(2, 4)}` : meseCorto(x.mese));
+  // Quanti punti: «1 mese» uno al giorno; «6 mesi» e «1 anno» uno a settimana; «da sempre» uno a settimana fino a 3 anni, poi uno al mese.
+  const passo = periodo === '1' ? 'giorni=31' : periodo === '6' ? 'settimane=27' : periodo === '12' ? 'settimane=53'
+    : mesi <= 36 ? `settimane=${Math.max(2, Math.ceil((mesi * 30.5) / 7) + 1)}` : `mesi=${mesi}`;
+  const andamento = useDati<PuntoAndamento[]>(`/investimenti/andamento?${passo}${filtro ? `&${filtro}` : ''}${esclusi.size ? `&escludi=${encodeURIComponent([...esclusi].join(','))}` : ''}`).dati ?? [];
+  const etichetta = (x: PuntoAndamento) => (periodo !== 'tutto' ? data(x.al, 'corta') : mesi > 12 ? `${meseCorto(x.mese)} ${x.mese.slice(2, 4)}` : meseCorto(x.mese));
   const esposizione = useDati<Esposizione>(`/investimenti/esposizione${filtro ? `?${filtro}` : ''}`).dati;
 
   if (!portafogli.dati || !p) return <Caricamento errore={portafogli.errore ?? gen.errore} />;

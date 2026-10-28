@@ -216,27 +216,52 @@ export async function aggiornaStorico(db: PoolClient, ids: string[]) {
     const cambio = s ? (s.valuta === 'EUR' ? new Map<string, number>() : cambi.get(s.valuta)) : null;
     if (!s || !cambio) { prossimoStorico.set(t.id, Date.now() + RIPROVA_STORICO_MS); continue; }
     prossimoStorico.set(t.id, Date.now() + RILEGGI_STORICO_MS);
-    const giorniCambio = [...cambio.keys()].sort();
-    const cambioAl = (data: string) => {
-      if (s.valuta === 'EUR') return 1;
-      let ultimo: number | null = null;
-      for (const g of giorniCambio) { if (g > data) break; ultimo = cambio.get(g)!; }
-      return ultimo;
-    };
-    const righe = s.punti.filter((p) => p.data >= t.dal && p.data <= ieri).flatMap((p) => {
-      const c = cambioAl(p.data);
-      return c ? [[p.data, (p.prezzo * c).toFixed(4), p.prezzo.toFixed(4), c.toFixed(6)]] : [];
-    });
-    if (righe.length) {
-      await db.query(
-        `insert into prezzi (titolo_id, data, prezzo, valuta, prezzo_valuta, cambio, fonte, aggiornato_il)
-         select $1, r.data::date, r.prezzo::numeric, $2, r.prezzo_valuta::numeric, r.cambio::numeric, $3, now()
-           from jsonb_to_recordset($4::jsonb) as r(data text, prezzo text, prezzo_valuta text, cambio text)
-         on conflict (titolo_id, data) do nothing`,
-        [t.id, s.valuta, fonte.nome, JSON.stringify(righe.map(([data, prezzo, prezzo_valuta, cambio]) => ({ data, prezzo, prezzo_valuta, cambio })))]);
-    }
+    await salvaSerie(db, t.id, s, cambio, t.dal, ieri);
     if (!t.completo) await db.query('update titoli set storico_dal = $2 where id = $1', [t.id, t.primo]);
   }
+}
+
+// Salva in euro le chiusure di una serie tra `dal` e `al` (in valuta estera con il cambio del giorno, o l'ultimo prima). Non
+// sovrascrive i prezzi già salvati.
+async function salvaSerie(db: PoolClient, titoloId: string, s: SerieFonte, cambio: Map<string, number>, dal: string, al: string) {
+  const giorniCambio = [...cambio.keys()].sort();
+  const cambioAl = (data: string) => {
+    if (s.valuta === 'EUR') return 1;
+    let ultimo: number | null = null;
+    for (const g of giorniCambio) { if (g > data) break; ultimo = cambio.get(g)!; }
+    return ultimo;
+  };
+  const righe = s.punti.filter((p) => p.data >= dal && p.data <= al).flatMap((p) => {
+    const c = cambioAl(p.data);
+    return c ? [{ data: p.data, prezzo: (p.prezzo * c).toFixed(4), prezzo_valuta: p.prezzo.toFixed(4), cambio: c.toFixed(6) }] : [];
+  });
+  if (!righe.length) return;
+  await db.query(
+    `insert into prezzi (titolo_id, data, prezzo, valuta, prezzo_valuta, cambio, fonte, aggiornato_il)
+     select $1, r.data::date, r.prezzo::numeric, $2, r.prezzo_valuta::numeric, r.cambio::numeric, $3, now()
+       from jsonb_to_recordset($4::jsonb) as r(data text, prezzo text, prezzo_valuta text, cambio text)
+     on conflict (titolo_id, data) do nothing`, [titoloId, s.valuta, fonte.nome, JSON.stringify(righe)]);
+}
+
+// Il prezzo di un acquisto (decisione 67): la chiusura del giorno `data` in euro, o dell'ultimo giorno di borsa prima (al massimo una
+// settimana, per fine settimana e feste); per oggi, il prezzo di oggi. Prima si cerca tra i prezzi salvati, poi si scarica dalla fonte.
+// Null se la fonte non risponde o il titolo non ha un simbolo di borsa.
+export async function prezzoDelGiorno(db: PoolClient, titoloId: string, data: string): Promise<number | null> {
+  const cerca = async () => (await db.query<{ prezzo: string }>(
+    `select prezzo::text as prezzo from prezzi where titolo_id = $1 and data <= $2::date and data > $2::date - 7 order by data desc limit 1`, [titoloId, data])).rows[0];
+  await aggiornaPrezzi(db, [titoloId]);   // il prezzo di oggi e, se manca, il simbolo di borsa
+  const salvato = await cerca();
+  if (salvato) return Number(salvato.prezzo);
+  const t = (await db.query<{ simbolo: string | null }>('select simbolo from titoli where id = $1', [titoloId])).rows[0];
+  if (!t?.simbolo) return null;
+  const dal = aggiungiGiorni(data, -7);
+  const s = await fonte.storico(t.simbolo, dal);
+  if (!s) return null;
+  const cambio = s.valuta === 'EUR' ? new Map<string, number>() : await fonte.storicoCambio(s.valuta, aggiungiGiorni(dal, -10));
+  if (!cambio) return null;
+  await salvaSerie(db, titoloId, s, cambio, dal, aggiungiGiorni(oggi(), -1));
+  const letto = await cerca();
+  return letto ? Number(letto.prezzo) : null;
 }
 
 export type PrezzoLetto = { prezzo: string; prezzo_valuta: string | null; valuta: string; data: string; fonte: string | null; aggiornato_il: string | null; stato: StatoPrezzo };

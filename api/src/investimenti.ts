@@ -47,13 +47,18 @@ export async function caricaDati(db: PoolClient, conStorico = false) {
   const prezzi = (await db.query<{ titolo_id: string; data: string; prezzo: string; fonte: string | null; aggiornato_il: string | null }>(
     'select titolo_id, data, prezzo::text as prezzo, fonte, aggiornato_il from prezzi where titolo_id = any($1) order by data', [ids])).rows
     .map((p): Prezzo => ({ titolo_id: p.titolo_id, data: p.data, prezzo: Number(p.prezzo), fonte: p.fonte, aggiornato_il: p.aggiornato_il }));
+  // L'allineamento alla banca di un titolo in un portafoglio (decisione 68): per quanto moltiplicare i prezzi di acquisto (`pcm`) e
+  // tutti i prezzi di mercato (`prezzo`), anche nel passato del grafico. Senza allineamento valgono 1.
+  const allineamenti = new Map((await db.query<{ titolo_id: string; portafoglio_id: string; fattore_pcm: string | null; fattore_prezzo: string | null }>(
+    'select titolo_id, portafoglio_id, fattore_pcm::text as fattore_pcm, fattore_prezzo::text as fattore_prezzo from allineamenti_banca')).rows
+    .map((r) => [`${r.titolo_id}|${r.portafoglio_id}`, { pcm: Number(r.fattore_pcm ?? 1), prezzo: Number(r.fattore_prezzo ?? 1) }]));
   const beniDb = (await db.query<BeneDb>(`select ${CAMPI_BENE} from ${DA_BENI} order by b.nome`)).rows;
   const quotazioni = await quotazioniMetalli(db, [...new Set(beniDb.flatMap((b) => (b.metallo ? [b.metallo] : [])))]);
   // Anche per i metalli servono le quotazioni passate, dal giorno in cui ogni bene è stato comprato (decisione 65).
   if (conStorico) await aggiornaStoricoMetalli(db, beniDb.flatMap((b) => (b.metallo ? [{ metallo: b.metallo, dal: b.data_acquisto ?? b.creato }] : [])));
   const storico: Storico = conStorico ? await storicoMetalli(db) : new Map();
   const nomiPortafogli = new Map(portafogli.map((p) => [p.id, p.nome]));
-  return { lotti, titoli, portafogli, nomiPortafogli, prezzi, beniDb, quotazioni, storico };
+  return { lotti, titoli, portafogli, nomiPortafogli, prezzi, allineamenti, beniDb, quotazioni, storico };
 }
 export type Dati = Awaited<ReturnType<typeof caricaDati>>;
 
@@ -121,13 +126,18 @@ export function riepilogo(d: Dati, portafogli: Set<string>) {
   const al = oggi();
   const righe = [...posizioniAl(d.lotti, al, portafogli).values()].filter((p) => p.quantita > 1e-9).map((p) => {
     const prezzo = prezzoAl(d.prezzi, p.titolo, al);
-    const valore = prezzo ? p.quantita * prezzo.prezzo : null;
+    // Allineato alla banca (decisione 68): i prezzi di acquisto e di mercato di Yahoo, moltiplicati per i fattori salvati.
+    const f = d.allineamenti.get(`${p.titolo}|${p.portafoglio}`);
+    const costo = p.costo * (f?.pcm ?? 1);
+    const prezzoUsato = prezzo ? prezzo.prezzo * (f?.prezzo ?? 1) : null;
+    const valore = prezzoUsato !== null ? p.quantita * prezzoUsato : null;
     return {
       ...d.titoli.get(p.titolo)!, titolo_id: p.titolo, portafoglio_id: p.portafoglio, portafoglio: d.nomiPortafogli.get(p.portafoglio) ?? null,
-      quantita: numero(p.quantita), prezzo_medio: (p.costo / p.quantita).toFixed(4), costo: cent(p.costo),
-      prezzo: prezzo ? prezzo.prezzo.toFixed(4) : null, prezzo_al: prezzo?.data ?? null, prezzo_fonte: prezzo ? prezzo.fonte ?? 'mano' : null, prezzo_aggiornato_il: prezzo?.aggiornato_il ?? null, stato: statoPrezzo(prezzo?.data),
+      quantita: numero(p.quantita), prezzo_medio: (costo / p.quantita).toFixed(4), costo: cent(costo),
+      pcm_borsa: (p.costo / p.quantita).toFixed(4), prezzo_borsa: prezzo ? prezzo.prezzo.toFixed(4) : null, allineata: !!f,
+      prezzo: prezzoUsato !== null ? prezzoUsato.toFixed(4) : null, prezzo_al: prezzo?.data ?? null, prezzo_fonte: prezzo ? prezzo.fonte ?? 'mano' : null, prezzo_aggiornato_il: prezzo?.aggiornato_il ?? null, stato: statoPrezzo(prezzo?.data),
       valore: valore === null ? null : cent(valore),
-      guadagno: valore === null ? null : cent(valore - p.costo), guadagno_percentuale: valore === null ? null : percentuale(valore, p.costo),
+      guadagno: valore === null ? null : cent(valore - costo), guadagno_percentuale: valore === null ? null : percentuale(valore, costo),
     };
   });
   const beni = d.beniDb.filter((b) => portafogli.has(b.portafoglio_id)).map((b) => descriviBene(b, d.quotazioni, d.nomiPortafogli));
@@ -200,21 +210,25 @@ function beneAl(b: BeneDb, al: string, storico: Storico) {
 // Valore e soldi messi dentro alla fine di ogni mese (mesi) o ogni settimana (settimane). L'ultimo punto è oggi.
 // Per i titoli senza prezzo noto a quella data vale il PCM della riga.
 // `esclusi`: gli asset tolti dal guadagno mentre si guarda la pagina (decisione 66), «t:<titolo>:<portafoglio>» o «b:<bene>».
-export async function andamento(db: PoolClient, mesi: number, settimane: number | undefined, portafoglioId?: string, esclusi: Set<string> = new Set()) {
+// `passo`: un punto ogni giorno o ogni settimana (decisione 65) invece che a fine mese.
+export async function andamento(db: PoolClient, mesi: number, passo: { giorni: number } | { settimane: number } | undefined, portafoglioId?: string, esclusi: Set<string> = new Set()) {
   const d = await caricaDati(db, true);
   const scelti = selezione(d, portafoglioId);
   const fine = oggi();
-  const n = settimane ?? mesi;
+  const giorniTra = passo ? ('giorni' in passo ? 1 : 7) : 0;
+  const n = passo ? ('giorni' in passo ? passo.giorni : passo.settimane) : mesi;
   return Array.from({ length: n }, (_, i) => {
-    // Ultimo giorno di ogni mese di calendario, o lo stesso giorno di ogni settimana.
+    // Ultimo giorno di ogni mese di calendario, o ogni giorno / settimana all'indietro da oggi.
     const inizio = `${aggiungiMesi(fine, i - n + 1).slice(0, 7)}-01`;
-    const al = settimane ? aggiungiGiorni(fine, -7 * (n - 1 - i)) : i === n - 1 ? fine : aggiungiGiorni(aggiungiMesi(inizio, 1), -1);
+    const al = giorniTra ? aggiungiGiorni(fine, -giorniTra * (n - 1 - i)) : i === n - 1 ? fine : aggiungiGiorni(aggiungiMesi(inizio, 1), -1);
     let valore = 0;
     let messo = 0;
     for (const p of posizioniAl(d.lotti, al, scelti).values()) {
       if (esclusi.has(`t:${p.titolo}:${p.portafoglio}`)) continue;
       const prezzo = prezzoAl(d.prezzi, p.titolo, al)?.prezzo ?? Number(d.lotti.filter((o) => o.titolo_id === p.titolo && o.data <= al).at(-1)?.prezzo ?? 0);
-      valore += p.quantita * prezzo; messo += p.costo;
+      // Allineato alla banca anche nel passato (decisione 68).
+      const f = d.allineamenti.get(`${p.titolo}|${p.portafoglio}`);
+      valore += p.quantita * prezzo * (f?.prezzo ?? 1); messo += p.costo * (f?.pcm ?? 1);
     }
     for (const b of d.beniDb) {
       if (!scelti.has(b.portafoglio_id) || esclusi.has(`b:${b.id}`)) continue;
