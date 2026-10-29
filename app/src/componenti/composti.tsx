@@ -552,6 +552,10 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 }
 
 // ---- CMP-31 Riga categoria ----
+// Misure delle colonne su computer: strette, così il nome ha lo spazio (la pagina Categorie le usa anche per l'intestazione).
+export const LARGHEZZE_CATEGORIA = { budget: 96, previste: 96, uscite: 96, percentuale: 64 };
+export const LATO_AZIONI_CATEGORIA = 32;
+export const LARGHEZZA_AZIONI_CATEGORIA = 4 * LATO_AZIONI_CATEGORIA + 3 * 2;
 export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina, onBudget, budget, budgetAttivo = true }: {
   livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; onBudget?: () => void; budget?: string; budgetAttivo?: boolean; previste: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
 }) {
@@ -559,11 +563,11 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
   const compatto = useCompatto();
   const [sopra, setSopra] = useState(false);
   const pulsanti = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], flexShrink: 0 }}>
-      {onBudget ? <PulsanteIcona icona="chart-column" etichetta={budget ? `Budget di ${nome}: ${budget}` : `Crea il budget di ${nome}`} onPress={onBudget} /> : null}
-      {onNuovo ? <PulsanteIcona icona="plus" etichetta={`Nuova sottocategoria di ${nome}`} onPress={onNuovo} /> : null}
-      <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} onPress={onModifica} />
-      {onElimina ? <PulsanteIcona icona="trash-2" etichetta={`Elimina ${nome}`} onPress={onElimina} /> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: compatto ? d['spazio-testo'] : 2, flexShrink: 0 }}>
+      {onBudget ? <PulsanteIcona icona="chart-column" etichetta={budget ? `Budget di ${nome}: ${budget}` : `Crea il budget di ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onBudget} /> : null}
+      {onNuovo ? <PulsanteIcona icona="plus" etichetta={`Nuova sottocategoria di ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onNuovo} /> : null}
+      <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onModifica} />
+      {onElimina ? <PulsanteIcona icona="trash-2" etichetta={`Elimina ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onElimina} /> : null}
     </View>
   );
   if (compatto) {
@@ -591,8 +595,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
     <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
       onMouseEnter={() => setSopra(true)} onMouseLeave={() => setSopra(false)}
       style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], borderRadius: d['raggio-controllo'],
-        backgroundColor: sopra ? c['sfondo-hover'] : 'transparent' }}>
-      {livello > 0 ? <View style={{ width: livello === 1 ? d['misura-rientro-albero'] : d['misura-rientro-albero-doppio'] }} /> : null}
+        paddingLeft: d['margine-voce-h'] + livello * 16, backgroundColor: sopra ? c['sfondo-hover'] : 'transparent' }}>
       <View style={{ width: d['misura-icona-media'], alignItems: 'center' }}>
         {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
       </View>
@@ -601,10 +604,10 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
       </View>
-      <Col w={120} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
-      <Col w={120} destra><Testo stile="corpo-normale">{previste}</Testo></Col>
-      <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
-      {percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
+      <Col w={LARGHEZZE_CATEGORIA.budget} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
+      <Col w={LARGHEZZE_CATEGORIA.previste} destra><Testo stile="corpo-normale">{previste}</Testo></Col>
+      <Col w={LARGHEZZE_CATEGORIA.uscite} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
+      {percentuale !== undefined ? <Col w={LARGHEZZE_CATEGORIA.percentuale} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
       {pulsanti}
     </View>
   );
