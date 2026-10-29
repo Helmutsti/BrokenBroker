@@ -552,8 +552,6 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 }
 
 // ---- CMP-31 Riga categoria ----
-// Larghezza delle colonne Budget e Uscite a telefono (l'intestazione in Categorie le riusa).
-export const LARGHEZZA_COLONNA_COMPATTA = 84;
 export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina, onBudget, budget, budgetAttivo = true }: {
   livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; onBudget?: () => void; budget?: string; budgetAttivo?: boolean; previste: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
 }) {
@@ -568,27 +566,46 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
       {onElimina ? <PulsanteIcona icona="trash-2" etichetta={`Elimina ${nome}`} onPress={onElimina} /> : null}
     </View>
   );
+  if (compatto) {
+    // Telefono: il nome ha tutta la larghezza che resta; sotto vengono le cifre e i pulsanti. Rientro piccolo per livello.
+    const cifre = `Budget ${budget ?? '—'} · Uscite ${speso}`;
+    const cifre2 = `Previste ${previste}${percentuale && percentuale !== '—' ? ` · ${percentuale} dello stipendio` : ''}`;
+    return (
+      <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
+        style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingLeft: livello * 12 }}>
+        <View style={{ width: 24, alignItems: 'center', paddingTop: 10 }}>
+          {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi} hitSlop={10}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
+        </View>
+        <Tessera icona={icona} misura="media" tono={ereditata ? 'neutro' : 'accento'} coloreIcona={ereditata ? 'icona-tenue' : undefined} tinta={colore ?? undefined} />
+        <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+          <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'} style={{ flexShrink: 1 }}>{nome}</Testo>
+          {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
+          <Testo stile="dettaglio-forte" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{cifre}</Testo>
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{cifre2}</Testo>
+          <View style={{ alignSelf: 'flex-start' }}>{pulsanti}</View>
+        </View>
+      </View>
+    );
+  }
   return (
     <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
       onMouseEnter={() => setSopra(true)} onMouseLeave={() => setSopra(false)}
-      style={{ flexDirection: 'row', flexWrap: compatto ? 'wrap' : 'nowrap', alignItems: 'center', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: compatto ? 0 : d['margine-voce-h'], borderRadius: d['raggio-controllo'],
-        backgroundColor: !compatto && sopra ? c['sfondo-hover'] : 'transparent' }}>
-      {livello > 0 ? <View style={{ width: (livello === 1 ? d['misura-rientro-albero'] : d['misura-rientro-albero-doppio']) / (compatto ? 2 : 1) }} /> : null}
-      <View style={{ width: compatto ? 28 : d['misura-icona-media'], alignItems: 'center' }}>
-        {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi} hitSlop={compatto ? 10 : 0}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'], borderRadius: d['raggio-controllo'],
+        backgroundColor: sopra ? c['sfondo-hover'] : 'transparent' }}>
+      {livello > 0 ? <View style={{ width: livello === 1 ? d['misura-rientro-albero'] : d['misura-rientro-albero-doppio'] }} /> : null}
+      <View style={{ width: d['misura-icona-media'], alignItems: 'center' }}>
+        {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
       </View>
       <Tessera icona={icona} misura="media" tono={ereditata ? 'neutro' : 'accento'} coloreIcona={ereditata ? 'icona-tenue' : undefined} tinta={colore ?? undefined} />
       <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
-        {compatto ? <View style={{ alignSelf: 'flex-start' }}>{pulsanti}</View> : null}
       </View>
-      <Col w={compatto ? LARGHEZZA_COLONNA_COMPATTA : 120} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
-      {compatto ? null : <Col w={120} destra><Testo stile="corpo-normale">{previste}</Testo></Col>}
-      <Col w={compatto ? LARGHEZZA_COLONNA_COMPATTA : 120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
-      {!compatto && percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
-      {compatto ? null : pulsanti}
-      {compatto ? <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ flexBasis: '100%', paddingLeft: 28 + d['spazio-icona'] }}>{`Previste ${previste}${percentuale && percentuale !== '—' ? ` · ${percentuale} dello stipendio` : ''}`}</Testo> : null}
+      <Col w={120} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
+      <Col w={120} destra><Testo stile="corpo-normale">{previste}</Testo></Col>
+      <Col w={120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
+      {percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
+      {pulsanti}
     </View>
   );
 }

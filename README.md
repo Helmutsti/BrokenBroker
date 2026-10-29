@@ -51,7 +51,7 @@ Porte usate (si cambiano in `.env`): app `8080`, API `3000`, database `5433` (so
 
 ## Per chi sviluppa
 
-- `api/`: API in Node 24 + TypeScript + Express, database Postgres 17 con le regole di visibilità nel database. Prove: `node api/prove/prove-funzioni.mjs` con l'API avviata.
+- `api/`: API in Node 24 + TypeScript + Express, database Postgres 17 con le regole di visibilità nel database. Prove: `node api/prove/prove-spunta-spese.mjs`, `prove-ceste.mjs` e `prove-budget.mjs` con l'API avviata.
 - `app/`: app in React Native; sul web con react-native-web e Vite. In sviluppo: `cd app`, `npm install`, `npm run web` (http://localhost:5173, usa l'API in Docker).
 - `docs/design/`: flussi, schermate, componenti, token e registro del design (Figma).
 - `DECISIONI.md`: scopo, tappe e decisioni del progetto. `AGENTS.md`: istruzioni per gli assistenti di programmazione.

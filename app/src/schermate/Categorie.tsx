@@ -5,7 +5,7 @@ import { Icona } from '../componenti/Icona.tsx';
 import { Check } from 'lucide-react-native';
 import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
 import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
-import { Intestazione, LARGHEZZA_COLONNA_COMPATTA, RigaCategoria, Scheda } from '../componenti/composti.tsx';
+import { Intestazione, RigaCategoria, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Budget, Categoria, ElencoBudget, ElencoSpese, Rata } from '../dati/tipi.ts';
@@ -65,11 +65,7 @@ export function Categorie() {
       <Esito tono="informazione" testo="Icona piena: scelta per la categoria. Icona chiara: presa dalla categoria padre. Icona e colore si scelgono con la matita." />
       <Scheda>
         <View role="tree" aria-label="Categorie">
-          {compatto ? <View style={{ flexDirection: 'row', gap: d['spazio-icona'] }}>
-            <View style={{ flex: 1 }} />
-            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: LARGHEZZA_COLONNA_COMPATTA, textAlign: 'right' }}>Budget</Testo>
-            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: LARGHEZZA_COLONNA_COMPATTA, textAlign: 'right' }}>Uscite</Testo>
-          </View> : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
+          {compatto ? null : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>Budget</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Previste a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>

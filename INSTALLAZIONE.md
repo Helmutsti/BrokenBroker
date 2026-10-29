@@ -109,10 +109,12 @@ curl http://localhost:3000/categorie -H "Authorization: Bearer <token>"
 Le prove creano utenti nuovi, quindi vogliono la registrazione aperta: si avvia l'API con `REGISTRAZIONE_APERTA=si` nel file `.env` (da togliere dopo, e da non usare su un database con dati veri). Con l'API avviata:
 
 ```
-node api/prove/prove-funzioni.mjs
+node api/prove/prove-spunta-spese.mjs
+node api/prove/prove-ceste.mjs
+node api/prove/prove-budget.mjs
 ```
 
-Crea ogni volta due utenti nuovi e prova spese previste, spunte, budget, condivisione e quote, obiettivi, rate, regole, investimenti e analisi.
+Creano ogni volta utenti nuovi e provano spese e spunte, ceste dei conti e budget.
 `api/prove/prove-basi.mjs` (accesso, conti, categorie, movimenti) e `api/prove/prove-obiettivi-db.mjs` (regole del database sugli obiettivi) vogliono come argomento la cartella del progetto.
 
 Dati di prova per vedere l'app piena: `node api/prove/dati-esempio.mjs` (le credenziali di prova sono scritte in cima al file).
