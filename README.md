@@ -9,7 +9,7 @@ Oggi c'è la versione per **computer** (pagina web). La versione per iPhone usa 
 - **Spese** (pagina iniziale): i conti con il saldo (si riscrive con un tocco), per ognuno e in totale quanto deve ancora uscire e l'avanzo; sotto le spese del mese raggruppate per conto di partenza. Ogni spesa è un'uscita o un giroconto: spuntarla sposta davvero i soldi (la tua quota), togliendo la spunta tornano indietro.
 - **Spese previste** ogni mese, ogni N mesi o una volta sola, divise a metà o con altre quote con l'altra persona.
 - **Salvadanai**: «ceste» dentro i conti (una parte del saldo di un conto), annidabili, con traguardo e traguardi di copertura; i soldi li sposti tu dai liberi del conto alle ceste e viceversa. Una cesta può essere collegata a una spesa (es. l'assicurazione): dice quanto manca e quanto mettere al mese, e scende quando spunti la spesa.
-- **Movimenti**: i budget con quanto si riempiono e la griglia delle uscite del mese, con «Nuova uscita». **Conti** come etichette, **investimenti** con prezzo medio di carico, **categorie** con icone.
+- **Movimenti**: i budget (limiti di spesa creati dalle Categorie) con quanto si riempiono e la griglia delle uscite del mese, con «Nuova uscita». **Conti** come etichette, **investimenti** con prezzo medio di carico, **categorie** con icone.
 
 ## Installare su un computer
 

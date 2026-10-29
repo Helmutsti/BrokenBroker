@@ -1,9 +1,9 @@
 import type { PoolClient } from 'pg';
 import { oggi } from './periodo.ts';
 
-// Un'uscita fuori piano (decisione 70): scritta a mano o dai budget, verso «fuori» e non nata dalla spunta di una spesa o di una rata
-// (che già pesa come spesa prevista: contarla due volte la raddoppierebbe). Condizione SQL per `movimenti` con alias `m`.
-export const SQL_USCITA_FUORI_PIANO = `m.a_conto_id is null and coalesce(m.verso, 'uscita') = 'uscita' and m.spunta_id is null`;
+// Un'uscita (decisione 71): una transazione verso «fuori», scritta a mano o nata dalla spunta di una spesa o di una rata. I giroconti (hanno un
+// conto di arrivo e nessuna categoria) e le entrate non sono uscite. Condizione SQL per `movimenti` con alias `m`.
+export const SQL_USCITA = `m.a_conto_id is null and coalesce(m.verso, 'uscita') = 'uscita'`;
 
 // La transazione che nasce dalla spunta di una spesa o di una rata (decisioni 61 e 71): da `da` ad `a` (vuoto = fuori), legata alla spunta
 // (che a sua volta è legata alla spesa e al mese personale: togliendo la spunta la transazione sparisce, e il saldo torna com'era).

@@ -93,13 +93,17 @@ rotteConti.put('/:id/saldo', async (req, res) => {
   res.json(conto);
 });
 
-// Solo il proprietario cancella (le ceste del conto spariscono con lui).
+// Solo il proprietario cancella (le ceste del conto spariscono con lui; le transazioni restano, senza questo conto). Ogni spesa ha un conto
+// di partenza (decisione 71): se qualche spesa o rata parte da questo conto, o un giroconto arriva su di esso, non si elimina.
 rotteConti.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    if ((await db.query('delete from conti where id = $1', [id])).rowCount) return;
     const visibile = (await db.query('select 1 from conti where id = $1', [id])).rowCount;
-    throw visibile ? new ErroreApi(403, 'Solo chi ha creato il conto può cancellarlo') : nonTrovato('Conto');
+    if (!visibile) throw nonTrovato('Conto');
+    if (!(await db.query('select 1 from conti where id = $1 and proprietario_id = fp_me()', [id])).rowCount) throw new ErroreApi(403, 'Solo chi ha creato il conto può cancellarlo');
+    const n = (await db.query<{ n: number }>('select fp_voci_su_conto($1) as n', [id])).rows[0].n;
+    if (n > 0) throw new ErroreApi(409, `Questo conto ha ancora ${n} ${n === 1 ? 'spesa o rata' : 'spese e rate'}: sposta prima le spese su un altro conto`);
+    await db.query('delete from conti where id = $1', [id]);
   });
   res.status(204).end();
 });

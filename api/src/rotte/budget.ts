@@ -6,8 +6,8 @@ import { ErroreApi, nonTrovato } from '../errori.ts';
 import { meseDi, oggi, periodoRichiesto } from '../periodo.ts';
 import * as v from '../valida.ts';
 
-// Budget (decisioni 49, 57 e 59): uno per categoria. È una cifra da tenere sotto controllo (non un limite): lo speso sono le uscite scritte in
-// Movimenti con la sua categoria; se si sfora si conta tutto lo stesso e si mostra di quanto. Insieme ai movimenti è uno strumento a parte.
+// Budget (decisioni 49, 57, 59 e 71): uno per categoria, un limite di spesa (categoria, cifra del mese, attivo). Lo speso sono tutte le uscite del
+// mese con la sua categoria, scritte a mano o nate da una spunta; se si sfora si conta tutto lo stesso e si mostra di quanto. Solo di chi lo crea.
 
 export const rotteBudget = Router();
 
@@ -33,17 +33,10 @@ rotteBudget.get('/', async (req, res) => {
   res.json(risposta);
 });
 
-// Un budget con le quote scritte (con chi è diviso, anche senza condivisione).
+// Un budget.
 rotteBudget.get('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
-  const voce = await conUtente(res.locals.utenteId, async (db) => {
-    const [b] = await budgetDelMese(db, await periodoRichiesto(db, req.query.mese), id);
-    if (!b) return undefined;
-    const quote = (await db.query(
-      `select q.utente_id, u.nome, q.percentuale::text as percentuale from quote q join utenti u on u.id = q.utente_id
-        where q.budget_id = $1 order by u.nome`, [id])).rows;
-    return { ...b, quote };
-  });
+  const voce = await conUtente(res.locals.utenteId, async (db) => (await budgetDelMese(db, await periodoRichiesto(db, req.query.mese), id))[0]);
   if (!voce) throw nonTrovato('Budget');
   res.json(voce);
 });
@@ -54,7 +47,6 @@ function leggi(c: Record<string, unknown>, nuovo: boolean) {
   return {
     importo,
     attivo: v.booleano(c, 'attivo'),
-    note: v.annullabile(c, 'note', () => v.testo(c, 'note', false, 500)),
   };
 }
 
@@ -87,33 +79,11 @@ rotteBudget.patch('/:id', async (req, res) => {
   res.json(aggiornato);
 });
 
-// Solo chi ha creato il budget lo elimina. Le uscite già registrate restano nel registro dei movimenti, con la loro categoria.
+// Le uscite già registrate restano nel registro dei movimenti, con la loro categoria.
 rotteBudget.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    if ((await db.query('delete from budget where id = $1', [id])).rowCount) return;
-    const visibile = (await db.query('select 1 from budget where id = $1', [id])).rowCount;
-    throw visibile ? new ErroreApi(403, 'Solo chi ha creato il budget può eliminarlo') : nonTrovato('Budget');
-  });
-  res.status(204).end();
-});
-
-// Come si divide il budget con l'altra persona: come per le spese. Elenco vuoto = divisione di base.
-rotteBudget.put('/:id/quote', async (req, res) => {
-  const id = v.idPercorso(req.params.id);
-  const c = v.corpo(req.body);
-  if (!Array.isArray(c.quote)) throw new ErroreApi(400, 'Serve un elenco "quote"');
-  const quote = c.quote.map((q) => {
-    const r = v.corpo(q);
-    return { utente: v.id(r, 'utente_id', true)!, pct: v.importo(r, 'percentuale', true)! };
-  });
-  const somma = quote.reduce((t, q) => t + Number(q.pct), 0);
-  const nonSpecificata = quote.length === 1 && quote[0].utente === res.locals.utenteId && Number(quote[0].pct) > 0 && Number(quote[0].pct) < 100;
-  if (quote.length && !nonSpecificata && Math.abs(somma - 100) > 0.001) throw new ErroreApi(400, 'Le quote devono fare 100%');
-  await conUtente(res.locals.utenteId, async (db) => {
-    if (!(await db.query('select 1 from budget where id = $1', [id])).rowCount) throw nonTrovato('Budget');
-    await db.query('delete from quote where budget_id = $1', [id]);
-    for (const q of quote) await db.query('insert into quote (budget_id, utente_id, percentuale) values ($1, $2, $3)', [id, q.utente, q.pct]);
+    if (!(await db.query('delete from budget where id = $1', [id])).rowCount) throw nonTrovato('Budget');
   });
   res.status(204).end();
 });

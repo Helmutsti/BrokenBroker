@@ -467,17 +467,17 @@ export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, total
 
 // ---- CMP-28 Scheda conto ----
 // Un conto (decisione 61): nome, icona, saldo (rosso se negativo), una nota e, per un contenitore, `dettaglio` («Non assegnato …», rosso se
-// negativo); «Condiviso» se lo vedono tutti e due. `rientro`: livello nell'albero (sotto-conti), la scheda si stringe di 24 px per livello.
-export function SchedaConto({ nome, nota, saldo, saldoNegativo, dettaglio, dettaglioNegativo, condiviso, icona, rientro = 0, onApri }: {
-  nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; dettaglio?: string; dettaglioNegativo?: boolean; condiviso?: boolean; icona: string; rientro?: number; onApri: () => void;
+// negativo); «Condiviso» se lo vedono tutti e due.
+export function SchedaConto({ nome, nota, saldo, saldoNegativo, dettaglio, dettaglioNegativo, condiviso, icona, onApri }: {
+  nome: string; nota?: string; saldo?: string; saldoNegativo?: boolean; dettaglio?: string; dettaglioNegativo?: boolean; condiviso?: boolean; icona: string; onApri: () => void;
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={nome} onPress={onApri}
-      style={(s: StatoPressione) => [{ width: compatto ? '100%' : 352 - 24 * rientro, minHeight: 44, padding: compatto ? 12 : d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c[s.hovered ? 'sfondo-hover' : 'sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, anelloFocus(c, s.focused)]}>
+      style={(s: StatoPressione) => [{ width: compatto ? '100%' : 352, minHeight: 44, padding: compatto ? 12 : d['margine-scheda'], gap: d['spazio-blocco'], backgroundColor: c[s.hovered ? 'sfondo-hover' : 'sfondo-scheda'], borderRadius: d['raggio-scheda'], borderWidth: d['misura-bordo'], borderColor: c['bordo-scheda'] }, anelloFocus(c, s.focused)]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-        <Tessera icona={icona} misura={rientro ? 'media' : 'grande'} />
+        <Tessera icona={icona} misura="grande" />
         <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
           <Testo stile="titolo-scheda" numberOfLines={1}>{nome}</Testo>
           {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
@@ -890,9 +890,10 @@ function RigaSalvadanaioInterna({ nome, icona, valore, tono = 'accento', cifra, 
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'] }}>
         {icona ? <Tessera icona={icona} misura="piccola" tono={allerta} /> : null}
         <View style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', minHeight: 44 }}>{titolo}</View>
-        {cifraConData}
         {propria ? null : matita}
       </View>
+      {/* Telefono: la cifra (con la scadenza) va sotto il nome, così il nome resta leggibile. */}
+      <View style={{ alignItems: 'flex-start' }}>{cifraConData}</View>
       {propria ? null : <View style={{ flexDirection: 'row' }}><Barra valore={valore} tono={tono} /></View>}
       {dettaglio}
     </View>

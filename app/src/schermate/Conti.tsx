@@ -114,7 +114,7 @@ const aiutoSaldo = (conto: Conto) => [
   conto.liberi !== null && Number(conto.nelle_ceste) > 0.005 ? `Nelle ceste ${euro(conto.nelle_ceste)}, liberi ${euro(conto.liberi)}.` : null,
 ].filter(Boolean).join(' ');
 
-// «Sul conto» della pagina Spese: riscrive il saldo del conto principale.
+// «Sul conto» della pagina Spese: riscrive il saldo di un conto.
 export function FinestraSaldo({ conto, aperta, onChiudi }: { conto: Conto | null; aperta: boolean; onChiudi: () => void }) {
   const [saldo, setSaldo] = useState('');
   const [giorno, setGiorno] = useState('');
@@ -129,7 +129,7 @@ export function FinestraSaldo({ conto, aperta, onChiudi }: { conto: Conto | null
 }
 
 function FinestraConto({ conto, condivisioni, aperta, onChiudi }: { conto: Conto | null; condivisioni: Condivisione[]; aperta: boolean; onChiudi: () => void }) {
-  // Quante spese e rate usano il conto: con il conto eliminato restano senza conto.
+  // Quante spese e rate partono dal conto (o ci arrivano): finché ce ne sono il conto non si elimina (ogni spesa ha il suo conto di partenza).
   const spese = useDati<ElencoSpese>(aperta && conto ? '/spese-previste' : null).dati;
   const rate = useDati<Rata[]>(aperta && conto ? '/rate' : null).dati;
   const nSpese = conto ? (spese?.spese.filter((s) => s.conto_id === conto.id || s.a_conto_id === conto.id).length ?? 0) : 0;
@@ -163,7 +163,7 @@ function FinestraConto({ conto, condivisioni, aperta, onChiudi }: { conto: Conto
   return (
     <FinestraModulo titolo={conto ? conto.nome : 'Nuovo conto'} icona={icona} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
       onElimina={conto?.mio ? () => cancella(`/conti/${conto.id}`).then(() => undefined) : undefined} etichettaElimina="Elimina conto"
-      confermaElimina={conto ? { nome: `«${conto.nome}»`, dettaglio: `${collegate ? `${collegate} restano senza conto.` : 'Nessuna spesa o rata usa questo conto.'} Le transazioni restano, senza questo conto.` } : undefined}>
+      confermaElimina={conto ? { nome: `«${conto.nome}»`, dettaglio: collegate ? `Non si può: ${collegate} ${nSpese + nRate === 1 ? 'parte' : 'partono'} da questo conto. Sposta prima le spese su un altro conto.` : 'Le ceste del conto spariscono con lui; le transazioni restano, senza questo conto.' } : undefined}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
         <SceltaIcona valore={icona} onCambia={setIcona} />
         <View style={{ flex: 1, minWidth: 0 }}><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. BPER" autoFocus={!conto} /></ConErrore></View>

@@ -19,7 +19,8 @@ export type Movimento = { id: string; tipo: TipoMovimento; importo: string; mome
 export type ElencoMovimenti = { movimenti: Movimento[]; mesi: string[]; mese_in_corso: string };
 
 export type Categoria = { id: string; proprietario_id: string; padre_id: string | null; nome: string; tipo: 'uscita' | 'entrata'; colore: string | null; icona: string | null; ordine: number; figli?: Categoria[];
-  budget?: { id: string; importo: string; attivo: boolean } | null }; // il budget della categoria, se c'è (decisioni 49 e 51)
+  budget?: { id: string; importo: string; attivo: boolean } | null; // il limite di spesa della categoria, se c'è (decisioni 49 e 71)
+  n_uscite?: number }; // quante uscite (transazioni) hanno questa categoria
 
 export type TipoSpesa = 'fissa' | 'investimento';
 export type Spesa = {
@@ -35,12 +36,11 @@ export type Spesa = {
 export type Periodo = { mese: string; dal: string; al: string };
 export type ElencoSpese = { periodo: Periodo; spese: Spesa[] };
 export type UscitaBudget = { id: string; budget_id: string | null; importo: string; momento: string; data: string; descrizione: string; conto_id: string | null; conto: string | null; utente: string | null; modificabile: boolean };
-// Un budget (decisioni 49, 57, 59 e 70): uno per categoria. Una cifra da tenere sotto controllo: lo speso (le uscite fuori piano scritte in Movimenti
-// con la sua categoria, o registrate dal budget, nel mese; mai le spese previste) si conta sempre, anche oltre la cifra (`sforo`). Con i movimenti è uno strumento a parte.
+// Un budget (decisioni 49, 57, 59, 70 e 71): uno per categoria, un limite di spesa. Lo speso sono tutte le uscite del mese con la sua categoria
+// (scritte a mano o nate da una spunta; i giroconti no) e si conta sempre, anche oltre la cifra (`sforo`).
 export type Budget = {
   id: string; categoria_id: string; categoria: string; categoria_padre: string | null; nome: string; icona: string | null; colore: string | null;
-  importo: string; attivo: boolean; note: string | null;
-  mia: boolean; condiviso: boolean; creato_da: string | null; mia_percentuale: number; mia_quota: string;
+  importo: string; attivo: boolean;
   speso: string; speso_per_conto: Record<string, string>; sforo: string;
   uscite: UscitaBudget[];
 };
@@ -114,5 +114,5 @@ export type VoceCatalogo = {
 };
 
 export type Persona = { id: string; nome: string; email: string; io: boolean };
-export type Condivisione = { id: string; mia: boolean; voce: 'conto' | 'spesa' | 'budget'; voce_id: string; nome: string | null; proprietario: string; condiviso_con: string; condiviso_con_id: string; proprietario_id: string };
+export type Condivisione = { id: string; mia: boolean; voce: 'conto' | 'spesa'; voce_id: string; nome: string | null; proprietario: string; condiviso_con: string; condiviso_con_id: string; proprietario_id: string };
 export type PersonaSistema = { id: string; nome: string };

@@ -13,7 +13,8 @@ const CAMPI = 'id, padre_id, nome, tipo, colore, icona, ordine';
 
 type Categoria = { id: string; padre_id: string | null; nome: string; tipo: string; colore: string | null; icona: string | null; ordine: number;
   // Il budget di questa categoria, se c'è (decisione 49): uno per categoria.
-  budget: { id: string; importo: string; attivo: boolean } | null };
+  budget: { id: string; importo: string; attivo: boolean } | null;
+  n_uscite: number }; // quante uscite (transazioni) hanno questa categoria
 type Nodo = Categoria & { figli: Nodo[] };
 
 function albero(righe: Categoria[]): Nodo[] {
@@ -49,14 +50,15 @@ rotteCategorie.get('/', async (req, res) => {
     (await db.query<Categoria>(
       `select ${CAMPI.split(', ').map((x) => `c.${x}`).join(', ')},
               (select jsonb_build_object('id', b.id, 'importo', b.importo::text, 'attivo', b.attivo)
-                 from budget b where b.categoria_id = c.id) as budget
+                 from budget b where b.categoria_id = c.id) as budget,
+              (select count(*)::int from movimenti m where m.categoria_id = c.id) as n_uscite
          from categorie c where c.proprietario_id = fp_me() order by c.ordine, c.nome`)).rows);
   res.json(req.query.formato === 'elenco' ? righe : albero(righe));
 });
 
 // Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie: le spese
 // previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no.
-// I budget (decisione 58) non contano: sono solo una lente sui movimenti di una categoria, non una spesa.
+// Il budget (un limite di spesa) non è una spesa: non pesa qui.
 // La somma sui rami la fa chi legge l'albero.
 rotteCategorie.get('/spese', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) => {
@@ -116,14 +118,14 @@ rotteCategorie.patch('/:id', async (req, res) => {
 });
 
 // Cancellare una categoria in uso richiede ?sposta_su=<id>: spese (anche quelle condivise
-// ricevute), rate e sottocategorie passano a quella categoria.
+// ricevute), rate, uscite e sottocategorie passano a quella categoria.
 rotteCategorie.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const destinazione = typeof req.query.sposta_su === 'string' ? v.idPercorso(req.query.sposta_su) : undefined;
   await conUtente(res.locals.utenteId, async (db) => {
     const esiste = await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id]);
     if (!esiste.rowCount) throw nonTrovato('Categoria');
-    if ((await db.query('select 1 from budget where categoria_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Questa categoria ha un budget: eliminalo prima dalla pagina Budget');
+    if ((await db.query('select 1 from budget where categoria_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Questa categoria ha un budget: eliminalo prima dalla sua riga nella pagina Categorie');
 
     if (destinazione) {
       if (destinazione === id) throw new ErroreApi(400, 'La categoria di destinazione deve essere diversa');
@@ -136,12 +138,14 @@ rotteCategorie.delete('/:id', async (req, res) => {
       }
       // Anche le spese condivise ricevute, che hanno la categoria in spese_dati_utente (decisione 43).
       await db.query('update spese_dati_utente set categoria_id = $2 where categoria_id = $1 and utente_id = fp_me()', [id, destinazione]);
+      await db.query('select fp_sposta_uscite_categoria($1, $2)', [id, destinazione]);
     } else {
       const { rows } = await db.query<{ in_uso: boolean }>(
         `select exists (select 1 from categorie where padre_id = $1)
              or exists (select 1 from spese_previste where categoria_id = $1)
              or exists (select 1 from spese_dati_utente where categoria_id = $1)
-             or exists (select 1 from rate where categoria_id = $1) as in_uso`, [id]);
+             or exists (select 1 from rate where categoria_id = $1)
+             or exists (select 1 from movimenti where categoria_id = $1) as in_uso`, [id]);
       if (rows[0].in_uso) throw new ErroreApi(409, 'La categoria è in uso: indica dove spostare le voci con ?sposta_su=<id>');
     }
     await db.query('delete from categorie where id = $1', [id]);

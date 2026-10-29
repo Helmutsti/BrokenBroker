@@ -158,14 +158,14 @@ export function RiquadroCondivisione({ aperta, nome, condiviso, onCambia, con, o
   );
 }
 
-// ---- Divisione e condivisione di una spesa o di un budget: un solo modulo, uguale ovunque ----
+// ---- Divisione e condivisione di una spesa: un solo modulo, uguale ovunque ----
 export type OrigineDivisione = { id: string; mia: boolean; condiviso: boolean; miaPercentuale: number };
 type Divisione = 'no' | 'meta' | 'altra';
 
 // Lo stato e il salvataggio. Dividere (la mia quota) e condividere (l'altra persona la vede e la modifica) sono due scelte indipendenti.
 // Senza condivisione si scrive solo la mia quota (100% = nessuna quota scritta); con la condivisione anche quella dell'altra persona.
 // Togliere la condivisione non cambia la quota.
-export function useDivisione({ aperta, voce, rotta, origine }: { aperta: boolean; voce: 'spesa' | 'budget'; rotta: string; origine: OrigineDivisione | null }) {
+export function useDivisione({ aperta, voce, rotta, origine }: { aperta: boolean; voce: 'spesa'; rotta: string; origine: OrigineDivisione | null }) {
   const rif = useRiferimenti();
   const miaCondivisione = useDati<Condivisione[]>(aperta && origine ? '/condivisioni' : null).dati?.find((x) => x.voce === voce && x.voce_id === origine?.id && x.mia);
   // Se era diviso con qualcuno senza condividere, la persona si legge dalle quote del dettaglio.
@@ -215,16 +215,14 @@ export function useDivisione({ aperta, voce, rotta, origine }: { aperta: boolean
 
 // Il modulo, uno sotto l'altro: «Come la dividete» (No / Metà / Altra quota, con il campo % se «Altra quota»), lo switch di condivisione
 // (testo e switch sulla stessa riga) e la tendina «Con chi», disattivata finché lo switch è spento.
-export function SezioneDivisione({ stato, cosa, cifra, testoCondividi }: { stato: ReturnType<typeof useDivisione>; cosa: 'spesa' | 'budget'; cifra: string | null; testoCondividi: string }) {
+export function SezioneDivisione({ stato, cosa, cifra, testoCondividi }: { stato: ReturnType<typeof useDivisione>; cosa: 'spesa'; cifra: string | null; testoCondividi: string }) {
   const s = stato;
-  const lui = cosa === 'budget';
-  const nome = lui ? 'il budget' : 'la spesa';
   const percentuale = s.divisione === 'no' ? 100 : s.divisione === 'meta' ? 50 : Number(s.miaQuota.replace(',', '.')) || 0;
   const quota = cifra ? `La tua quota: ${euro((Number(cifra) * percentuale) / 100)}.` : undefined;
   const grande = (x: string) => `${x.charAt(0).toUpperCase()}${x.slice(1)}`;
   const nessuno = !!s.persone && s.persone.length === 0;
   return (
-    <Riquadro titolo="Dividi e condividi" icona="users" nota={`Dividi ${nome} per contare solo la tua quota; condividi${lui ? 'lo' : 'la'} perché l'altra persona ${lui ? 'lo' : 'la'} veda e ${lui ? 'lo' : 'la'} possa modificare.`}>
+    <Riquadro titolo="Dividi e condividi" icona="users" nota="Dividi la spesa per contare solo la tua quota; condividila perché l'altra persona la veda e la possa modificare.">
       <View style={{ gap: d['spazio-blocco'] }}>
         <Voce etichetta="Come la dividete" aiuto={quota}>
           <SceltaSegmenti etichetta="Come la dividete" larghezzaPiena valore={s.divisione} onCambia={s.setDivisione}
@@ -232,7 +230,7 @@ export function SezioneDivisione({ stato, cosa, cifra, testoCondividi }: { stato
         </Voce>
         {s.divisione === 'altra' ? <ConErrore campo="quota"><Campo etichetta="La tua quota in %" valore={s.miaQuota} onCambia={s.setMiaQuota} inputMode="decimal" /></ConErrore> : null}
         <RigaCondividi testo={testoCondividi} acceso={s.condiviso} onCambia={s.setCondiviso} disattivato={nessuno}
-          aiuto={nessuno ? 'Non c\'è ancora nessun altro utente nel sistema.' : s.condiviso && s.nomeAltro ? `${grande(s.nomeAltro)} ${lui ? 'lo vede e lo può modificare' : 'la vede e la può modificare'}; solo tu puoi eliminar${lui ? 'lo' : 'la'}.` : lui ? 'Lo vedrà anche lei e potrà modificarlo.' : 'La vedrà anche lei e potrà spuntarla.'} />
+          aiuto={nessuno ? 'Non c\'è ancora nessun altro utente nel sistema.' : s.condiviso && s.nomeAltro ? `${grande(s.nomeAltro)} la vede e la può modificare; solo tu puoi eliminarla.` : 'La vedrà anche lei e potrà spuntarla.'} />
         <ConErrore campo="condivisione">
           <Tendina etichetta="Con chi" valore={s.conEff} iconaPrima="user" disattivato={!s.condiviso || s.bloccata} onCambia={s.setCon} segnaposto="Scegli una persona"
             opzioni={(s.persone ?? []).map((p) => ({ valore: p.id, testo: p.nome }))} />
@@ -244,7 +242,7 @@ export function SezioneDivisione({ stato, cosa, cifra, testoCondividi }: { stato
 }
 
 // Crea o toglie la condivisione di una voce secondo l'interruttore; restituisce l'id dell'altra persona (o null).
-export async function salvaCondivisione(voce: 'conto' | 'spesa' | 'budget', id: string, condiviso: boolean, con: string | null): Promise<string | null> {
+export async function salvaCondivisione(voce: 'conto' | 'spesa', id: string, condiviso: boolean, con: string | null): Promise<string | null> {
   const esistente = (await leggi<Condivisione[]>('/condivisioni')).find((x) => x.voce === voce && x.voce_id === id && x.mia);
   if (condiviso && esistente && con && esistente.condiviso_con_id !== con) await cancella(`/condivisioni/${esistente.id}`);
   else if (condiviso && esistente) return esistente.condiviso_con_id;
