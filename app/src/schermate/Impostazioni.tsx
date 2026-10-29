@@ -1,10 +1,10 @@
 ﻿import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Avatar, Esito, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
-import { Campo, Tendina } from '../componenti/campi.tsx';
+import { Campo } from '../componenti/campi.tsx';
 import { Intestazione, Scheda, Vuoto } from '../componenti/composti.tsx';
 import { cancella, modifica, useDati } from '../dati/api.ts';
-import { opzioniConti, useRiferimenti } from '../dati/contesto.tsx';
+import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Condivisione, Persona } from '../dati/tipi.ts';
 import { euro, importoInTesto, leggiImporto, nomeMeseMinuscolo } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
@@ -35,15 +35,12 @@ export function Impostazioni() {
   const [stipendio, setStipendio] = useState('');
   const [paga, setPaga] = useState('');
   const [inizio, setInizio] = useState('');
-  const [principale, setPrincipale] = useState('');
   useEffect(() => {
     if (p) {
       setNome(p.nome); setStipendio(importoInTesto(p.stipendio_netto)); setPaga(p.giorno_paga ? String(p.giorno_paga) : ''); setInizio(String(p.inizio_mese));
-      setPrincipale(p.conto_principale_id ?? '');
     }
   }, [p]);
-  const profilo = useSalva(), mese = useSalva(), contiSpese = useSalva();
-  const nomeConto = (id: string) => rif.conto(id)?.nome ?? 'il conto scelto';
+  const profilo = useSalva(), mese = useSalva();
 
   const giorno = (v: string, min: number, max: number, cosa: string) => {
     if (!v.trim()) return null;
@@ -55,7 +52,7 @@ export function Impostazioni() {
   if (!p) return null;
   return (
     <>
-      <Intestazione titolo="Impostazioni" sottotitolo="Il tuo profilo, come si calcola il mese, i conti della pagina Spese e cosa condividi." />
+      <Intestazione titolo="Impostazioni" sottotitolo="Il tuo profilo, come si calcola il mese e cosa condividi." />
       <View style={{ flexDirection: compatto ? 'column' : 'row', gap: d['spazio-blocco'], alignItems: compatto ? 'stretch' : 'flex-start' }}>
         <View style={{ flex: compatto ? undefined : 1, gap: d['spazio-blocco'] }}>
           <Scheda titolo="Profilo" icona="user">
@@ -88,14 +85,6 @@ export function Impostazioni() {
           </Scheda>
         </View>
         <View style={{ flex: compatto ? undefined : 1, gap: d['spazio-blocco'] }}>
-          <Scheda titolo="Conto principale" nota="Il conto da cui parte la pagina Spese" icona="landmark">
-            <Tendina etichetta="Conto principale" valore={principale} iconaPrima="landmark" onCambia={setPrincipale} segnaposto="Scegli il conto"
-              opzioni={[{ valore: '', testo: 'Nessuno' }, ...opzioniConti(rif.conti, { tenere: [principale] })]} />
-            <Testo stile="dettaglio-normale" colore="testo-secondario">
-              {principale ? `La pagina Spese segue ${nomeConto(principale)}: il suo saldo, quello che deve ancora uscire da lì e l'avanzo.` : 'Il conto da cui escono le spese del mese: la pagina Spese mostra il suo saldo e quanto avanza.'}</Testo>
-            {contiSpese.esito ? <Esito tono={contiSpese.esito.ok ? 'ok' : 'errore'} testo={contiSpese.esito.testo} /> : null}
-            <Pulsante etichetta="Salva" onPress={contiSpese.salva(() => modifica('/profilo', { conto_principale_id: principale || null }))} />
-          </Scheda>
           <Scheda titolo="Condivisione" nota="L'altra persona vede e modifica solo ciò che condividi" icona="users">
             {altra ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
@@ -103,7 +92,7 @@ export function Impostazioni() {
                 <View style={{ flex: 1, gap: d['spazio-testo'] }}><Testo stile="corpo-forte">{altra.nome}</Testo>
                   <Testo stile="dettaglio-normale" colore="testo-secondario">{`${condivisioni.filter((c) => c.mia).length} voci condivise da te · ${condivisioni.filter((c) => !c.mia).length} condivise con te`}</Testo></View>
               </View>
-            ) : <Vuoto testo="Ancora nessuna condivisione. Per condividere un conto (con i suoi salvadanai) o una spesa aprilo e attiva Condividi: scegli con chi nel form." />}
+            ) : <Vuoto testo="Ancora nessuna condivisione. Per condividere un conto (con le sue ceste) o una spesa aprilo e attiva Condividi: scegli con chi nel form." />}
             {condivisioni.length ? (
               <View>
                 {condivisioni.map((c) => (

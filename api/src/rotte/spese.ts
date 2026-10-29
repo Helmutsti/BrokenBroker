@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { PoolClient } from 'pg';
-import { bloccoSpesa, erroreSpesaBloccata, vietaCampi } from '../collegamenti.ts';
+import { scalaCestaDellaSpesa } from '../ceste.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodoRichiesto } from '../periodo.ts';
@@ -45,6 +45,9 @@ async function categoriaMia(db: PoolClient, id: string | null | undefined) {
   if (!(await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id])).rowCount) throw nonTrovato('Categoria');
 }
 
+const ERRORE_SENZA_CONTO = 'Ogni spesa ha un conto di partenza: scegli da quale conto escono i soldi';
+const ERRORE_SPOSTAMENTO = 'Uno spostamento tra due conti non ha categoria: non è una spesa';
+
 function leggi(c: Record<string, unknown>, nuova: boolean) {
   const importo = v.importo(c, 'importo', nuova);
   if (importo !== undefined && Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
@@ -61,7 +64,6 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     tipo: v.scelta(c, 'tipo', TIPI),
     attiva: v.booleano(c, 'attiva'),
     note: v.annullabile(c, 'note', () => v.testo(c, 'note', false, 500)),
-    alimenta_obiettivo_id: v.annullabile(c, 'alimenta_obiettivo_id', () => v.id(c, 'alimenta_obiettivo_id')),
   };
 }
 
@@ -93,6 +95,8 @@ rotteSpese.post('/', async (req, res) => {
   normalizzaMensile(campi, undefined);
   if (campi.senza_giorno && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa senza giorno ha bisogno almeno del mese');
   if (campi.ogni_mesi === null && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa una tantum ha bisogno della data');
+  if (!campi.conto_id) throw new ErroreApi(400, ERRORE_SENZA_CONTO);
+  if (campi.a_conto_id && campi.categoria_id) throw new ErroreApi(400, ERRORE_SPOSTAMENTO);
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     await categoriaMia(db, campi.categoria_id);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
@@ -110,12 +114,15 @@ rotteSpese.patch('/:id', async (req, res) => {
   const c = v.corpo(req.body);
   const campi = leggi(c, false);
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
-    const blocco = await bloccoSpesa(db, id);
-    vietaCampi(blocco, Object.keys(c), erroreSpesaBloccata);
     const sua = (await db.query<{ mia: boolean }>('select proprietario_id = fp_me() as mia from spese_previste where id = $1', [id])).rows[0];
     if (!sua) return undefined;
-    const prima = (await db.query<{ ogni_mesi: number | null; prossima_scadenza: string | null }>(
-      'select ogni_mesi, prossima_scadenza from spese_previste where id = $1', [id])).rows[0];
+    const prima = (await db.query<{ ogni_mesi: number | null; prossima_scadenza: string | null; a_conto_id: string | null; categoria_id: string | null; conto_id: string | null }>(
+      'select ogni_mesi, prossima_scadenza, a_conto_id, categoria_id, conto_id from spese_previste where id = $1', [id])).rows[0];
+    // Il conto di partenza è obbligatorio (decisione 71): una spesa di chi la crea non può restarne senza (si controlla come resta dopo la modifica).
+    if (sua.mia && !(campi.conto_id !== undefined ? campi.conto_id : prima.conto_id)) throw new ErroreApi(400, ERRORE_SENZA_CONTO);
+    // Uno spostamento tra due conti non è una spesa: niente categoria (si guarda come resta la voce dopo la modifica).
+    const arrivo = campi.a_conto_id !== undefined ? campi.a_conto_id : prima.a_conto_id;
+    if (arrivo && (campi.categoria_id || (campi.a_conto_id && sua.mia && campi.categoria_id === undefined && prima.categoria_id))) throw new ErroreApi(400, ERRORE_SPOSTAMENTO);
     normalizzaMensile(campi, prima.ogni_mesi);
     // Da mensile a periodica serve la data (il mese): niente più «mensile» da cui ricavarla.
     if (prima.ogni_mesi === 1 && campi.ogni_mesi !== undefined && campi.ogni_mesi !== 1 && !campi.prossima_scadenza) {
@@ -158,8 +165,6 @@ rotteSpese.post('/:id/vista', async (req, res) => {
 rotteSpese.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    const blocco = await bloccoSpesa(db, id);
-    if (blocco) throw erroreSpesaBloccata(blocco);
     if ((await db.query('delete from spese_previste where id = $1', [id])).rowCount) return;
     const visibile = (await db.query('select 1 from spese_previste where id = $1', [id])).rowCount;
     throw visibile ? new ErroreApi(403, 'Solo chi ha creato la spesa può cancellarla') : nonTrovato('Spesa prevista');
@@ -183,7 +188,9 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
     const spunta = (await db.query<{ id: string; data: string }>(
       'insert into spunte (utente_id, spesa_prevista_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
-    await transazioneDaSpunta(db, { spunta, da: s.conto_id, a: s.a_conto_id, intero: Number(s.importo), mia: Number(s.mia_quota), descrizione: s.nome, categoria: s.categoria_id });
+    await transazioneDaSpunta(db, { spunta, da: s.conto_id, a: s.a_conto_id, mia: Number(s.mia_quota), descrizione: s.nome, categoria: s.categoria_id });
+    // Se una cesta punta a questa spesa, scende della stessa quota (non sotto zero); togliendo la spunta torna com'era.
+    await scalaCestaDellaSpesa(db, id, spunta.id, Number(s.mia_quota), s.nome);
     return spunta;
   });
   res.status(201).json(risultato);

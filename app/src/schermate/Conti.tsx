@@ -1,10 +1,10 @@
 ﻿import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Interruttore, Pulsante } from '../componenti/base.tsx';
-import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
+import { Campo, CampoData, SceltaIcona } from '../componenti/campi.tsx';
 import { Intestazione, Scheda, SchedaConto, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, sostituisci, useDati } from '../dati/api.ts';
-import { alberoConti, contoCondiviso, opzioniConti } from '../dati/contesto.tsx';
+import { contoCondiviso } from '../dati/contesto.tsx';
 import type { Condivisione, Conto, ElencoSpese, Rata } from '../dati/tipi.ts';
 import { dataOra, euro, importoInTesto, leggiData, leggiImporto, oggiIso } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
@@ -12,18 +12,13 @@ import { d, Testo } from '../tema/tema.tsx';
 import { Caricamento } from './comuni.tsx';
 import { Affiancati, ConErrore, ErroreCampo, FinestraModulo, Meta, Riquadro, RiquadroCondivisione, salvaCondivisione, serve } from './moduli.tsx';
 
-// SC-06 Conti (decisione 61): un albero di conti (conto → sotto-conti), ognuno con il suo saldo. Il saldo si scrive come lo vedi in banca,
-// con il momento in cui vale, e poi lo muovono le transazioni (spunte e movimenti). Il saldo di un contenitore comprende i sotto-conti:
-// «Non assegnato» è la parte che non sta in nessun sotto-conto. Un conto si condivide con i suoi sotto-conti.
+// SC-06 Conti (decisioni 61 e 71): i conti, ognuno con il suo saldo. Il saldo si scrive come lo vedi in banca, con il momento in cui vale, e poi lo
+// muovono le transazioni (spunte e movimenti). Dentro un conto stanno le ceste (pagina Salvadanai): qui si vede quanto c'è nelle ceste e quanto resta libero.
 
-// Con chi è condiviso un conto (lui o un conto che lo contiene): «con Anna» se l'hai condiviso tu, «da Anna» se te l'ha condiviso lei.
-function conChi(conti: Conto[], condivisioni: Condivisione[], id: string): string | null {
-  for (let c = conti.find((x) => x.id === id); c; c = conti.find((x) => x.id === c!.padre_id)) {
-    const s = condivisioni.find((x) => x.voce === 'conto' && x.voce_id === c!.id);
-    if (s) return s.mia ? `con ${s.condiviso_con}` : `da ${s.proprietario}`;
-    if (!c.padre_id) break;
-  }
-  return null;
+// Con chi è condiviso un conto: «con Anna» se l'hai condiviso tu, «da Anna» se te l'ha condiviso lei.
+function conChi(condivisioni: Condivisione[], id: string): string | null {
+  const s = condivisioni.find((x) => x.voce === 'conto' && x.voce_id === id);
+  return s ? (s.mia ? `con ${s.condiviso_con}` : `da ${s.proprietario}`) : null;
 }
 
 export function Conti() {
@@ -31,52 +26,45 @@ export function Conti() {
   const [archiviati, setArchiviati] = useState(false);
   const { dati, errore } = useDati<Conto[]>(`/conti?archiviati=${archiviati}`);
   const condivisioni = useDati<Condivisione[]>('/condivisioni').dati ?? [];
-  const [aperto, setAperto] = useState<Conto | 'nuovo' | 'sotto' | null>(null);
+  const [aperto, setAperto] = useState<Conto | 'nuovo' | null>(null);
   if (!dati) return <Caricamento errore={errore} />;
 
   const attivi = dati.filter((c) => !c.archiviato);
   const vecchi = dati.filter((c) => c.archiviato);
-  const scheda = (c: Conto, sotto: number) => {
-    const chi = contoCondiviso(dati, c.id) ? conChi(dati, condivisioni, c.id) : null;
-    const dentro = [sotto ? `${sotto} ${sotto === 1 ? 'sotto-conto' : 'sotto-conti'}` : null, c.non_assegnato !== null ? `non assegnato ${euro(c.non_assegnato)}` : null].filter(Boolean).join(' · ');
+  const scheda = (c: Conto) => {
+    const chi = contoCondiviso(dati, c.id) ? conChi(condivisioni, c.id) : null;
+    const dentro = Number(c.nelle_ceste) > 0.005 ? `Nelle ceste ${euro(c.nelle_ceste)} · liberi ${euro(c.liberi)}` : undefined;
     return (
       <SchedaConto key={c.id} nome={c.nome} icona={c.icona} onApri={() => setAperto(c)}
         saldo={c.saldo !== null ? euro(c.saldo) : undefined} saldoNegativo={c.saldo !== null && Number(c.saldo) < 0}
         nota={[c.saldo_scritto_il ? `Scritto il ${dataOra(c.saldo_scritto_il)}` : c.saldo !== null ? 'Saldo mai scritto: solo transazioni' : 'Saldo da scrivere', chi].filter(Boolean).join(' · ')}
-        dettaglio={dentro ? dentro.charAt(0).toUpperCase() + dentro.slice(1) : undefined} dettaglioNegativo={c.non_assegnato !== null && Number(c.non_assegnato) < 0}
+        dettaglio={dentro} dettaglioNegativo={c.liberi !== null && Number(c.liberi) < 0}
         condiviso={contoCondiviso(dati, c.id)} />
     );
   };
-  // Solo i conti in cima: i sotto-conti (salvadanai e ceste) si vedono nella pagina Salvadanai; qui si dice quanti sono.
-  const albero = (conti: Conto[]) => {
-    const righe = alberoConti(conti);
-    const quanti = (id: string) => conti.filter((x) => x.padre_id === id).length;
-    return (
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>
-        {righe.filter((r) => r.livello === 0).map(({ conto }) => (
-          <View key={conto.id} style={{ width: compatto ? '100%' : 352 }}>{scheda(conto, quanti(conto.id))}</View>
-        ))}
-      </View>
-    );
-  };
+  const elenco = (conti: Conto[]) => (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: d['spazio-blocco'] }}>
+      {conti.map((c) => <View key={c.id} style={{ width: compatto ? '100%' : 352 }}>{scheda(c)}</View>)}
+    </View>
+  );
 
   return (
     <>
-      <Intestazione titolo="Conti" sottotitolo="I tuoi conti, con il saldo. Scrivi il saldo come lo vedi in banca: poi lo muovono le spunte e i movimenti. I sotto-conti sono nella pagina Salvadanai."
+      <Intestazione titolo="Conti" sottotitolo="I tuoi conti, con il saldo. Scrivi il saldo come lo vedi in banca: poi lo muovono le spunte e i movimenti. Le ceste sono nella pagina Salvadanai."
         azioni={(
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: d['spazio-colonne'] }}>
             <Pulsante tipo="primario" etichetta="Nuovo conto" icona="plus" onPress={() => setAperto('nuovo')} />
           </View>
         )} />
-      {attivi.length === 0 ? <Scheda><Vuoto testo="Nessun conto. Aggiungi il tuo conto corrente." /></Scheda> : albero(attivi)}
+      {attivi.length === 0 ? <Scheda><Vuoto testo="Nessun conto. Aggiungi il tuo conto corrente." /></Scheda> : elenco(attivi)}
       {archiviati && vecchi.length ? (
         <View style={{ gap: d['spazio-blocco'] }}>
           <Testo stile="titolo-scheda">Archiviati</Testo>
-          {albero(vecchi)}
+          {elenco(vecchi)}
         </View>
       ) : null}
       <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" icona="archive" etichetta={archiviati ? 'Nascondi i conti archiviati' : 'Mostra i conti archiviati'} onPress={() => setArchiviati(!archiviati)} /></View>
-      <FinestraConto conto={typeof aperto === 'object' ? aperto : null} sotto={aperto === 'sotto'} conti={dati} condivisioni={condivisioni} aperta={!!aperto} onChiudi={() => setAperto(null)} />
+      <FinestraConto conto={typeof aperto === 'object' ? aperto : null} condivisioni={condivisioni} aperta={!!aperto} onChiudi={() => setAperto(null)} />
     </>
   );
 }
@@ -123,7 +111,7 @@ async function scriviSaldo(conto: Conto, testo: string, giorno: string, ora: str
 
 const aiutoSaldo = (conto: Conto) => [
   conto.saldo !== null ? `Ora è ${euro(conto.saldo)}${conto.saldo_scritto_il ? `: scritto il ${dataOra(conto.saldo_scritto_il)}, poi mosso dalle transazioni` : ', solo dalle transazioni: il saldo non è mai stato scritto'}.` : 'Da qui in poi lo muovono le spunte e i movimenti.',
-  conto.non_assegnato !== null ? `Comprende i sotto-conti: non assegnato ${euro(conto.non_assegnato)}.` : null,
+  conto.liberi !== null && Number(conto.nelle_ceste) > 0.005 ? `Nelle ceste ${euro(conto.nelle_ceste)}, liberi ${euro(conto.liberi)}.` : null,
 ].filter(Boolean).join(' ');
 
 // «Sul conto» della pagina Spese: riscrive il saldo del conto principale.
@@ -140,10 +128,7 @@ export function FinestraSaldo({ conto, aperta, onChiudi }: { conto: Conto | null
   );
 }
 
-// Un conto e i conti che contiene, a ogni livello: non può finire dentro uno di questi.
-const discendenti = (conti: Conto[], id: string): string[] => conti.filter((c) => c.padre_id === id).flatMap((c) => [c.id, ...discendenti(conti, c.id)]);
-
-function FinestraConto({ conto, sotto, conti, condivisioni, aperta, onChiudi }: { conto: Conto | null; sotto: boolean; conti: Conto[]; condivisioni: Condivisione[]; aperta: boolean; onChiudi: () => void }) {
+function FinestraConto({ conto, condivisioni, aperta, onChiudi }: { conto: Conto | null; condivisioni: Condivisione[]; aperta: boolean; onChiudi: () => void }) {
   // Quante spese e rate usano il conto: con il conto eliminato restano senza conto.
   const spese = useDati<ElencoSpese>(aperta && conto ? '/spese-previste' : null).dati;
   const rate = useDati<Rata[]>(aperta && conto ? '/rate' : null).dati;
@@ -153,7 +138,6 @@ function FinestraConto({ conto, sotto, conti, condivisioni, aperta, onChiudi }: 
   const miaCondivisione = conto ? condivisioni.find((x) => x.voce === 'conto' && x.voce_id === conto.id && x.mia) : undefined;
   const [nome, setNome] = useState('');
   const [icona, setIcona] = useState('landmark');
-  const [padre, setPadre] = useState('');
   const [archiviato, setArchiviato] = useState(false);
   const [condiviso, setCondiviso] = useState(false);
   const [con, setCon] = useState<string | null>(null);
@@ -162,49 +146,37 @@ function FinestraConto({ conto, sotto, conti, condivisioni, aperta, onChiudi }: 
   const [ora, setOra] = useState('');
   useEffect(() => {
     if (!aperta) return;
-    setNome(conto?.nome ?? ''); setIcona(conto?.icona ?? (sotto ? 'piggy-bank' : 'landmark')); setPadre(conto?.padre_id ?? '');
+    setNome(conto?.nome ?? ''); setIcona(conto?.icona ?? 'landmark');
     setArchiviato(conto?.archiviato ?? false); setCondiviso(conto?.condiviso ?? false); setCon(null);
     setSaldo(importoInTesto(conto?.saldo)); setGiorno(''); setOra('');
-  }, [aperta, conto, sotto]);
+  }, [aperta, conto]);
 
-  const fuori = conto ? [conto.id, ...discendenti(conti, conto.id)] : [];
-  const sottoConto = sotto || !!padre;
   const salva = async () => {
     const corpo: Record<string, unknown> = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), icona };
-    if (sotto && !padre) throw new ErroreCampo('padre', 'Scegli il conto che lo contiene');
-    if (!conto || (conto.padre_id ?? '') !== padre) corpo.padre_id = padre || null;
     if (conto) corpo.archiviato = archiviato;
     const salvato = conto ? await modifica<Conto>(`/conti/${conto.id}`, corpo) : await crea<Conto>('/conti', corpo);
     await scriviSaldo(salvato, saldo, giorno, ora);
-    // Si condivide solo un conto in cima, e solo chi l'ha creato: i sotto-conti seguono il contenitore.
-    if (salvato.mio && !salvato.padre_id) await salvaCondivisione('conto', salvato.id, condiviso, con ?? miaCondivisione?.condiviso_con_id ?? null);
+    // Si condivide solo chi l'ha creato: le ceste seguono il conto.
+    if (salvato.mio) await salvaCondivisione('conto', salvato.id, condiviso, con ?? miaCondivisione?.condiviso_con_id ?? null);
   };
-  const chi = conto ? conChi(conti, condivisioni, conto.id) : null;
+  const chi = conto ? conChi(condivisioni, conto.id) : null;
   return (
-    <FinestraModulo titolo={conto ? conto.nome : sotto ? 'Nuovo sotto-conto' : 'Nuovo conto'} icona={icona} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
+    <FinestraModulo titolo={conto ? conto.nome : 'Nuovo conto'} icona={icona} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
       onElimina={conto?.mio ? () => cancella(`/conti/${conto.id}`).then(() => undefined) : undefined} etichettaElimina="Elimina conto"
       confermaElimina={conto ? { nome: `«${conto.nome}»`, dettaglio: `${collegate ? `${collegate} restano senza conto.` : 'Nessuna spesa o rata usa questo conto.'} Le transazioni restano, senza questo conto.` } : undefined}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: d['spazio-colonne'] }}>
         <SceltaIcona valore={icona} onCambia={setIcona} />
-        <View style={{ flex: 1, minWidth: 0 }}><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto={sottoConto ? 'Es. Fondo emergenza' : 'Es. BPER'} autoFocus={!conto} /></ConErrore></View>
+        <View style={{ flex: 1, minWidth: 0 }}><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. BPER" autoFocus={!conto} /></ConErrore></View>
       </View>
-      <ConErrore campo="padre">
-        <Tendina etichetta={sotto ? 'Dentro quale conto' : 'Dentro quale conto (facoltativo)'} valore={padre} iconaPrima="landmark" onCambia={setPadre} segnaposto="Scegli il conto che lo contiene"
-          opzioni={[...(sotto ? [] : [{ valore: '', testo: 'Nessuno: è un conto a sé' }]), ...opzioniConti(conti, { tenere: [padre], escludi: fuori })]} />
-        <Testo stile="dettaglio-normale" colore="testo-secondario">
-          {sottoConto ? 'Un sotto-conto è una parte del conto che lo contiene: il saldo del contenitore lo comprende.' : 'Un conto a sé, come quello della banca. Può contenere dei sotto-conti.'}</Testo>
-      </ConErrore>
       <Riquadro titolo="Saldo" icona="wallet" nota="Scrivilo quando vuoi, con il momento in cui vale: dopo lo muovono le transazioni.">
         <CampiSaldo saldo={saldo} setSaldo={setSaldo} giorno={giorno} setGiorno={setGiorno} ora={ora} setOra={setOra}
           aiuto={conto ? aiutoSaldo(conto) : 'Facoltativo. Da qui in poi lo muovono le spunte e i movimenti.'} />
       </Riquadro>
       {conto && !conto.mio ? (
         <Testo stile="dettaglio-normale" colore="testo-secondario">{`Conto condiviso con te${chi ? ` ${chi}` : ''}: vedete lo stesso saldo. Puoi modificarlo; solo chi l'ha creato può eliminarlo.`}</Testo>
-      ) : padre ? (
-        <Testo stile="dettaglio-normale" colore="testo-secondario">{chi ? `Condiviso ${chi}, insieme al conto che lo contiene.` : 'Un sotto-conto si condivide insieme al conto che lo contiene.'}</Testo>
       ) : (
         <ConErrore campo="condivisione"><RiquadroCondivisione aperta={aperta} nome="questo conto" condiviso={condiviso} onCambia={setCondiviso} con={con ?? miaCondivisione?.condiviso_con_id ?? null} onCon={setCon}
-          giaCondivisa={!!conto?.condiviso} testoCondividi="Condividi questo conto e i suoi sotto-conti" testoAttivo="Lo vedete tutti e due, con lo stesso saldo, sotto-conti compresi." /></ConErrore>
+          giaCondivisa={!!conto?.condiviso} testoCondividi="Condividi questo conto e le sue ceste" testoAttivo="Lo vedete tutti e due, con lo stesso saldo e le stesse ceste." /></ConErrore>
       )}
       {conto ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>

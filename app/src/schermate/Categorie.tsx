@@ -5,13 +5,13 @@ import { Icona } from '../componenti/Icona.tsx';
 import { Check } from 'lucide-react-native';
 import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
 import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
-import { Intestazione, RigaCategoria, Scheda } from '../componenti/composti.tsx';
+import { Intestazione, LARGHEZZA_COLONNA_COMPATTA, RigaCategoria, Scheda } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Categoria, ElencoBudget, ElencoSpese, Rata } from '../dati/tipi.ts';
 import { euro, nomeMeseMinuscolo, numero } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { FinestraBudget } from './Budget.tsx';
+import { FinestraBudget } from './Movimenti.tsx';
 import { FinestraModulo, serve, Voce } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
@@ -49,7 +49,7 @@ export function Categorie() {
         speso={s ? euro(s) : '—'} percentuale={s && stipendio > 0 ? `${numero((s / stipendio) * 100, 1)}%` : '—'} icona={rif.iconaCategoria(c.id)} ereditata={!c.icona} colore={c.colore}
         onApriChiudi={() => { const n = new Set(aperte); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); setAperte(n); }} onModifica={() => setAperta(c)}
         onNuovo={() => setAperta({ padre: c.id })} onElimina={() => setDaEliminare(c)}
-        onBudget={c.tipo === 'uscita' ? () => setBudgetDi(c) : undefined} budget={c.budget ? `${euro(c.budget.importo)}${c.budget.attivo ? '' : ' · non attivo'}` : undefined} />);
+        onBudget={c.tipo === 'uscita' ? () => setBudgetDi(c) : undefined} budget={c.budget ? euro(c.budget.importo) : undefined} budgetAttivo={c.budget?.attivo ?? true} />);
       if (ramo === 'aperto') visita(c.id, livello + 1);
     }
   };
@@ -63,9 +63,14 @@ export function Categorie() {
       <Esito tono="informazione" testo="Icona piena: scelta per quella categoria. Icona grigia chiara: presa dalla categoria padre (se la categoria non ha un colore). Se la categoria ha un colore, l’icona lo mantiene, anche quando è presa dal padre. Il colore si sceglie con la matita." />
       <Scheda>
         <View role="tree" aria-label="Categorie">
-          {compatto ? null : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
+          {compatto ? <View style={{ flexDirection: 'row', gap: d['spazio-icona'] }}>
+            <View style={{ flex: 1 }} />
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: LARGHEZZA_COLONNA_COMPATTA, textAlign: 'right' }}>Budget</Testo>
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: LARGHEZZA_COLONNA_COMPATTA, textAlign: 'right' }}>Uscite</Testo>
+          </View> : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
-            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Spese a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>Budget</Testo>
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Uscite a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 80, textAlign: 'right' }}>% stipendio</Testo>
             <View style={{ width: 4 * ALTEZZA_CONTROLLO + 3 * d['spazio-testo'] }} />
           </View>}

@@ -2,7 +2,7 @@ import {
   Archive, ArrowDown, ArrowDownLeft, ArrowLeftRight, ArrowUp, ArrowUpRight, Banknote, Bed, Briefcase, Bus, Calculator, Calendar, CalendarCheck, CalendarClock,
   CalendarRange, Camera, Car, Cat, ChartColumn, ChartLine, ChartPie, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleAlert, CircleCheck, CircleX, Coffee,
   CreditCard, Ellipsis, Eye, EyeOff, Factory, FileText, Fuel, Gamepad2, Gift, Glasses, Globe, Heart, House, Info, KeyRound, Landmark, Laptop, Layers,
-  LayoutDashboard, ListChecks, Lock, LogOut, type LucideIcon, Mail, Music, Package, Pencil, Percent, PiggyBank, Pill, Plane, Plus, Refrigerator, Repeat,
+  LayoutDashboard, ListChecks, Lock, LogOut, type LucideIcon, Mail, Music, Package, PackageOpen, Pencil, Percent, PiggyBank, Pill, Plane, Plus, Refrigerator, Repeat,
   Scale, Search, Shield, ShieldCheck, Shirt, ShoppingCart, SlidersHorizontal, Smartphone, Sofa, SquareParking, Stethoscope, Tags, Target, Ticket, Trash2,
   TreePalm, TrendingUp, Tv, User, UserPlus, Users, Utensils, Wallet, Wrench, X, Zap,
 } from 'lucide-react-native';
@@ -27,7 +27,7 @@ const ICONE: Record<string, LucideIcon> = {
   smartphone: Smartphone, house: House, zap: Zap, 'trash-2': Trash2, sofa: Sofa, utensils: Utensils, 'shopping-cart': ShoppingCart, coffee: Coffee,
   car: Car, fuel: Fuel, 'square-parking': SquareParking, shield: Shield, 'file-text': FileText, wrench: Wrench, bus: Bus, repeat: Repeat, tv: Tv,
   music: Music, laptop: Laptop, ticket: Ticket, 'tree-palm': TreePalm, 'gamepad-2': Gamepad2, heart: Heart, pill: Pill, stethoscope: Stethoscope,
-  glasses: Glasses, package: Package, shirt: Shirt, gift: Gift, cat: Cat, briefcase: Briefcase, camera: Camera, plane: Plane, bed: Bed,
+  glasses: Glasses, package: Package, 'package-open': PackageOpen, shirt: Shirt, gift: Gift, cat: Cat, briefcase: Briefcase, camera: Camera, plane: Plane, bed: Bed,
   refrigerator: Refrigerator, 'shield-check': ShieldCheck, check: Check,
 };
 

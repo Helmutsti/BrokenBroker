@@ -7,11 +7,11 @@ import * as v from '../valida.ts';
 
 export const rotteConti = Router();
 
-// Conti al centro (decisione 61): un albero di conti (conto → sotto-conti), ognuno con un saldo che si può sempre riscrivere.
-// Un conto con sotto-conti è il loro contenitore: il suo saldo li comprende e `non_assegnato` è la parte che non sta in nessun sotto-conto
-// (calcolo in saldi.ts). I conti si condividono (stesso saldo per tutti e due), sotto-conti compresi.
+// Conti al centro (decisione 61): ognuno con un saldo che si può sempre riscrivere. Dentro un conto stanno le ceste (decisione 71): `nelle_ceste`
+// è quanto c'è nelle sue ceste e `liberi` = saldo - nelle_ceste (calcolo in saldi.ts). I conti si condividono (stesso saldo per tutti e due),
+// ceste comprese.
 const SELEZIONE = `
-  select c.id, c.nome, c.icona, c.archiviato, c.padre_id, c.proprietario_id = fp_me() as mio,
+  select c.id, c.nome, c.icona, c.archiviato, c.proprietario_id = fp_me() as mio,
          exists (select 1 from condivisioni s where s.conto_id = c.id) as condiviso,
          c.saldo_scritto::text as saldo_scritto, c.saldo_scritto_il
     from conti c`;
@@ -19,7 +19,10 @@ const SELEZIONE = `
 async function conSaldi(db: PoolClient, righe: Record<string, unknown>[]) {
   const saldi = await saldiDeiConti(db);
   const testo = (n: number | null | undefined) => (n === null || n === undefined ? null : n.toFixed(2));
-  return righe.map((r) => ({ ...r, saldo: testo(saldi.get(r.id as string)?.saldo), non_assegnato: testo(saldi.get(r.id as string)?.non_assegnato) }));
+  return righe.map((r) => {
+    const s = saldi.get(r.id as string);
+    return { ...r, saldo: testo(s?.saldo), nelle_ceste: testo(s?.nelle_ceste ?? 0), liberi: testo(s?.liberi) };
+  });
 }
 
 rotteConti.get('/', async (req, res) => {
@@ -41,17 +44,11 @@ rotteConti.get('/:id', async (req, res) => {
   res.json(conto);
 });
 
-async function padreVisibile(db: PoolClient, id: string | null | undefined) {
-  if (id && !(await db.query('select 1 from conti where id = $1', [id])).rowCount) throw nonTrovato('Conto contenitore');
-}
-
 rotteConti.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const nome = v.testo(c, 'nome', true, 80), icona = v.testo(c, 'icona', false, 60) ?? 'landmark';
-  const padre = v.annullabile(c, 'padre_id', () => v.id(c, 'padre_id')) ?? null;
   const conto = await conUtente(res.locals.utenteId, async (db) => {
-    await padreVisibile(db, padre);
-    const { rows } = await db.query<{ id: string }>('insert into conti (proprietario_id, nome, icona, padre_id) values (fp_me(), $1, $2, $3) returning id', [nome, icona, padre]);
+    const { rows } = await db.query<{ id: string }>('insert into conti (proprietario_id, nome, icona) values (fp_me(), $1, $2) returning id', [nome, icona]);
     return uno(db, rows[0].id);
   });
   res.status(201).json(conto);
@@ -60,29 +57,21 @@ rotteConti.post('/', async (req, res) => {
 rotteConti.patch('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
-  const campi = {
+  const set = v.setParziale({
     nome: v.testo(c, 'nome', false, 80),
     icona: v.testo(c, 'icona', false, 60),
     archiviato: v.booleano(c, 'archiviato'),
-    padre_id: v.annullabile(c, 'padre_id', () => v.id(c, 'padre_id')),
-  };
-  const set = v.setParziale(campi, 2);
+  }, 2);
   const conto = await conUtente(res.locals.utenteId, async (db) => {
-    await padreVisibile(db, campi.padre_id);
-    try {
-      if (!(await db.query(`update conti set ${set.sql} where id = $1`, [id, ...set.valori])).rowCount) return undefined;
-    } catch (e) {
-      if ((e as Error).message.includes('sotto-conto')) throw new ErroreApi(400, (e as Error).message);
-      throw e;
-    }
+    if (!(await db.query(`update conti set ${set.sql} where id = $1`, [id, ...set.valori])).rowCount) return undefined;
     return uno(db, id);
   });
   if (!conto) throw nonTrovato('Conto');
   res.json(conto);
 });
 
-// Il saldo del conto come lo vedi in banca (per un contenitore: comprende i sotto-conti). `momento` (facoltativo, di base adesso, non nel
-// futuro) dice a quando vale: le transazioni prima di quel momento sono già dentro. Si può riscrivere sempre; importo null lo toglie.
+// Il saldo del conto come lo vedi in banca. `momento` (facoltativo, di base adesso, non nel futuro) dice a quando vale: le transazioni prima
+// di quel momento sono già dentro. Si può riscrivere sempre; importo null lo toglie.
 rotteConti.put('/:id/saldo', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
@@ -104,11 +93,10 @@ rotteConti.put('/:id/saldo', async (req, res) => {
   res.json(conto);
 });
 
-// Solo il proprietario cancella; un contenitore con sotto-conti no (prima si spostano o si cancellano i sotto-conti).
+// Solo il proprietario cancella (le ceste del conto spariscono con lui).
 rotteConti.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    if ((await db.query('select 1 from conti where padre_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Il conto contiene dei sotto-conti: spostali o eliminali prima');
     if ((await db.query('delete from conti where id = $1', [id])).rowCount) return;
     const visibile = (await db.query('select 1 from conti where id = $1', [id])).rowCount;
     throw visibile ? new ErroreApi(403, 'Solo chi ha creato il conto può cancellarlo') : nonTrovato('Conto');

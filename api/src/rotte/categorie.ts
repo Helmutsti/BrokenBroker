@@ -57,16 +57,17 @@ rotteCategorie.get('/', async (req, res) => {
 // Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie: le spese
 // previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no.
 // I budget (decisione 58) non contano: sono solo una lente sui movimenti di una categoria, non una spesa.
-// I promemoria dei salvadanai non sono spese. La somma sui rami la fa chi legge l'albero.
+// La somma sui rami la fa chi legge l'albero.
 rotteCategorie.get('/spese', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
     const per = new Map<string, number>();
     for (const s of await speseDelMese(db, p)) {
-      if (s.categoria_id && s.attiva && s.nel_mese && !s.alimenta_obiettivo_id && !s.a_conto_id) per.set(s.categoria_id, (per.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
+      if (s.categoria_id && s.attiva && s.nel_mese && !s.a_conto_id) per.set(s.categoria_id, (per.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
     }
     for (const r of await leggiRate(db)) {
-      if (r.categoria_id && r.attiva && scadenzaRata(r, p)) per.set(r.categoria_id, (per.get(r.categoria_id) ?? 0) + Number(r.importo_rata));
+      // Conta anche l'ultima rata già passata: vale per tutto il mese in cui scade.
+      if (r.categoria_id && scadenzaRata(r, p)) per.set(r.categoria_id, (per.get(r.categoria_id) ?? 0) + Number(r.importo_rata));
     }
     return [...per].map(([categoria_id, speso]) => ({ categoria_id, speso: speso.toFixed(2) }));
   });

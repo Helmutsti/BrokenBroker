@@ -1,9 +1,11 @@
 import type { PoolClient } from 'pg';
 import type { Periodo } from './periodo.ts';
+import { SQL_USCITA_FUORI_PIANO } from './transazioni.ts';
 
-// Budget (decisioni 49, 57 e 61): uno per categoria. È una cifra da tenere sotto controllo, non un limite: lo SPESO sono le uscite (transazioni
-// verso fuori) del mese con la categoria del budget (o registrate dal budget), da qualunque conto o senza: quelle scritte a mano e quelle
-// nate dalla spunta di una spesa. Gli spostamenti tra conti non contano mai (non sono spese). Se lo speso supera la cifra si conta tutto lo
+// Budget (decisioni 49, 57, 61 e 70): uno per categoria. È una cifra da tenere sotto controllo, non un limite: lo SPESO sono le uscite fuori
+// piano del mese (transazioni verso fuori scritte a mano o dal budget) con la categoria del budget (o registrate dal budget), da qualunque
+// conto o senza. Le spese previste, spuntate o no, non contano: la spunta crea una transazione che qui si salta (decisione 70). Gli
+// spostamenti tra conti non contano mai (non sono spese). Se lo speso supera la cifra si conta tutto lo
 // stesso e si mostra di quanto si è sforato (`sforo`). Nessun peso su alcun totale (Panoramica, Analisi, Categorie: decisione 58).
 
 export type Uscita = { id: string; budget_id: string | null; importo: string; momento: string; data: string; descrizione: string; conto_id: string | null; conto: string | null; utente: string | null; modificabile: boolean };
@@ -44,9 +46,9 @@ export async function budgetDelMese(db: PoolClient, p: Periodo, soloId?: string)
   // Le uscite del mese: del budget (budget_id) o della sua categoria.
   const mov = (await db.query<Uscita & { categoria_id: string | null }>(
     `select m.id, m.budget_id, m.categoria_id, m.importo::text as importo, m.momento, m.momento::date as data, m.descrizione,
-            m.da_conto_id as conto_id, c.nome as conto, u.nome as utente, (m.utente_id = fp_me() and m.spunta_id is null) as modificabile
+            m.da_conto_id as conto_id, c.nome as conto, u.nome as utente, m.utente_id = fp_me() as modificabile
        from movimenti m left join conti c on c.id = m.da_conto_id left join utenti u on u.id = m.utente_id
-      where m.a_conto_id is null and coalesce(m.verso, 'uscita') = 'uscita' and m.momento >= $1::date and m.momento < $2::date + 1
+      where ${SQL_USCITA_FUORI_PIANO} and m.momento >= $1::date and m.momento < $2::date + 1
       order by m.momento desc, m.id desc`, [p.dal, p.al])).rows;
 
   return rows.map((b) => {

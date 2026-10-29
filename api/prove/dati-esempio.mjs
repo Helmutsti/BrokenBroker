@@ -85,19 +85,17 @@ await r('POST', '/rate', M, { oggetto: 'American Express', finanziaria: 'Amex', 
 await r('POST', '/rate', M, { oggetto: 'Pinguino', finanziaria: 'Cofidis', importo_rata: '83.60', numero_rate: 5, prima_scadenza: meseFa(3, 10), conto_id: intesa, categoria_id: C('Rate') });
 await r('POST', '/rate', M, { oggetto: 'Telefono', finanziaria: 'Findomestic', importo_rata: '69.25', ultima_scadenza: meseFa(-5, 5), prima_scadenza: meseFa(1, 5), conto_id: intesa, categoria_id: C('Rate') });
 
-// Obiettivi: fondo di emergenza con traguardi di copertura, viaggio con sotto-obiettivi.
-const fondo = await r('POST', '/obiettivi', M, { nome: 'Fondo emergenza', traguardo: '8000' });
-await r('POST', `/obiettivi/${fondo.id}/versamenti`, M, { importo: '2500' });
+// Ceste (decisione 71): parti del saldo di un conto. Fondo di emergenza con traguardi di copertura, viaggio con sotto-ceste, e una cesta legata a una spesa.
+const fondo = await r('POST', '/ceste', M, { nome: 'Fondo emergenza', conto_id: tr, traguardo: '8000' });
+await r('POST', '/ceste/sposta', M, { da: null, a: fondo.id, importo: '2500' });
 for (const [n, i] of [['Un mese di spese', '1770'], ['Due mesi di spese', '3540'], ['Riparazione auto', '2000'], ['PC o telefono nuovo', '2000'], ['Elettrodomestico', '1500'], ['Occhiali', '500']])
-  await r('POST', `/obiettivi/${fondo.id}/traguardi`, M, { nome: n, importo: i });
-const viaggio = await r('POST', '/obiettivi', M, { nome: 'Viaggio insieme', scadenza: meseFa(-10, 1), crea_spesa: true });
-await r('POST', '/condivisioni', M, { voce: 'obiettivo', id: viaggio.id, email: 'ele@brokenbroker.test' });
-const parti = [];
-for (const [n, t, v] of [['Volo', '600', '600'], ['Alloggio', '900', '300'], ['Spese sul posto', '500', null]]) parti.push([(await r('POST', '/obiettivi', M, { nome: n, padre_id: viaggio.id, traguardo: t })).id, v]);
-for (const [id, v] of parti) if (v) await r('POST', `/obiettivi/${id}/versamenti`, M, { importo: v });
-const annuali = await r('POST', '/obiettivi', M, { nome: 'Spese annuali', traguardo: '2391.99' });
-await r('POST', `/obiettivi/${annuali.id}/versamenti`, M, { importo: '940.24' });
-const nikon = await r('POST', '/obiettivi', M, { nome: 'Obiettivo Nikon', traguardo: '400' });
+  await r('POST', `/ceste/${fondo.id}/traguardi`, M, { nome: n, importo: i });
+const viaggio = await r('POST', '/ceste', M, { nome: 'Viaggio insieme', conto_id: tr });
+for (const [n, t, v] of [['Volo', '600', '600'], ['Alloggio', '900', '300'], ['Spese sul posto', '500', null]]) {
+  const parte = await r('POST', '/ceste', M, { nome: n, padre_id: viaggio.id, traguardo: t });
+  if (v) await r('POST', '/ceste/sposta', M, { da: null, a: parte.id, importo: v });
+}
+const nikon = await r('POST', '/ceste', M, { nome: 'Obiettivo Nikon', conto_id: tr, traguardo: '400' });
 void nikon;
 
 // Investimenti.

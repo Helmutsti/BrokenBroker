@@ -57,7 +57,7 @@ rotteRate.post('/:id/spunta', async (req, res) => {
     if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
     const spunta = (await db.query<{ id: string; data: string }>('insert into spunte (utente_id, rata_id, data) values (fp_me(), $1, $2) returning id, data', [id, data])).rows[0];
     const rata = Number(r.importo_rata);
-    await transazioneDaSpunta(db, { spunta, da: r.conto_id, a: null, intero: rata, mia: rata, descrizione: r.oggetto, categoria: r.categoria_id });
+    await transazioneDaSpunta(db, { spunta, da: r.conto_id, a: null, mia: rata, descrizione: r.oggetto, categoria: r.categoria_id });
     return spunta;
   });
   res.status(201).json(spunta);

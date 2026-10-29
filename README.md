@@ -1,15 +1,15 @@
 # BrokenBroker
 
-App di finanza personale per capire il proprio tenore di vita: quanto si risparmia davvero, se una spesa è sostenibile, come vanno rate, obiettivi e investimenti. Pensata per due persone che vivono insieme: ognuna ha i suoi dati privati e può condividere spese, budget e obiettivi.
+App di finanza personale per capire il proprio tenore di vita: quanto si risparmia davvero, se una spesa è sostenibile, come vanno rate, salvadanai e investimenti. Pensata per due persone che vivono insieme: ognuna ha i suoi dati privati e può condividere spese, budget e obiettivi.
 
 Oggi c'è la versione per **computer** (pagina web). La versione per iPhone usa lo stesso codice ma va ancora provata su un Mac.
 
 ## Cosa fa
 
-- **Panoramica** del mese, come il foglio Excel: il saldo che scrivi tu, le spese previste da spuntare quando escono (la spunta è solo un segno), quanto deve ancora uscire e quanto resta davvero.
+- **Spese** (pagina iniziale): i conti con il saldo (si riscrive con un tocco), per ognuno e in totale quanto deve ancora uscire e l'avanzo; sotto le spese del mese raggruppate per conto di partenza. Ogni spesa è un'uscita o un giroconto: spuntarla sposta davvero i soldi (la tua quota), togliendo la spunta tornano indietro.
 - **Spese previste** ogni mese, ogni N mesi o una volta sola, divise a metà o con altre quote con l'altra persona.
-- **Obiettivi** annidabili, con sotto-obiettivi e traguardi di copertura (es. il fondo di emergenza).
-- **Movimenti** e **budget** come strumento a parte, **conti** come etichette, **investimenti** con prezzo medio di carico, **analisi** con "posso permettermelo?" e controllo delle rate, **categorie** con icone.
+- **Salvadanai**: «ceste» dentro i conti (una parte del saldo di un conto), annidabili, con traguardo e traguardi di copertura; i soldi li sposti tu dai liberi del conto alle ceste e viceversa. Una cesta può essere collegata a una spesa (es. l'assicurazione): dice quanto manca e quanto mettere al mese, e scende quando spunti la spesa.
+- **Movimenti**: i budget con quanto si riempiono e la griglia delle uscite del mese, con «Nuova uscita». **Conti** come etichette, **investimenti** con prezzo medio di carico, **categorie** con icone.
 
 ## Installare su un computer
 

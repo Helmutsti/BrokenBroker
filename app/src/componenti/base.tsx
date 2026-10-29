@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { Pressable, type PressableStateCallbackType, type StyleProp, View, type ViewStyle } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useCompatto } from '../tema/compatto.ts';
@@ -215,17 +215,28 @@ export function SceltaSegmenti<T extends string>({ opzioni, valore, onCambia, et
 }) {
   const { c } = useTema();
   const alto = useCompatto();
+  // Tutte le opzioni larghe uguali: a tutta larghezza si dividono lo spazio; altrimenti prendono la larghezza della più larga,
+  // misurata una volta con la larghezza naturale (si rimisura se cambiano i testi).
+  const testi = opzioni.map((o) => o.testo).join('|');
+  const misure = useRef<{ testi: string; larghezze: number[] }>({ testi, larghezze: [] });
+  const [larga, setLarga] = useState<number | null>(null);
+  if (misure.current.testi !== testi) { misure.current = { testi, larghezze: [] }; if (larga !== null) setLarga(null); }
+  const misura = (i: number, w: number) => {
+    if (larghezzaPiena || larga !== null) return;
+    misure.current.larghezze[i] = w;
+    if (opzioni.every((_, k) => misure.current.larghezze[k] !== undefined)) setLarga(Math.ceil(Math.max(...misure.current.larghezze)));
+  };
   return (
-    // Alta come campi, tendine e pulsanti: le opzioni riempiono l'altezza e il testo sta al centro; se non stanno in una riga vanno a capo.
-    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', flexWrap: 'wrap', minHeight: alto ? 44 : ALTEZZA_CONTROLLO, padding: d['margine-gruppo-controlli'], gap: d['margine-gruppo-controlli'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-tenue'], alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
-      {opzioni.map((o) => {
+    // Un solo bordo attorno al gruppo, alto come campi, tendine e pulsanti: ogni opzione riempie tutta l'altezza, separata dalla vicina da una linea; niente a capo (i divisori si spezzerebbero), il testo va su due righe.
+    <View accessibilityRole="radiogroup" accessibilityLabel={etichetta} style={{ flexDirection: 'row', minHeight: alto ? 44 : ALTEZZA_CONTROLLO, borderRadius: d['raggio-controllo'], borderWidth: d['misura-bordo'], borderColor: c['bordo-controllo'], overflow: 'hidden', alignSelf: larghezzaPiena ? 'stretch' : 'flex-start' }}>
+      {opzioni.map((o, i) => {
         const scelta = o.valore === valore;
         return (
-          <Pressable key={o.valore} accessibilityRole="radio" aria-checked={scelta} onPress={() => onCambia(o.valore)}
-            style={(s: StatoPressione) => [{ flexGrow: larghezzaPiena ? 1 : 0, minHeight: (alto ? 44 : ALTEZZA_CONTROLLO) - 2 * d['margine-gruppo-controlli'], alignItems: 'center', justifyContent: 'center', paddingHorizontal: dentroIlBordo(d['margine-voce-h']),
-              borderRadius: d['raggio-controllo-interno'], backgroundColor: scelta ? c['sfondo-scheda'] : s.hovered ? c['sfondo-hover'] : 'transparent',
-              borderWidth: d['misura-bordo'], borderColor: scelta ? c['bordo-controllo'] : 'transparent' }, anelloFocus(c, s.focused)]}>
-            <Testo stile={scelta ? 'dettaglio-forte' : 'dettaglio-normale'} colore={scelta ? 'testo-accento' : 'testo-secondario'}>{o.testo}</Testo>
+          <Pressable key={o.valore} accessibilityRole="radio" aria-checked={scelta} onPress={() => onCambia(o.valore)} onLayout={(e) => misura(i, e.nativeEvent.layout.width)}
+            style={(s: StatoPressione) => [{ ...(larghezzaPiena ? { flexGrow: 1, flexBasis: 0 } : larga !== null ? { width: larga } : {}), flexShrink: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: dentroIlBordo(d['margine-voce-h']),
+              backgroundColor: scelta ? c['sfondo-accento-tenue'] : s.hovered ? c['sfondo-hover'] : 'transparent',
+              borderLeftWidth: i === 0 ? 0 : d['misura-bordo'], borderLeftColor: c['bordo-controllo'] }, anelloFocus(c, s.focused)]}>
+            <Testo stile={scelta ? 'dettaglio-forte' : 'dettaglio-normale'} colore={scelta ? 'testo-accento' : 'testo-secondario'} numberOfLines={2} style={{ textAlign: 'center' }}>{o.testo}</Testo>
           </Pressable>
         );
       })}

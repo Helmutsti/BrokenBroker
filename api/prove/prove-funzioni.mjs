@@ -541,16 +541,17 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   verifica((await r('POST', `/obiettivi/${nip.id}/versamenti`, A, { importo: '50', da_liberi: true })).s === 400, 'nipote: liberi del padre diretto, non del nonno');
   const nip1 = await r('POST', `/obiettivi/${nip.id}/versamenti`, A, { importo: '40', da_liberi: true });
   verifica(nip1.s === 201 && Number((await dammi(ass.id)).versato) === 1.58 && Number((await dammi(ass.id)).saldo) === 41.58 && Number((await dammi(sc.id)).versato) === 100, 'nipote: sposta dai liberi del padre diretto', nip1.j);
-  // Aggiunta divisa: sul figlio con un nipote, lo spostamento si divide e il padre cala dell'intero.
-  const div = await r('POST', `/obiettivi/${ass.id}/versamenti`, A, { importo: '1.00', da_liberi: true, dividi: true });
+  // Aggiunta su un salvadanaio con un sotto-salvadanaio (decisione 69): i soldi restano tutti nei suoi liberi, il nipote non prende niente.
+  const nipPrima = Number((await dammi(nip.id)).saldo);
+  const div = await r('POST', `/obiettivi/${ass.id}/versamenti`, A, { importo: '1.00', da_liberi: true });
   const a2 = await dammi(ass.id);
-  verifica(div.s === 201 && Number(a2.saldo) === 42.58 && Number((await dammi(sc.id)).saldo) === 1000 && Number((await dammi(sc.id)).versato) === 99, 'spostamento con dividi: i liberi calano dell\'intero, totale del superiore invariato', [a2.saldo, a2.versato]);
+  verifica(div.s === 201 && Number(a2.versato) === 2.58 && Number(a2.saldo) === 42.58 && Number((await dammi(nip.id)).saldo) === nipPrima && Number((await dammi(sc.id)).saldo) === 1000 && Number((await dammi(sc.id)).versato) === 99, 'aggiunta con sotto-salvadanai: tutto nei liberi del salvadanaio, il sotto non cambia, totale del superiore invariato', [a2.saldo, a2.versato]);
   // Annullare un vecchio spostamento quando i soldi sono già stati usati: rifiutato, nulla cambia.
   const idVecchio = (await r('GET', `/obiettivi/${bollo.id}`, A)).j.versamenti.find((x) => Number(x.importo) === -100).id;
   verifica((await r('DELETE', `/obiettivi/versamenti/${idVecchio}`, A)).s === 409 && Number((await dammi(sc.id)).versato) === 99 && Number((await dammi(bollo.id)).versato) === 858.42, 'annullare uno spostamento già usato: 409 e nulla cambia');
-  // Cancellare un versamento di uno spostamento annulla entrambe le metà.
-  const idDiv = (await r('GET', `/obiettivi/${nip.id}`, A)).j.versamenti.find((x) => x.spostamento_con === 'Scadenze' || Number(x.importo) === 1).id;
-  verifica((await r('DELETE', `/obiettivi/versamenti/${idDiv}`, A)).s === 204 && Number((await dammi(sc.id)).versato) === 100 && Number((await dammi(ass.id)).saldo) === 41.58, 'cancellare uno spostamento toglie entrambe le metà');
+  // Cancellare un versamento annulla lo spostamento: i soldi tornano al superiore.
+  const idDiv = (await r('GET', `/obiettivi/${ass.id}`, A)).j.versamenti.find((x) => Number(x.importo) === 1).id;
+  verifica((await r('DELETE', `/obiettivi/versamenti/${idDiv}`, A)).s === 204 && Number((await dammi(sc.id)).versato) === 100 && Number((await dammi(ass.id)).saldo) === 41.58, 'cancellare uno spostamento riporta i soldi al superiore');
   verifica((await r('DELETE', `/obiettivi/versamenti/${idVecchio}`, A)).s === 204 && Number((await dammi(sc.id)).versato) === 0 && Number((await dammi(bollo.id)).versato) === 958.42, 'annullare uno spostamento: tornano come prima');
   await r('POST', `/obiettivi/${sc.id}/versamenti`, A, { importo: '500' });
   // Un altro utente non vede né sposta.
@@ -646,11 +647,13 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   verifica(vP.s === 201 && Number((await goal(fondoG.id)).saldo) === 180, 'versamento in un mese passato: permesso', vP.j);
   const idP = (await r('GET', `/obiettivi/${fondoG.id}`, A)).j.versamenti.find((x) => x.importo === '10.00').id;
   verifica((await r('DELETE', `/obiettivi/versamenti/${idP}`, A)).s === 204 && Number((await goal(fondoG.id)).saldo) === 170, 'annullare un versamento di un mese passato: permesso');
-  // Un versamento diviso tra i sotto-salvadanai: la somma è l'importo
+  // Un versamento in un salvadanaio con sotto-salvadanai resta tutto nei suoi liberi (decisione 69); un `dividi` inviato è ignorato.
   const padreD = (await r('POST', '/obiettivi', A, { nome: 'Fondo D' })).j;
   await r('POST', '/obiettivi', A, { nome: 'D1', padre_id: padreD.id, traguardo: '100' });
   await r('POST', '/obiettivi', A, { nome: 'D2', padre_id: padreD.id, traguardo: '100' });
-  verifica((await versa(padreD.id, { importo: '150', dividi: true })).s === 201 && Number((await r('GET', `/obiettivi/${padreD.id}`, A)).j.saldo) === 150 && await quanti() === nA, 'versamento con dividi: la somma delle parti è l\'importo');
+  const vD = await versa(padreD.id, { importo: '150', dividi: true });
+  const pD = (await r('GET', `/obiettivi/${padreD.id}`, A)).j;
+  verifica(vD.s === 201 && Number(pD.versato) === 150 && Number(pD.saldo) === 150 && pD.figli.every((f) => Number(f.saldo) === 0) && await quanti() === nA, 'versamento con sotto-salvadanai: tutto nei liberi del padre, i figli a zero', [pD.versato, pD.saldo]);
   verifica((await r('DELETE', `/obiettivi/${fondoG.id}`, A)).s === 204 && (await r('DELETE', `/obiettivi/${padreD.id}`, A)).s === 204, 'i salvadanai si eliminano');
 }
 
@@ -863,6 +866,35 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   const dopoX = (await tutti('?limite=200')).movimenti.find((x) => x.id === soloX.j.id);
   verifica(dopoX && dopoX.conto_id === null && dopoX.conto === null, 'conto eliminato: il movimento resta, senza etichetta', dopoX);
   verifica((await r('GET', `/spese-previste`, A)).j.spese.find((x) => x.id === spesaX.id)?.conto_id === null && (await r('GET', `/obiettivi/${svX.id}`, A)).j.conto_id === null, 'conto eliminato: spese e salvadanai restano senza conto');
+}
+
+// Svuotare un salvadanaio con sotto-salvadanai annidati: tutto torna al contenitore, il totale del contenitore non cambia
+{
+  const cs = (await r('POST', '/conti', A, { nome: 'Conto svuota' })).j;
+  await r('PUT', `/conti/${cs.id}/saldo`, A, { importo: '5000', momento: new Date(Date.now() - 3600_000).toISOString() });
+  const sP = (await r('POST', '/obiettivi', A, { nome: 'Svuota P', conto_id: cs.id })).j;
+  const sC = (await r('POST', '/obiettivi', A, { nome: 'Svuota C', padre_id: sP.id })).j;
+  const sG = (await r('POST', '/obiettivi', A, { nome: 'Svuota G', padre_id: sC.id })).j;
+  // Ogni versamento esce dal contenitore: 600 dal conto in P, 500 da P in C, 300 da C in G. Restano 100 in P, 200 in C, 300 in G.
+  await r('POST', `/obiettivi/${sP.id}/versamenti`, A, { importo: '600' });
+  await r('POST', `/obiettivi/${sC.id}/versamenti`, A, { importo: '500' });
+  await r('POST', `/obiettivi/${sG.id}/versamenti`, A, { importo: '300' });
+  const conto0 = (await r('GET', '/conti', A)).j.find((x) => x.id === cs.id);
+  verifica(conto0.saldo === '5000.00' && conto0.non_assegnato === '4400.00', 'svuota: partenza', conto0);
+  const nodo = (alb, id) => { for (const x of alb) { if (x.id === id) return x; const t = nodo(x.figli, id); if (t) return t; } };
+  // Svuota il sotto-salvadanaio di mezzo: lui e il suo figlio vanno nel superiore
+  const e1 = await r('POST', `/obiettivi/${sC.id}/svuota`, A);
+  verifica(e1.s === 201 && e1.j.saldo === '0.00' && e1.j.versato === '0.00' && e1.j.figli[0].saldo === '0.00', 'svuota: il sotto-salvadanaio e il suo figlio sono a zero', e1.j);
+  const alb1 = (await r('GET', '/obiettivi', A)).j;
+  verifica(nodo(alb1, sP.id).versato === '600.00' && nodo(alb1, sP.id).saldo === '600.00', 'svuota: i soldi sono nel superiore', nodo(alb1, sP.id));
+  // Svuota il salvadanaio in cima: tutto torna al conto
+  const e2 = await r('POST', `/obiettivi/${sP.id}/svuota`, A);
+  const alb2 = (await r('GET', '/obiettivi', A)).j;
+  verifica(e2.s === 201 && [sP, sC, sG].every((x) => nodo(alb2, x.id).saldo === '0.00'), 'svuota: tutto a zero a ogni livello', e2.j);
+  const conto1 = (await r('GET', '/conti', A)).j.find((x) => x.id === cs.id);
+  verifica(conto1.saldo === '5000.00' && conto1.non_assegnato === '5000.00', 'svuota: il totale del conto non cambia, il non assegnato cresce', conto1);
+  verifica((await r('POST', `/obiettivi/${sP.id}/svuota`, Bt)).s === 404, 'svuota: solo chi lo vede');
+  verifica((await r('POST', `/obiettivi/${cs.id}/svuota`, A)).s === 404, 'svuota: un conto non è un salvadanaio');
 }
 
 console.log(`prove: ${ok} passate, ${ko} fallite`);
