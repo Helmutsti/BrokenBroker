@@ -554,8 +554,8 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 // ---- CMP-31 Riga categoria ----
 // Larghezza delle colonne Budget e Uscite a telefono (l'intestazione in Categorie le riusa).
 export const LARGHEZZA_COLONNA_COMPATTA = 84;
-export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina, onBudget, budget, budgetAttivo = true }: {
-  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; onBudget?: () => void; budget?: string; budgetAttivo?: boolean; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
+export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina, onBudget, budget, budgetAttivo = true }: {
+  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; onBudget?: () => void; budget?: string; budgetAttivo?: boolean; previste: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
@@ -571,7 +571,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, perc
   return (
     <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
       onMouseEnter={() => setSopra(true)} onMouseLeave={() => setSopra(false)}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: compatto ? 0 : d['margine-voce-h'], borderRadius: d['raggio-controllo'],
+      style={{ flexDirection: 'row', flexWrap: compatto ? 'wrap' : 'nowrap', alignItems: 'center', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingHorizontal: compatto ? 0 : d['margine-voce-h'], borderRadius: d['raggio-controllo'],
         backgroundColor: !compatto && sopra ? c['sfondo-hover'] : 'transparent' }}>
       {livello > 0 ? <View style={{ width: (livello === 1 ? d['misura-rientro-albero'] : d['misura-rientro-albero-doppio']) / (compatto ? 2 : 1) }} /> : null}
       <View style={{ width: compatto ? 28 : d['misura-icona-media'], alignItems: 'center' }}>
@@ -581,13 +581,14 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, speso, perc
       <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
-        {compatto && percentuale !== undefined ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`${percentuale} dello stipendio`}</Testo> : null}
         {compatto ? <View style={{ alignSelf: 'flex-start' }}>{pulsanti}</View> : null}
       </View>
       <Col w={compatto ? LARGHEZZA_COLONNA_COMPATTA : 120} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
+      {compatto ? null : <Col w={120} destra><Testo stile="corpo-normale">{previste}</Testo></Col>}
       <Col w={compatto ? LARGHEZZA_COLONNA_COMPATTA : 120} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
       {!compatto && percentuale !== undefined ? <Col w={80} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
       {compatto ? null : pulsanti}
+      {compatto ? <Testo stile="dettaglio-normale" colore="testo-secondario" style={{ flexBasis: '100%', paddingLeft: 28 + d['spazio-icona'] }}>{`Previste ${previste}${percentuale && percentuale !== '—' ? ` · ${percentuale} dello stipendio` : ''}`}</Testo> : null}
     </View>
   );
 }

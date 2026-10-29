@@ -23,7 +23,7 @@ const ICONE = ['house', 'zap', 'trash-2', 'sofa', 'wrench', 'utensils', 'shoppin
 export function Categorie() {
   const compatto = useCompatto();
   const rif = useRiferimenti();
-  const spese = useDati<{ categoria_id: string; speso: string }[]>(`/categorie/spese?mese=${rif.mese}`).dati ?? [];
+  const spese = useDati<{ categoria_id: string; previste: string; uscite: string }[]>(`/categorie/spese?mese=${rif.mese}`).dati ?? [];
   const [tipo, setTipo] = useState<'uscita' | 'entrata'>('uscita');
   const [aperte, setAperte] = useState<Set<string>>(new Set());
   const [aperta, setAperta] = useState<Categoria | { padre: string | null } | null>(null);
@@ -32,8 +32,10 @@ export function Categorie() {
   const budgetDati = useDati<ElencoBudget>(`/budget?mese=${rif.mese}`).dati;
   const tutte = rif.categorie;
   const figli = (id: string | null) => tutte.filter((c) => c.padre_id === id && c.tipo === tipo).sort((a, b) => a.ordine - b.ordine || a.nome.localeCompare(b.nome));
-  const spesoDiretto = new Map(spese.map((s) => [s.categoria_id, Number(s.speso)]));
-  const speso = (id: string): number => (spesoDiretto.get(id) ?? 0) + tutte.filter((c) => c.padre_id === id).reduce((t, c) => t + speso(c.id), 0);
+  // Previste e uscite di una categoria comprendono le sue sottocategorie, come il budget (decisione 71).
+  const previsteDirette = new Map(spese.map((s) => [s.categoria_id, Number(s.previste)]));
+  const usciteDirette = new Map(spese.map((s) => [s.categoria_id, Number(s.uscite)]));
+  const somma = (diretti: Map<string, number>, id: string): number => (diretti.get(id) ?? 0) + tutte.filter((c) => c.padre_id === id).reduce((t, c) => t + somma(diretti, c.id), 0);
   // Peso sullo stipendio netto: manca o zero, niente percentuali.
   const stipendio = Number(rif.profilo?.stipendio_netto ?? 0);
   const radici = (t: 'uscita' | 'entrata') => tutte.filter((c) => !c.padre_id && c.tipo === t).length;
@@ -43,9 +45,10 @@ export function Categorie() {
     for (const c of figli(id)) {
       const sotto = tutte.filter((x) => x.padre_id === c.id);
       const ramo = sotto.length ? (aperte.has(c.id) ? 'aperto' : 'chiuso') : 'foglia';
-      const s = speso(c.id);
+      const pr = somma(previsteDirette, c.id);
+      const s = somma(usciteDirette, c.id);
       righe.push(<RigaCategoria key={c.id} livello={Math.min(livello, 2)} ramo={ramo} nome={c.nome} sottocategorie={sotto.length ? `${sotto.length} sottocategorie` : undefined}
-        speso={s ? euro(s) : '—'} percentuale={s && stipendio > 0 ? `${numero((s / stipendio) * 100, 1)}%` : '—'} icona={rif.iconaCategoria(c.id)} ereditata={!c.icona} colore={c.colore}
+        previste={pr ? euro(pr) : '—'} speso={s ? euro(s) : '—'} percentuale={s && stipendio > 0 ? `${numero((s / stipendio) * 100, 1)}%` : '—'} icona={rif.iconaCategoria(c.id)} ereditata={!c.icona} colore={c.colore}
         onApriChiudi={() => { const n = new Set(aperte); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); setAperte(n); }} onModifica={() => setAperta(c)}
         onNuovo={() => setAperta({ padre: c.id })} onElimina={() => setDaEliminare(c)}
         onBudget={c.tipo === 'uscita' ? () => setBudgetDi(c) : undefined} budget={c.budget ? euro(c.budget.importo) : undefined} budgetAttivo={c.budget?.attivo ?? true} />);
@@ -56,7 +59,7 @@ export function Categorie() {
 
   return (
     <>
-      <Intestazione titolo="Categorie" sottotitolo="Le categorie dividono le tue spese. Su una categoria di uscite puoi mettere un budget: un limite di spesa del mese."
+      <Intestazione titolo="Categorie" sottotitolo="Le categorie dividono le tue spese. Su una categoria di uscite puoi mettere un budget: un limite di spesa del mese, che conta anche le sue sottocategorie. Previste: spese e rate del mese; Uscite: quelle vere."
         azioni={<Pulsante tipo="primario" etichetta="Nuova categoria" icona="plus" onPress={() => setAperta({ padre: null })} />} />
       <SceltaSegmenti etichetta="Uscite o entrate" valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'uscita', testo: `Uscite · ${radici('uscita')}` }, { valore: 'entrata', testo: `Entrate · ${radici('entrata')}` }]} />
       <Esito tono="informazione" testo="Icona piena: scelta per la categoria. Icona chiara: presa dalla categoria padre. Icona e colore si scelgono con la matita." />
@@ -69,6 +72,7 @@ export function Categorie() {
           </View> : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>Budget</Testo>
+            <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Previste a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 120, textAlign: 'right' }}>{`Uscite a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: 80, textAlign: 'right' }}>% stipendio</Testo>
             <View style={{ width: 4 * ALTEZZA_CONTROLLO + 3 * d['spazio-testo'] }} />

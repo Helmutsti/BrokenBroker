@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { periodoRichiesto } from '../periodo.ts';
+import { SQL_USCITA } from '../transazioni.ts';
 import { leggiRate, scadenzaRata } from '../rate.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
@@ -56,22 +57,30 @@ rotteCategorie.get('/', async (req, res) => {
   res.json(req.query.formato === 'elenco' ? righe : albero(righe));
 });
 
-// Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie: le spese
-// previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no.
+// Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie (la somma sui rami la fa chi legge l'albero). Due numeri (decisione 71):
+//  - `previste`: le spese previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no;
+//  - `uscite`: le uscite vere del mese personale con quella categoria, scritte a mano o nate da una spunta (la stessa regola dello speso del budget).
 // Il budget (un limite di spesa) non è una spesa: non pesa qui.
-// La somma sui rami la fa chi legge l'albero.
 rotteCategorie.get('/spese', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
-    const per = new Map<string, number>();
+    const previste = new Map<string, number>();
     for (const s of await speseDelMese(db, p)) {
-      if (s.categoria_id && s.attiva && s.nel_mese && !s.a_conto_id) per.set(s.categoria_id, (per.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
+      if (s.categoria_id && s.attiva && s.nel_mese && !s.a_conto_id) previste.set(s.categoria_id, (previste.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
     }
     for (const r of await leggiRate(db)) {
       // Conta anche l'ultima rata già passata: vale per tutto il mese in cui scade.
-      if (r.categoria_id && scadenzaRata(r, p)) per.set(r.categoria_id, (per.get(r.categoria_id) ?? 0) + Number(r.importo_rata));
+      if (r.categoria_id && scadenzaRata(r, p)) previste.set(r.categoria_id, (previste.get(r.categoria_id) ?? 0) + Number(r.importo_rata));
     }
-    return [...per].map(([categoria_id, speso]) => ({ categoria_id, speso: speso.toFixed(2) }));
+    const uscite = new Map<string, number>();
+    const { rows } = await db.query<{ categoria_id: string; tot: string }>(
+      `select m.categoria_id, sum(m.importo)::text as tot from movimenti m
+        where ${SQL_USCITA} and m.categoria_id is not null and m.momento >= $1::date and m.momento < $2::date + 1
+        group by m.categoria_id`, [p.dal, p.al]);
+    for (const r of rows) uscite.set(r.categoria_id, Number(r.tot));
+    return [...new Set([...previste.keys(), ...uscite.keys()])].map((categoria_id) => ({
+      categoria_id, previste: (previste.get(categoria_id) ?? 0).toFixed(2), uscite: (uscite.get(categoria_id) ?? 0).toFixed(2),
+    }));
   });
   res.json(righe);
 });

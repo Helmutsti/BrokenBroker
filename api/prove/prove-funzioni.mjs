@@ -779,7 +779,7 @@ verifica(ctrl.rate_attive === 2 && ctrl.rata_mensile === '150.00', 'riepilogo ra
   verifica(!('giroconti_per_conto' in m2) && !('uscite_a_mano_per_conto' in m2), '/analisi/mese: niente giroconti né uscite a mano per conto', Object.keys(m2));
   verifica(m2.voci.budget === undefined && m2.budget_residuo === undefined, 'analisi: nessuna voce di budget nei totali del mese', m2.voci);
   const catS2 = (await r('GET', `/categorie/spese?mese=${meseA}`, A)).j;
-  verifica(!catS2.some((x) => x.categoria_id === catU.id && Number(x.speso) >= 500), '/categorie/spese: il tetto del budget non pesa sulla categoria', catS2);
+  verifica(!catS2.some((x) => x.categoria_id === catU.id && (Number(x.previste) >= 500 || Number(x.uscite) >= 500)), '/categorie/spese: il tetto del budget non pesa sulla categoria', catS2);
 }
 
 // ---- Movimenti a mano e conto eliminato (decisioni 53 e 59) ----

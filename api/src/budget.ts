@@ -36,7 +36,18 @@ export async function budgetDelMese(db: PoolClient, p: Periodo, soloId?: string)
       order by c.nome, b.id`, [soloId ?? null]);
   if (!rows.length) return [];
 
-  // Le uscite del mese: del budget (budget_id) o della sua categoria.
+  // Le categorie di ogni budget: la sua e tutte le sottocategorie, a qualsiasi livello (come l'Excel, dove «Casa» raccoglieva tutte le righe che la contenevano).
+  const figliDi = new Map<string, string[]>();
+  for (const k of (await db.query<{ id: string; padre_id: string | null }>('select id, padre_id from categorie')).rows) {
+    if (k.padre_id) figliDi.set(k.padre_id, [...(figliDi.get(k.padre_id) ?? []), k.id]);
+  }
+  const discendenti = (id: string): Set<string> => {
+    const out = new Set([id]);
+    for (const x of out) for (const f of figliDi.get(x) ?? []) out.add(f);
+    return out;
+  };
+
+  // Le uscite del mese: del budget (budget_id) o della sua categoria (o di una sua sottocategoria).
   const mov = (await db.query<Uscita & { categoria_id: string | null }>(
     `select m.id, m.budget_id, m.categoria_id, m.importo::text as importo, m.momento, m.momento::date as data, m.descrizione,
             m.da_conto_id as conto_id, c.nome as conto, u.nome as utente, (m.utente_id = fp_me() and m.spunta_id is null) as modificabile
@@ -45,7 +56,8 @@ export async function budgetDelMese(db: PoolClient, p: Periodo, soloId?: string)
       order by m.momento desc, m.id desc`, [p.dal, p.al])).rows;
 
   return rows.map((b) => {
-    const usciteBudget = mov.filter((m) => m.budget_id === b.id || m.categoria_id === b.categoria_id);
+    const categorie = discendenti(b.categoria_id);
+    const usciteBudget = mov.filter((m) => m.budget_id === b.id || (m.categoria_id !== null && categorie.has(m.categoria_id)));
     const perConto: Record<string, number> = {};
     for (const m of usciteBudget) { const k = m.conto_id ?? 'senza'; perConto[k] = (perConto[k] ?? 0) + Number(m.importo); }
     const speso = usciteBudget.reduce((t, m) => t + Number(m.importo), 0);

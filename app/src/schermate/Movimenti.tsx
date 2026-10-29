@@ -15,7 +15,7 @@ import { ConErrore, ErroreCampo, FinestraModulo, serve } from './moduli.tsx';
 // Movimenti (decisione 71): in alto i budget (limiti di spesa che si creano dalle Categorie, uno per categoria) con quanto si stanno riempiendo; sotto
 // la griglia di tutte le uscite del mese personale (data, note, conto, categoria, cifra). Gli spostamenti tra conti non si mostrano. «Nuova uscita»
 // scrive una spesa di tutti i giorni: il saldo del conto scende (decisioni 47 e 53). Le uscite scritte a mano si cambiano e si tolgono dalla griglia;
-// quelle nate da una spunta si cambiano togliendo la spunta. Lo speso di un budget sono tutte le uscite del mese con la sua categoria, anche
+// quelle nate da una spunta si cambiano togliendo la spunta. Lo speso di un budget sono tutte le uscite del mese con la sua categoria o una sua sottocategoria, anche
 // quelle nate da una spunta (i giroconti no); se si sfora si conta tutto lo stesso, in rosso, con di quanto si è sforato. Il budget si cambia dalle Categorie.
 
 const speso = (b: VoceBudget) => Number(b.speso ?? 0);
@@ -196,7 +196,9 @@ function FinestraUscita({ uscita, onChiudi }: { uscita: Movimento | 'nuova' | nu
     if (esistente) await modifica(`/movimenti/${esistente.id}`, { ...corpo, descrizione: note.trim() });
     else await crea('/movimenti', { ...corpo, descrizione: note.trim() || undefined });
   };
-  const conBudget = categoria ? rif.categoria(categoria)?.budget : null;
+  // Il budget di una categoria conta anche le sue sottocategorie: basta che ce l'abbia la categoria o una sua superiore.
+  let conBudget = false;
+  for (let k = categoria ? rif.categoria(categoria) : undefined; k && !conBudget; k = k.padre_id ? rif.categoria(k.padre_id) : undefined) conBudget = !!k.budget;
   return (
     <FinestraModulo titolo={esistente ? 'Modifica uscita' : 'Nuova uscita'} icona="arrow-up-right" aperta={!!uscita} onChiudi={onChiudi} onSalva={salva}
       onElimina={esistente ? async () => { await cancella(`/movimenti/${esistente.id}`); } : undefined}

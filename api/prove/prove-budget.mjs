@@ -1,4 +1,4 @@
-// Prove del budget semplice e dell'eliminazione dei conti (decisione 71).
+// Prove del budget semplice (e delle sottocategorie e delle colonne Previste e Uscite della pagina Categorie) e dell'eliminazione dei conti (decisione 71).
 // Uso: node api/prove/prove-budget.mjs [indirizzo]   (di base http://localhost:3000)
 // Serve l'API con REGISTRAZIONE_APERTA=si: crea un utente di prova nuovo e alla fine lo cancella con i suoi dati (con `docker compose exec db psql`).
 //  - il budget è un limite di spesa: conta tutte le uscite della categoria nel mese, a mano o da una spunta; tolta la spunta non conta più;
@@ -79,6 +79,40 @@ try {
   await r('POST', '/movimenti', A, { tipo: 'uscita', importo: '9', conto_id: principale.id, categoria_id: casa.id, descrizione: 'Altra categoria' });
   verifica((await budgetDi(bud.id)).speso === '450.00', 'uscita di un\'altra categoria: non conta');
 
+  // Il budget conta anche le sottocategorie (come l'Excel): uscite in figlia e nipote contano nel budget del padre; le uscite di una categoria
+  // accanto (o del padre, per il budget di una figlia) no. Le colonne Previste e Uscite di /categorie/spese sono dirette: la somma sui rami la fa l'app.
+  const svago = (await r('POST', '/categorie', A, { nome: 'Svago prova' })).j;
+  const cinema = (await r('POST', '/categorie', A, { nome: 'Cinema prova', padre_id: svago.id })).j;
+  const popcorn = (await r('POST', '/categorie', A, { nome: 'Popcorn prova', padre_id: cinema.id })).j;
+  const budSvago = (await r('POST', '/budget', A, { categoria_id: svago.id, importo: '100' })).j;
+  const budCinema = (await r('POST', '/budget', A, { categoria_id: cinema.id, importo: '40' })).j;
+  const uscita = (cat, importo) => r('POST', '/movimenti', A, { tipo: 'uscita', importo, conto_id: principale.id, categoria_id: cat, descrizione: 'Prova sotto' });
+  await uscita(svago.id, '10');
+  await uscita(cinema.id, '20');
+  await uscita(popcorn.id, '5');
+  await uscita(casa.id, '3');
+  const bs = await budgetDi(budSvago.id), bc = await budgetDi(budCinema.id);
+  verifica(bs.speso === '35.00' && bs.uscite.length === 3, 'il budget del padre conta le uscite di figlia e nipote (10 + 20 + 5)', bs);
+  verifica(bc.speso === '25.00' && bc.uscite.length === 2, 'il budget della figlia conta la figlia e il nipote, non il padre (20 + 5)', bc);
+  const spCat = (await r('GET', `/categorie/spese?mese=${mese}`, A)).j;
+  const riga = (id) => spCat.find((x) => x.categoria_id === id);
+  verifica(riga(svago.id)?.uscite === '10.00' && riga(cinema.id)?.uscite === '20.00' && riga(popcorn.id)?.uscite === '5.00', 'colonna Uscite: uscite vere di ogni categoria, senza le figlie', spCat);
+  // Una spesa prevista (non spuntata) pesa nelle Previste e non nelle Uscite; spuntata, pesa in entrambe.
+  const cine = await spesa({ nome: 'Abbonamento cinema', importo: '12', categoria_id: popcorn.id });
+  verifica(riga(popcorn.id)?.uscite === '5.00' && (await r('GET', `/categorie/spese?mese=${mese}`, A)).j.find((x) => x.categoria_id === popcorn.id).previste === '12.00', 'spesa non spuntata: solo nelle Previste', (await r('GET', `/categorie/spese?mese=${mese}`, A)).j);
+  await spunta(cine.id);
+  const dopoSp = (await r('GET', `/categorie/spese?mese=${mese}`, A)).j.find((x) => x.categoria_id === popcorn.id);
+  verifica(dopoSp.previste === '12.00' && dopoSp.uscite === '17.00', 'spesa spuntata: Previste 12 e Uscite 5 + 12', dopoSp);
+  verifica((await budgetDi(budSvago.id)).speso === '47.00', 'la spesa spuntata in una nipote conta nel budget del nonno', (await budgetDi(budSvago.id)).speso);
+  await togli(cine.id);
+  verifica((await budgetDi(budSvago.id)).speso === '35.00', 'tolta la spunta lo speso del padre scende');
+  for (const b of [budSvago, budCinema]) await r('DELETE', `/budget/${b.id}`, A);
+  await r('DELETE', `/spese-previste/${cine.id}`, A);
+  await r('DELETE', `/categorie/${svago.id}?sposta_su=${casa.id}`, A);
+  // le uscite di Casa tornano a quelle di prima per il conteggio che segue
+  const nCasaDopo = psql(`select count(*) from movimenti where categoria_id = '${casa.id}' and utente_id = (select id from utenti where email = '${email}')`);
+  const extra = Number(nCasaDopo) - 1;
+
   // /categorie dice quante uscite ha ogni categoria e il suo budget.
   const catCibo = (await r('GET', '/categorie?formato=elenco', A)).j.find((c) => c.id === cibo.id);
   verifica(catCibo.budget?.id === bud.id && catCibo.n_uscite === 2, 'la categoria dice il suo budget e le sue uscite', catCibo);
@@ -90,7 +124,7 @@ try {
   verifica((await r('DELETE', `/categorie/${cibo.id}`, A)).s === 409, 'una categoria con uscite si elimina solo scegliendo dove spostarle (409)');
   verifica((await r('DELETE', `/categorie/${cibo.id}?sposta_su=${casa.id}`, A)).s === 204, 'eliminata spostando su Casa');
   const nelleCasa = psql(`select count(*) from movimenti where categoria_id = '${casa.id}' and utente_id = (select id from utenti where email = '${email}')`);
-  verifica(nelleCasa === '4', 'le uscite di Cibo (2 a mano e 1 da spunta) sono passate a Casa, dove c era già 1', nelleCasa);
+  verifica(nelleCasa === String(4 + extra), 'le uscite di Cibo (2 a mano e 1 da spunta) sono passate a Casa, dove c era già 1 (più quelle spostate dalla prova sulle sottocategorie)', nelleCasa);
   await togli(abbonamento.id);
 
   // Un conto con spese (o rate) non si elimina; senza, sì.
