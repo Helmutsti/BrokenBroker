@@ -3,9 +3,10 @@ import { createPortal } from 'react-dom';
 import { Pressable, View } from 'react-native';
 import { Icona } from '../componenti/Icona.tsx';
 import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
-import { Campo, CampoData, Tendina } from '../componenti/campi.tsx';
+import { Campo, CampoData, MenuScelta, Tendina } from '../componenti/campi.tsx';
 import { Foglio, Intestazione, NumeroChiave, Scheda, SelettorePeriodo, TitoloCategoria, TitoloGruppo, VoceDaSpuntare, Vuoto } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
+import { leggiScelta, salvaScelta } from '../dati/preferenze';
 import { opzioniConti, useRiferimenti } from '../dati/contesto.tsx';
 import type { Conto, ElencoSpese, Rata, RiepilogoMese, Spesa } from '../dati/tipi.ts';
 import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
@@ -17,12 +18,16 @@ import { FinestraSpesa } from './FinestraSpesa.tsx';
 import { Affiancati, FinestraModulo, Meta, serve, Voce } from './moduli.tsx';
 import { useCompatto } from '../tema/compatto.ts';
 
-// Spese (decisione 71, pagina iniziale): il foglio Spese dell'Excel in una pagina. In alto i conti con il saldo (si riscrive con un tocco) e,
-// per ognuno e in totale, quanto deve ancora uscire e l'avanzo. Sotto, le voci del mese raggruppate per conto di partenza, così si legge il
+// Spese (decisione 71, pagina iniziale): il foglio Spese dell'Excel in una pagina. In alto la carta del conto, che è anche la tendina per scegliere
+// quale conto guardare (o «Tutti i conti»): il saldo si riscrive con un tocco; accanto, per il conto scelto, uscite totali, quanto deve ancora uscire
+// e l'avanzo. La scelta filtra tutta la pagina e l'app ricorda l'ultimo conto scelto. Sotto, le voci del mese raggruppate per conto di partenza, così si legge il
 // percorso dei soldi: entrano in un conto (saldo scritto a mano), un giroconto li porta in un altro conto, da lì esce la spesa.
 // Ogni voce è un'uscita (da un conto, con categoria) o un giroconto (da un conto a un altro, senza categoria). Spuntarla sposta davvero i
 // soldi (la tua quota): il saldo scende, o passa dal conto di partenza a quello di arrivo; togliendo la spunta i soldi tornano com'erano.
 // Le annuali (nel loro mese, per intero) e le rate sono in riquadri a parte.
+let ultimoConto: string | null = null;
+const TUTTI = 'tutti';
+
 export function Spese() {
   const rif = useRiferimenti();
   const { mese, setMese } = rif;
@@ -37,6 +42,10 @@ export function Spese() {
   const [raggruppa, setRaggruppa] = useState<'conto' | 'categoria'>('conto');
   const [ordina, setOrdina] = useState<'scadenza' | 'nome'>('scadenza');
   const [vista, setVista] = useState(false);
+  // Il conto che si guarda (o TUTTI): l'ultimo scelto, ricordato anche dopo aver chiuso l'app.
+  const [contoId, setContoId] = useState<string>(ultimoConto ?? TUTTI);
+  useEffect(() => { leggiScelta('spese.conto').then((v) => { if (v && !ultimoConto) { ultimoConto = v; setContoId(v); } }); }, []);
+  const scegliConto = (v: string) => { ultimoConto = v; setContoId(v); salvaScelta('spese.conto', v); };
 
   // I numeri in alto: quando escono dallo schermo scorrendo, i totali si ripresentano piccoli in alto a destra.
   const { c } = useTema();
@@ -60,7 +69,6 @@ export function Spese() {
   const giorno = (s: Spesa) => (s.scadenza && !mensileSenzaGiorno(s) ? (s.senza_giorno ? nomeMeseMinuscolo(s.scadenza.slice(0, 7)) : `il ${Number(s.scadenza.slice(8, 10))}`) : null);
   const { delConto: tutteDelMese } = vociDelMese(el, perUscita);
   const rateMese = rateDelMese(rate, p.dal, p.al);
-  const nonAttive = el.spese.filter((s) => !s.attiva);
 
   const conti = rif.conti.filter((k) => !k.archiviato).sort((a, b) => a.nome.localeCompare(b.nome, 'it'));
   // Quanto si muove spuntando: sempre la mia quota (decisione 71).
@@ -70,24 +78,31 @@ export function Spese() {
   const arrivaA = (id: string) => (s: Spesa) => s.a_conto_id === id;
   const somma = (xs: Spesa[]) => xs.reduce((t, s) => t + quota(s), 0);
   const sommaRate = (xs: typeof rateMese) => xs.reduce((t, x) => t + Number(x.r.importo_rata), 0);
-  // Per conto: ancora da uscire (spese e rate non spuntate, giroconti verso altri conti compresi), in arrivo (giroconti da altri conti non
-  // spuntati) e avanzo = saldo − devono uscire + in arrivo.
-  const delConto = (id: string) => {
-    const saldo = rif.conto(id)?.saldo;
-    const daSpuntare = tutteDelMese.filter((s) => esceDa(id)(s) && !s.uscita);
-    const ratePerConto = rateMese.filter((x) => x.r.conto_id === id && !x.r.pagata);
-    const devono = somma(daSpuntare) + sommaRate(ratePerConto);
-    const inArrivo = somma(tutteDelMese.filter((s) => arrivaA(id)(s) && !s.uscita));
-    return { saldo: saldo == null ? null : Number(saldo), devono, quante: daSpuntare.length + ratePerConto.length, inArrivo, avanzo: saldo == null ? null : Number(saldo) - devono + inArrivo };
-  };
-  // In totale i giroconti si annullano (escono da un conto ed entrano in un altro): contano solo i soldi che escono davvero.
+  // Il conto scelto (se non esiste più o è archiviato: Tutti i conti).
+  const sel = conti.find((k) => k.id === contoId) ?? null;
+  // I numeri di un conto (id) o di tutti (null): uscite totali (spuntate o no), devono ancora uscire (spese e rate non spuntate, giroconti verso altri
+  // conti compresi), in arrivo (giroconti da altri conti non spuntati) e avanzo = saldo − devono uscire + in arrivo.
+  // In totale i giroconti si annullano (escono da un conto ed entrano in un altro): contano solo i soldi che escono davvero (anche senza conto).
   const saldi = conti.map((k) => k.saldo).filter((x): x is string => x != null).map(Number);
   const saldoTotale = saldi.length ? saldi.reduce((t, x) => t + x, 0) : null;
-  const usciteDaFare = tutteDelMese.filter((s) => !s.a_conto_id && !s.uscita);
-  const rateDaFare = rateMese.filter((x) => !x.r.pagata);
-  const devonoTotale = somma(usciteDaFare) + sommaRate(rateDaFare);
-  const quanteTotale = usciteDaFare.length + rateDaFare.length;
-  const avanzoTotale = saldoTotale === null ? null : saldoTotale - devonoTotale;
+  const numeri = (id: string | null) => {
+    const voci = tutteDelMese.filter(id === null ? (s) => !s.a_conto_id : esceDa(id));
+    const rt = id === null ? rateMese : rateMese.filter((x) => x.r.conto_id === id);
+    const daSpuntare = voci.filter((s) => !s.uscita), ratePerConto = rt.filter((x) => !x.r.pagata);
+    const devono = somma(daSpuntare) + sommaRate(ratePerConto);
+    const inArrivo = id === null ? 0 : somma(tutteDelMese.filter((s) => arrivaA(id)(s) && !s.uscita));
+    const saldoConto = id === null ? saldoTotale : rif.conto(id)?.saldo == null ? null : Number(rif.conto(id)!.saldo);
+    return { saldo: saldoConto, devono, quante: daSpuntare.length + ratePerConto.length, inArrivo, uscite: somma(voci) + sommaRate(rt), quanteUscite: voci.length + rt.length,
+      avanzo: saldoConto === null ? null : saldoConto - devono + inArrivo };
+  };
+  const nu = numeri(sel?.id ?? null);
+  const avanzoTotale = nu.avanzo, devonoTotale = nu.devono;
+  // Il filtro della pagina: del conto scelto contano le voci che partono da lui e i giroconti che arrivano su di lui (segnati «in arrivo»).
+  const inFiltro = (s: Spesa) => !sel || esceDa(sel.id)(s) || arrivaA(sel.id)(s);
+  const inArrivoQui = (s: Spesa) => !!sel && arrivaA(sel.id)(s) && !esceDa(sel.id)(s);
+  const rateViste = sel ? rateMese.filter((x) => x.r.conto_id === sel.id) : rateMese;
+  const speseViste = el.spese.filter(inFiltro);
+  const nonAttive = speseViste.filter((s) => !s.attiva);
 
   const spunta = async (s: Spesa) => {
     setErrore(null);
@@ -103,24 +118,24 @@ export function Spese() {
       else await crea(`/rate/${x.id}/spunta`, { mese });
     } catch (e) { setErrore((e as Error).message); }
   };
-  const voce = (s: Spesa, perConto: boolean) => (
+  const voce = (s: Spesa, perConto: boolean, arrivo = false) => (
     <VoceDaSpuntare key={s.id} nome={s.nome} conto={[giorno(s), perConto ? (s.a_conto_id ? `verso ${s.a_conto ?? 'un altro conto'}` : null) : daA(s)].filter(Boolean).join(' · ') || '—'}
-      importo={euro(s.mia_quota)} sottoImporto={[s.a_conto_id ? 'giroconto' : null, s.ogni_mesi === null ? 'una volta sola' : null].filter(Boolean).join(' · ') || undefined}
+      importo={euro(s.mia_quota)} sottoImporto={[s.a_conto_id ? 'giroconto' : null, arrivo ? 'in arrivo' : null, s.ogni_mesi === null ? 'una volta sola' : null].filter(Boolean).join(' · ') || undefined}
       icona={s.a_conto_id ? 'arrow-left-right' : s.icona ?? 'ellipsis'} fatta={s.uscita}
       onSpunta={() => spunta(s)} onApri={() => setSpesa(s)} />
   );
 
   // Le voci del mese (le annuali hanno il loro riquadro): un elenco solo, poi raggruppato per conto di partenza o per categoria.
-  type Riga = { chiave: string; nome: string; scadenza: string | null; conto: string; categoria: string | null; importo: number; vista: (perConto: boolean) => ReactNode };
-  const righe: Riga[] = tutteDelMese.filter((s) => !eAnnuale(s))
-    .map((s) => ({ chiave: s.id, nome: s.nome, scadenza: s.scadenza, conto: s.conto_id ?? '', categoria: s.categoria_id, importo: quota(s), vista: (pc: boolean) => voce(s, pc) }));
+  type Riga = { arrivo: boolean; chiave: string; nome: string; scadenza: string | null; conto: string; categoria: string | null; importo: number; vista: (perConto: boolean) => ReactNode };
+  const righe: Riga[] = tutteDelMese.filter((s) => !eAnnuale(s) && inFiltro(s))
+    .map((s) => ({ arrivo: inArrivoQui(s), chiave: s.id, nome: s.nome, scadenza: s.scadenza, conto: s.conto_id ?? '', categoria: s.categoria_id, importo: quota(s), vista: (pc: boolean) => voce(s, pc, inArrivoQui(s)) }));
   righe.sort(ordina === 'scadenza' ? (a, b) => (a.scadenza ?? '9999').localeCompare(b.scadenza ?? '9999') || a.nome.localeCompare(b.nome, 'it') : (a, b) => a.nome.localeCompare(b.nome, 'it'));
   const radiceCategoria = (id: string | null) => { let k = rif.categoria(id); while (k?.padre_id) k = rif.categoria(k.padre_id); return k ?? null; };
   const nelMese = (importo: number) => `${euro(importo)} nel mese`;
   const gruppi: { chiave: string; righe: Riga[]; titolo: ReactNode }[] = raggruppa === 'conto'
     ? [...new Set([...conti.map((k) => k.id), ...righe.map((x) => x.conto)])].map((id) => {
       const dentro = righe.filter((x) => x.conto === id);
-      return { chiave: id || 'senza', righe: dentro, titolo: <TitoloGruppo key={id || 'senza'} testo={id ? rif.conto(id)?.nome ?? 'Conto' : 'Senza conto'} destra={nelMese(dentro.reduce((t, x) => t + x.importo, 0))} /> };
+      return { chiave: id || 'senza', righe: dentro, titolo: <TitoloGruppo key={id || 'senza'} testo={id ? rif.conto(id)?.nome ?? 'Conto' : 'Senza conto'} destra={dentro.every((x) => x.arrivo) ? undefined : nelMese(dentro.filter((x) => !x.arrivo).reduce((t, x) => t + x.importo, 0))} /> };
     })
     : [...new Map(righe.map((x) => [radiceCategoria(x.categoria)?.id ?? '', radiceCategoria(x.categoria)])).entries()]
       .sort(([, a], [, b]) => (a ? 0 : 1) - (b ? 0 : 1) || (a?.nome ?? '').localeCompare(b?.nome ?? '', 'it'))
@@ -153,39 +168,66 @@ export function Spese() {
         </View>
       </Scheda>
     ) }));
-  if (rateMese.length) blocchi.push({ chiave: 'rate', peso: rateMese.length + 2, vista: (
+  if (rateViste.length) blocchi.push({ chiave: 'rate', peso: rateViste.length + 2, vista: (
     <Scheda>
       <View style={{ gap: d['spazio-elenco'] }}>
         <TitoloGruppo testo="Rate" destra={`manca ${euro(manca)} alla fine`} />
-        {rateMese.map(({ r: x, quando: q }) => (
+        {rateViste.map(({ r: x, quando: q }) => (
           <VoceDaSpuntare key={x.id} nome={x.oggetto} conto={[`il ${Number(q!.slice(8, 10))}`, x.finanziaria, rif.conto(x.conto_id)?.nome].filter(Boolean).join(' · ')}
             importo={euro(x.importo_rata)} sottoImporto={`${x.pagate} di ${x.numero_rate}`} icona="credit-card" fatta={!!x.pagata} onSpunta={() => spuntaRata(x)} onApri={() => setRata(x)} />
         ))}
       </View>
     </Scheda>) });
-  const quanteAnnuali = el.spese.filter(eAnnuale).length;
+  const quanteAnnuali = speseViste.filter(eAnnuale).length;
   if (quanteAnnuali) blocchi.push({ chiave: 'annuali', peso: quanteAnnuali + 2,
-    vista: <AnnualiInRotazione spese={el.spese} inizio={inizio} dal={p.dal} al={p.al} onSpunta={spunta} onApri={setSpesa} /> });
+    vista: <AnnualiInRotazione spese={speseViste} inizio={inizio} dal={p.dal} al={p.al} onSpunta={spunta} onApri={setSpesa} /> });
   const colonne: (typeof blocchi)[] = [[], []];
   const pesi = [0, 0];
   for (const b of blocchi) { const k = pesi[0] <= pesi[1] ? 0 : 1; colonne[k].push(b); pesi[k] += b.peso; }
 
-  const tonoAvanzo = (a: number | null) => (a !== null && a < 0 ? 'errore' : 'normale') as 'errore' | 'normale';
-  const cartaConto = (k: Conto) => {
-    const x = delConto(k.id);
-    return (
-      <View key={k.id} style={{ flexGrow: 1, flexBasis: compatto ? '100%' : 220, minWidth: compatto ? 0 : 210 }}>
-        <NumeroChiave etichetta={k.nome} valore={x.saldo === null ? 'Scrivilo' : euro(x.saldo)} icona={k.icona} tono={tonoAvanzo(x.avanzo)}
-          onPress={() => setSaldoDi(k)} etichettaPressione={`Riscrivi il saldo di ${k.nome}`}
-          nota={x.saldo === null ? 'Il saldo come lo vedi in banca · tocca per scriverlo' : 'Tocca per riscrivere il saldo'}
-          dettagli={[
-            { testo: `Devono ancora uscire ${euro(x.devono)}${x.quante ? ` · ${x.quante} ${x.quante === 1 ? 'voce' : 'voci'}` : ''}` },
-            ...(x.inArrivo > 0.005 ? [{ testo: `In arrivo da altri conti ${euro(x.inArrivo)}` }] : []),
-            { testo: x.avanzo === null ? 'Avanzo: scrivi il saldo' : `Avanzo ${euro(x.avanzo, { segno: true })}`, rosso: x.avanzo !== null && x.avanzo < 0 },
-          ]} />
-      </View>
-    );
-  };
+  // Carta del conto + tre riquadri, per il conto scelto. La carta è anche la tendina per sceglierlo.
+  const voci = (n: number) => `${n} ${n === 1 ? 'voce' : 'voci'}`;
+  const nome = sel?.nome ?? 'Tutti i conti';
+  const luogo = sel ? 'sul conto' : 'sui conti';
+  const cella = (pieno: boolean, figlio: ReactNode) => (
+    <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, flexBasis: compatto ? (pieno ? '100%' : '45%') : 0 }}>{figlio}</View>
+  );
+  const quattro = (
+    <>
+      {cella(true, (
+        <NumeroChiave etichetta={nome} valore={nu.saldo === null ? (sel ? 'Scrivilo' : '—') : euro(nu.saldo)} icona={sel?.icona ?? 'wallet'} tono={nu.saldo !== null && nu.saldo < 0 ? 'errore' : 'normale'}
+          onPress={sel ? () => setSaldoDi(sel) : undefined} etichettaPressione={sel ? `Riscrivi il saldo di ${sel.nome}` : undefined}
+          titolo={(
+            <MenuScelta valore={sel?.id ?? TUTTI} onCambia={scegliConto} larghezzaMinima={240}
+              opzioni={[{ valore: TUTTI, testo: 'Tutti i conti', icona: 'wallet' }, ...conti.map((k) => ({ valore: k.id, testo: k.nome, icona: k.icona }))]}>
+              {({ ref, apri, aperto }) => (
+                <Pressable ref={ref} accessibilityRole="button" accessibilityLabel={`Scegli il conto: ${nome}`} aria-expanded={aperto} onPress={apri}
+                  style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'], minHeight: compatto ? 44 : undefined }}>
+                  <Testo stile={compatto ? 'corpo-forte' : 'titolo-scheda'} colore="testo-secondario" style={{ flexShrink: 1, minWidth: 0 }}>{nome}</Testo>
+                  <Icona nome="chevron-down" misura={16} />
+                </Pressable>
+              )}
+            </MenuScelta>
+          )}
+          nota={sel ? (nu.saldo === null ? 'Il saldo come lo vedi in banca · tocca per scriverlo' : 'Tocca per riscrivere il saldo') : `${conti.length} ${conti.length === 1 ? 'conto' : 'conti'}, i giroconti si annullano`} />
+      ))}
+      {cella(false, (
+        <NumeroChiave etichetta="Uscite totali" valore={euro(nu.uscite)} icona="list-checks"
+          nota={nu.quanteUscite ? `${voci(nu.quanteUscite)} ${sel ? 'del conto' : 'in uscita'} nel mese, spuntate o no` : sel ? 'Nessuna voce del conto nel mese' : 'Nessuna voce nel mese'} />
+      ))}
+      {cella(false, (
+        <NumeroChiave etichetta="Devono ancora uscire" valore={euro(nu.devono)} icona="arrow-up-right"
+          nota={nu.quante ? `${voci(nu.quante)} da spuntare` : 'Tutto spuntato'} />
+      ))}
+      {cella(false, (
+        <NumeroChiave etichetta="Avanzo" valore={nu.avanzo === null ? '—' : euro(nu.avanzo, { segno: true })} icona="scale"
+          tono={nu.avanzo === null ? 'normale' : nu.avanzo < 0 ? 'errore' : nu.avanzo < 0.005 ? 'attenzione' : 'ok'}
+          nota={nu.avanzo === null ? (sel ? 'Scrivi il saldo del conto' : 'Scrivi i saldi dei conti')
+            : nu.avanzo < 0 ? `${sel ? 'Sul conto' : 'Sui conti'} mancano ${euro(-nu.avanzo)} per sostenere le spese`
+              : nu.inArrivo > 0.005 ? `${sel ? 'Sul conto' : 'Sui conti'} meno quello che deve uscire, più ${euro(nu.inArrivo)} in arrivo da altri conti` : `${sel ? 'Sul conto' : 'Sui conti'} meno quello che deve ancora uscire`} />
+      ))}
+    </>
+  );
 
   return (
     <>
@@ -196,16 +238,8 @@ export function Spese() {
         <SelettorePeriodo mese={mese} meseOggi={rif.meseOggi} onCambia={setMese} />
       </View>
       {conti.length ? (
-        <View ref={cifre as never} style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'stretch', gap: compatto ? d['spazio-colonne'] : d['spazio-blocco'] }}>
-          <View style={{ flexGrow: 1, flexBasis: compatto ? '100%' : 220, minWidth: compatto ? 0 : 210 }}>
-            <NumeroChiave etichetta="Tutti i conti" valore={saldoTotale === null ? '—' : euro(saldoTotale)} icona="wallet" tono={tonoAvanzo(avanzoTotale)}
-              nota={`${conti.length} ${conti.length === 1 ? 'conto' : 'conti'}, i giroconti si annullano`}
-              dettagli={[
-                { testo: `Devono ancora uscire ${euro(devonoTotale)}${quanteTotale ? ` · ${quanteTotale} ${quanteTotale === 1 ? 'voce' : 'voci'}` : ''}` },
-                { testo: avanzoTotale === null ? 'Avanzo: scrivi i saldi' : `Avanzo ${euro(avanzoTotale, { segno: true })}`, rosso: avanzoTotale !== null && avanzoTotale < 0 },
-              ]} />
-          </View>
-          {conti.map(cartaConto)}
+        <View ref={cifre as never} style={{ flexDirection: 'row', flexWrap: compatto ? 'wrap' : 'nowrap', alignItems: 'stretch', gap: compatto ? d['spazio-colonne'] : d['spazio-blocco'] }}>
+          {quattro}
         </View>
       ) : (
         <Scheda>
@@ -218,7 +252,7 @@ export function Spese() {
           // si stacca dalla pagina mentre si scorre, in tutti e due i temi, senza mai un blocco bianco.
           backgroundColor: c['sfondo-scheda'], borderRadius: compatto ? 0 : d['raggio-scheda'], borderWidth: 2, borderColor: c['testo-terziario'],
           boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as never}>
-          {([['Sui conti', saldoTotale === null ? '—' : euro(saldoTotale), 'testo-primario'], ['Devono uscire', euro(devonoTotale), 'testo-primario'],
+          {([[sel ? 'Sul conto' : 'Sui conti', nu.saldo === null ? '—' : euro(nu.saldo), 'testo-primario'], ['Devono uscire', euro(devonoTotale), 'testo-primario'],
             ['Avanzo', avanzoTotale === null ? '—' : euro(avanzoTotale, { segno: true }), avanzoTotale === null ? 'testo-primario' : avanzoTotale < 0 ? 'testo-errore' : avanzoTotale < 0.005 ? 'testo-attenzione' : 'testo-ok']] as const).map(([et, val, col]) => (
             <View key={et} style={{ minWidth: 0, flexShrink: 1 }}>
               <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1} style={compatto ? { fontSize: 11, lineHeight: 14 } : undefined}>{compatto ? et.replace('Devono uscire', 'Da uscire') : et}</Testo>
@@ -256,7 +290,7 @@ export function Spese() {
             backgroundColor: c['sfondo-accento'], boxShadow: `0 ${ombre.comparsa.offsetY}px ${ombre.comparsa.blur}px ${ombre.comparsa.colore}` } as never}>
           <Icona nome="plus" misura={24} colore="icona-su-accento" />
         </Pressable>, document.body) : null}
-      {!righe.length && !rateMese.length && !quanteAnnuali ? <Vuoto testo="Nessuna spesa in questo mese. Aggiungi affitto, bollette e abbonamenti." /> : null}
+      {!righe.length && !rateViste.length && !quanteAnnuali ? <Vuoto testo={sel ? 'Nessuna voce per questo conto in questo mese. Scegli «Tutti i conti» per vedere le altre.' : 'Nessuna spesa in questo mese. Aggiungi affitto, bollette e abbonamenti.'} /> : null}
       {/* Un box per gruppo, in due colonne equilibrate (con un box solo, una colonna a tutta larghezza). */}
       <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-start', gap: d['spazio-blocco'] }}>
         {colonne.filter((col) => col.length).map((col, i) => (
@@ -288,10 +322,11 @@ function AnnualiInRotazione({ spese, inizio, dal, al, onSpunta, onApri }: { spes
     .filter((x): x is { s: Spesa; prossima: string } => !!x.prossima)
     .sort((a, b) => a.prossima.localeCompare(b.prossima) || a.s.nome.localeCompare(b.s.nome));
   if (!annuali.length) return null;
+  const allAnno = annuali.reduce((t, x) => t + (Number(x.s.mia_quota) * 12) / x.s.ogni_mesi!, 0);
   return (
     <Scheda>
       <View style={{ gap: d['spazio-elenco'] }}>
-        <TitoloGruppo testo="Annuali" destra={`${euro(annuali.reduce((t, x) => t + (Number(x.s.mia_quota) * 12) / x.s.ogni_mesi!, 0))} all'anno`} />
+        <TitoloGruppo testo="Annuali" destra={`${euro(allAnno)} all'anno · ${euro(allAnno / 12)} al mese`} />
         {annuali.map(({ s, prossima }) => (
           <VoceDaSpuntare key={s.id} nome={s.nome} conto={[quando(s, inizio), daA(s)].filter(Boolean).join(' · ')} importo={euro(s.mia_quota)}
             sottoImporto={[s.nel_mese ? 'questo mese' : fraMesi(prossima, inizio), s.a_conto_id ? 'giroconto' : null].filter(Boolean).join(' · ')} fatta={s.nel_mese && s.uscita}

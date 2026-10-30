@@ -58,7 +58,8 @@ rotteCategorie.get('/', async (req, res) => {
 });
 
 // Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie (la somma sui rami la fa chi legge l'albero). Due numeri (decisione 71):
-//  - `previste`: le spese previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no;
+//  - `previste`: le spese previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no. Le spese che si ripetono
+//    ogni più mesi (annuali comprese) contano ogni mese con importo / N; quelle una volta sola solo nel mese in cui cadono;
 //  - `uscite`: le uscite vere del mese personale con quella categoria, scritte a mano o nate da una spunta (la stessa regola dello speso del budget).
 // Il budget (un limite di spesa) non è una spesa: non pesa qui.
 rotteCategorie.get('/spese', async (req, res) => {
@@ -66,7 +67,16 @@ rotteCategorie.get('/spese', async (req, res) => {
     const p = await periodoRichiesto(db, req.query.mese);
     const previste = new Map<string, number>();
     for (const s of await speseDelMese(db, p)) {
-      if (s.categoria_id && s.attiva && s.nel_mese && !s.a_conto_id) previste.set(s.categoria_id, (previste.get(s.categoria_id) ?? 0) + Number(s.mia_quota));
+      if (!s.categoria_id || !s.attiva || s.a_conto_id) continue;
+      let quota: number;
+      if (s.ogni_mesi !== null && s.ogni_mesi > 1) {
+        // Spesa che si ripete ogni N mesi: conta ogni mese con 1/N della quota. La data salvata è solo la prossima uscita, non un inizio.
+        quota = Math.round(Number(s.importo) * s.mia_percentuale / s.ogni_mesi) / 100;
+      } else {
+        if (!s.nel_mese) continue;
+        quota = Number(s.mia_quota);
+      }
+      previste.set(s.categoria_id, (previste.get(s.categoria_id) ?? 0) + quota);
     }
     for (const r of await leggiRate(db)) {
       // Conta anche l'ultima rata già passata: vale per tutto il mese in cui scade.
@@ -134,7 +144,7 @@ rotteCategorie.delete('/:id', async (req, res) => {
   await conUtente(res.locals.utenteId, async (db) => {
     const esiste = await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id]);
     if (!esiste.rowCount) throw nonTrovato('Categoria');
-    if ((await db.query('select 1 from budget where categoria_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Questa categoria ha un budget: eliminalo prima dalla sua riga nella pagina Categorie');
+    if ((await db.query('select 1 from budget where categoria_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Questa categoria ha un budget: toglilo prima dalla finestra di modifica della categoria, svuotando la cifra del budget');
 
     if (destinazione) {
       if (destinazione === id) throw new ErroreApi(400, 'La categoria di destinazione deve essere diversa');

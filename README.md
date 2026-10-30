@@ -6,7 +6,7 @@ Oggi c'è la versione per **computer** (pagina web). La versione per iPhone usa 
 
 ## Cosa fa
 
-- **Spese** (pagina iniziale): i conti con il saldo (si riscrive con un tocco), per ognuno e in totale quanto deve ancora uscire e l'avanzo; sotto le spese del mese raggruppate per conto di partenza. Ogni spesa è un'uscita o un giroconto: spuntarla sposta davvero i soldi (la tua quota), togliendo la spunta tornano indietro.
+- **Spese** (pagina iniziale): si guarda un conto alla volta (o «Tutti i conti»): la carta in alto è anche la tendina per sceglierlo e mostra il saldo, che si riscrive con un tocco; accanto, uscite totali, quanto deve ancora uscire e l'avanzo. La scelta filtra tutta la pagina (voci, rate e annuali) e l'app ricorda l'ultimo conto scelto. Le spese del mese sono raggruppate per conto di partenza. Ogni spesa è un'uscita o un giroconto: spuntarla sposta davvero i soldi (la tua quota), togliendo la spunta tornano indietro.
 - **Spese previste** ogni mese, ogni N mesi o una volta sola, divise a metà o con altre quote con l'altra persona.
 - **Salvadanai**: «ceste» dentro i conti (una parte del saldo di un conto), annidabili, con traguardo e traguardi di copertura; i soldi li sposti tu dai liberi del conto alle ceste e viceversa. Una cesta può essere collegata a una spesa (es. l'assicurazione): dice quanto manca e quanto mettere al mese, e scende quando spunti la spesa.
 - **Movimenti**: i budget (limiti di spesa creati dalle Categorie) con quanto si riempiono e la griglia delle uscite del mese, con «Nuova uscita». **Conti** come etichette, **investimenti** con prezzo medio di carico, **categorie** con icone.

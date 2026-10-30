@@ -553,27 +553,25 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 
 // ---- CMP-31 Riga categoria ----
 // Misure delle colonne su computer: strette, così il nome ha lo spazio (la pagina Categorie le usa anche per l'intestazione).
-export const LARGHEZZE_CATEGORIA = { budget: 96, previste: 96, uscite: 96, percentuale: 64 };
+export const LARGHEZZE_CATEGORIA = { budget: 136, previste: 136, uscite: 136 };
 export const LATO_AZIONI_CATEGORIA = 32;
-export const LARGHEZZA_AZIONI_CATEGORIA = 4 * LATO_AZIONI_CATEGORIA + 3 * 2;
-export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, percentuale, icona, ereditata, colore, onApriChiudi, onModifica, onNuovo, onElimina, onBudget, budget, budgetAttivo = true }: {
-  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; onBudget?: () => void; budget?: string; budgetAttivo?: boolean; previste: string; speso: string; percentuale?: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void; onNuovo?: () => void; onElimina?: () => void;
+export const LARGHEZZA_AZIONI_CATEGORIA = LATO_AZIONI_CATEGORIA;
+// Le cifre di budget, previste e uscite arrivano già scritte con la percentuale sullo stipendio tra parentesi, es. «200,00 € (8,5%)».
+export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, icona, ereditata, colore, onApriChiudi, onModifica, budget, budgetAttivo = true }: {
+  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; budget?: string; budgetAttivo?: boolean; previste: string; speso: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const [sopra, setSopra] = useState(false);
   const pulsanti = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: compatto ? d['spazio-testo'] : 2, flexShrink: 0 }}>
-      {onBudget ? <PulsanteIcona icona="chart-column" etichetta={budget ? `Budget di ${nome}: ${budget}` : `Crea il budget di ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onBudget} /> : null}
-      {onNuovo ? <PulsanteIcona icona="plus" etichetta={`Nuova sottocategoria di ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onNuovo} /> : null}
+    <View style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 0 }}>
       <PulsanteIcona icona="pencil" etichetta={`Modifica ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onModifica} />
-      {onElimina ? <PulsanteIcona icona="trash-2" etichetta={`Elimina ${nome}`} lato={compatto ? undefined : LATO_AZIONI_CATEGORIA} onPress={onElimina} /> : null}
     </View>
   );
   if (compatto) {
-    // Telefono: il nome ha tutta la larghezza che resta; sotto vengono le cifre e i pulsanti. Rientro piccolo per livello.
+    // Telefono: il nome ha tutta la larghezza che resta; sotto vengono le cifre e la matita. Rientro piccolo per livello.
     const cifre = `Budget ${budget ?? '—'} · Uscite ${speso}`;
-    const cifre2 = `Previste ${previste}${percentuale && percentuale !== '—' ? ` · ${percentuale} dello stipendio` : ''}`;
+    const cifre2 = `Previste ${previste}`;
     return (
       <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
         style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingLeft: livello * 12 }}>
@@ -607,7 +605,6 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
       <Col w={LARGHEZZE_CATEGORIA.budget} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
       <Col w={LARGHEZZE_CATEGORIA.previste} destra><Testo stile="corpo-normale">{previste}</Testo></Col>
       <Col w={LARGHEZZE_CATEGORIA.uscite} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
-      {percentuale !== undefined ? <Col w={LARGHEZZE_CATEGORIA.percentuale} destra><Testo stile="corpo-normale" colore="testo-secondario">{percentuale}</Testo></Col> : null}
       {pulsanti}
     </View>
   );
