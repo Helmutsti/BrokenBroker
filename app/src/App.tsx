@@ -11,27 +11,23 @@ import { Categorie } from './schermate/Categorie.tsx';
 import { Conti } from './schermate/Conti.tsx';
 import { Impostazioni } from './schermate/Impostazioni.tsx';
 import { Investimenti } from './schermate/Investimenti.tsx';
-import { Movimenti } from './schermate/Movimenti.tsx';
 import { Salvadanai } from './schermate/Salvadanai.tsx';
-import { Spese } from './schermate/Spese.tsx';
+import { Uscite } from './schermate/Uscite.tsx';
 import { useCompatto } from './tema/compatto.ts';
 import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
-// Sezioni della barra laterale (flussi.md): l'ordine è quello delle bozze approvate.
-// Le sezioni dei 3 fogli dell'Excel (Spese, Salvadanai, Investimenti) più Categorie, Conti
-// e Analisi. Budget (senza modi) e Movimenti sono tornati con la decisione 48; dalla 59 sono uno strumento a parte (entrate e uscite scritte a mano).
-// La pagina iniziale è «Spese» (decisione 71: assorbe la vecchia Panoramica).
+// Sezioni della barra laterale (decisione 72): Uscite (la pagina iniziale), Salvadanai, Investimenti, e in fondo Conti e Categorie.
+// Panoramica, Movimenti, Analisi e Obiettivi non sono nel menu (i loro file restano).
 const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
-  { chiave: 'mese', testo: 'Spese', icona: 'calendar-check', percorso: '', schermata: Spese },
+  { chiave: 'uscite', testo: 'Uscite', icona: 'calendar-check', percorso: '', schermata: Uscite },
   { chiave: 'salvadanai', testo: 'Salvadanai', breve: 'Salvad.', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
   { chiave: 'investimenti', testo: 'Investimenti', breve: 'Invest.', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
-  { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
   { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti },
-  { chiave: 'movimenti', testo: 'Movimenti', icona: 'arrow-left-right', percorso: 'movimenti', schermata: Movimenti },
+  { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
 ];
 
-// Barra in basso del telefono (richiesta di Manuel): 4 sezioni e «Altro», che apre le altre.
-const IN_BARRA = ['mese', 'salvadanai', 'investimenti', 'conti'];
+// Barra in basso del telefono: 3 sezioni e «Altro», che apre le altre (Conti, Categorie, Impostazioni).
+const IN_BARRA = ['uscite', 'salvadanai', 'investimenti'];
 const ALTRE: VoceMenu[] = [
   ...SEZIONI.filter((s) => !IN_BARRA.includes(s.chiave)),
   { chiave: 'impostazioni', testo: 'Impostazioni', icona: 'sliders-horizontal' },
@@ -63,7 +59,8 @@ function NavigatoreLaterale(props: { children: React.ReactNode; initialRouteName
     <NavigationContent>
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: c['sfondo-pagina'] }}>
         <BarraLaterale voci={SEZIONI} attiva={attiva.name} onNaviga={(k) => navigation.navigate(k)}
-          profilo={rif.profilo?.nome ?? ''} onProfilo={() => navigation.navigate('impostazioni')} onEsci={() => setChiediEsci(true)} />
+          profilo={rif.profilo?.nome ?? ''} onProfilo={() => navigation.navigate('impostazioni')} onEsci={() => setChiediEsci(true)}
+          azionePrincipale={{ testo: 'Nuova spesa', icona: 'plus', onPress: () => { rif.chiedi({ nuovaSpesa: true }); navigation.navigate('uscite'); } }} />
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: d['margine-pagina'], gap: d['spazio-gruppo'], width: '100%' }}>
           {descriptors[attiva.key].render()}
         </ScrollView>

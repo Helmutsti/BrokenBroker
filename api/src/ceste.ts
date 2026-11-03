@@ -1,36 +1,39 @@
 import type { PoolClient } from 'pg';
 import { inizioMese, mesiFino, meseDi, oggi, periodo, prossimaUscita, spostaMese } from './periodo.ts';
-import { speseDelMese } from './spese.ts';
+import { scadenzaPagata, speseDelMese, spunteDellaSpesa } from './spese.ts';
 
-// Le ceste (decisione 71): parti del saldo di un conto, annidabili (il padre ne fa la somma). Una cesta non muove il saldo del conto:
-// quanto c'è dentro lo dicono gli spostamenti (spostamenti_ceste). `versato` è la parte propria, `saldo` comprende le sotto-ceste.
-// Una cesta può puntare a una spesa prevista: allora cifra e data vengono dalla spesa (la tua quota, la prossima volta che cade) e si
-// calcolano quanto manca e quanto mettere al mese.
+// I salvadanai (decisione 72; la tabella si chiama `ceste`): liberi, cioè non stanno in nessun conto, e annidabili (il padre ne fa la somma).
+// Non abbassano il saldo né l'avanzo: quanto c'è dentro lo dicono solo gli spostamenti (spostamenti_ceste), con il lato vuoto (null) che
+// vuol dire «fuori da ogni salvadanaio». `versato` è la parte propria, `dentro` comprende i sotto-salvadanai.
+// Un salvadanaio può essere collegato a una spesa annuale o una tantum («Metti da parte», spesa_id): vive dentro «Spese annuali», nome, traguardo
+// (la tua quota della prossima scadenza) e data (la prossima scadenza) vengono dalla spesa e si cambiano solo da lì.
+
+export const NOME_SPESE_ANNUALI = 'Spese annuali';
 
 // `scadenza` è la prossima volta che cade (con `senza_giorno` conta solo il mese: il giorno è il primo del mese personale scritto).
-export type CestaSpesa = { id: string; nome: string; importo: string; scadenza: string | null; senza_giorno: boolean; ogni_mesi: number | null; pagata: boolean };
+export type SpesaDelSalvadanaio = { id: string; nome: string; importo: string; scadenza: string | null; senza_giorno: boolean; ogni_mesi: number | null; pagata: boolean };
 
-export type Cesta = {
-  id: string; conto_id: string; conto: string; padre_id: string | null; nome: string; icona: string; traguardo: string | null; spesa_id: string | null;
-  mio: boolean; versato: string; saldo: string;
-  // Il traguardo che vale: quello scritto, la cifra della spesa collegata o la somma dei traguardi delle sotto-ceste.
-  traguardo_effettivo: string | null; percentuale: number | null;
-  // Solo con una spesa collegata: la spesa, quanto manca alla cifra, i mesi personali fino alla data (almeno 1) e quanto mettere al mese.
-  spesa: CestaSpesa | null; manca: string | null; mesi: number | null; al_mese: string | null;
+export type Salvadanaio = {
+  id: string; padre_id: string | null; nome: string; icona: string; spesa_id: string | null; collegato: boolean;
+  versato: string; dentro: string;
+  // Il traguardo che vale (scritto, o la tua quota della spesa collegata, o la somma di quelli dei sotto-salvadanai) e quello scritto a mano.
+  traguardo: string | null; traguardo_scritto: string | null; scadenza: string | null; percentuale: number | null;
+  // Quanto manca al traguardo; con traguardo e data: i mesi (almeno 1) fino alla data e quanto mettere al mese.
+  mancano: string | null; mesi: number | null; metti_al_mese: string | null;
+  spesa: SpesaDelSalvadanaio | null;
   traguardi: { id: string; nome: string; importo: string; ordine: number; percentuale: number }[];
-  figli: Cesta[];
+  figli: Salvadanaio[];
 };
 
 export const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 const percento = (parte: number, tutto: number) => Math.min(100, Math.round((parte / tutto) * 100));
 
-type Riga = { id: string; conto_id: string; conto: string; padre_id: string | null; nome: string; icona: string; traguardo: string | null; spesa_id: string | null; mio: boolean };
+type Riga = { id: string; padre_id: string | null; nome: string; icona: string; traguardo: string | null; scadenza: string | null; spesa_id: string | null };
 
-// L'albero di tutte le ceste che chi chiede vede, in cima quelle senza cesta superiore.
-export async function alberoCeste(db: PoolClient): Promise<Cesta[]> {
+// L'albero di tutti i salvadanai di chi chiede, in cima quelli senza salvadanaio superiore.
+export async function alberoSalvadanai(db: PoolClient): Promise<Salvadanaio[]> {
   const righe = (await db.query<Riga>(
-    `select k.id, k.conto_id, c.nome as conto, k.padre_id, k.nome, k.icona, k.traguardo::text as traguardo, k.spesa_id, k.proprietario_id = fp_me() as mio
-       from ceste k join conti c on c.id = k.conto_id order by k.nome`)).rows;
+    `select id, padre_id, nome, icona, traguardo::text as traguardo, scadenza::text as scadenza, spesa_id from ceste order by nome`)).rows;
   const propri = new Map((await db.query<{ id: string; v: string }>(
     `select id, sum(v)::text as v from (select a_cesta_id as id, importo as v from spostamenti_ceste where a_cesta_id is not null
                                         union all select da_cesta_id, -importo from spostamenti_ceste where da_cesta_id is not null) x group by id`)).rows.map((r) => [r.id, Number(r.v)]));
@@ -39,11 +42,15 @@ export async function alberoCeste(db: PoolClient): Promise<Cesta[]> {
 
   const inizio = await inizioMese(db), adesso = oggi();
   const spese = righe.some((r) => r.spesa_id) ? await speseDelMese(db, periodo(meseDi(adesso, inizio), inizio)) : [];
-  const nodi = new Map<string, Cesta>();
+  const nodi = new Map<string, Salvadanaio>();
   for (const r of righe) {
-    nodi.set(r.id, { ...r, versato: '0.00', saldo: '0.00', traguardo_effettivo: null, percentuale: null, spesa: null, manca: null, mesi: null, al_mese: null, traguardi: [], figli: [] });
+    nodi.set(r.id, {
+      id: r.id, padre_id: r.padre_id, nome: r.nome, icona: r.icona, spesa_id: r.spesa_id, collegato: r.spesa_id !== null,
+      versato: '0.00', dentro: '0.00', traguardo: null, traguardo_scritto: r.traguardo, scadenza: r.scadenza, percentuale: null,
+      mancano: null, mesi: null, metti_al_mese: null, spesa: null, traguardi: [], figli: [],
+    });
   }
-  const radici: Cesta[] = [];
+  const radici: Salvadanaio[] = [];
   for (const n of nodi.values()) {
     const padre = n.padre_id ? nodi.get(n.padre_id) : undefined;
     if (padre) padre.figli.push(n); else radici.push(n);
@@ -55,43 +62,51 @@ export async function alberoCeste(db: PoolClient): Promise<Cesta[]> {
     let da = adesso;
     for (let i = 0; i < 3; i++) {
       const data = prossimaUscita(s.prossima_scadenza, s.ogni_mesi, da, s.senza_giorno, inizio, s.giorno_mese);
-      const mese = meseDi(data, inizio), p = periodo(mese, inizio);
-      const spuntata = (await db.query('select 1 from spunte where spesa_prevista_id = $1 and data between $2 and $3', [s.id, p.dal, p.al])).rowCount;
-      if (!spuntata) return { data, pagata: false };
+      const mese = meseDi(data, inizio);
+      // Pagata anche in anticipo: una spunta fatta prima vale per la scadenza giusta (spunte.per_mese), e la prossima è quella dopo.
+      if (!scadenzaPagata(await spunteDellaSpesa(db, s.id), mese, inizio)) return { data, pagata: false };
       if (s.ogni_mesi === null) return { data: null, pagata: true };
       da = periodo(spostaMese(mese, s.ogni_mesi), inizio).dal;
     }
     return { data: null, pagata: true };
   };
 
-  const calcola = async (n: Cesta): Promise<void> => {
+  const calcola = async (n: Salvadanaio): Promise<void> => {
     for (const f of n.figli) await calcola(f);
     const propria = propri.get(n.id) ?? 0;
-    const saldo = propria + n.figli.reduce((t, f) => t + Number(f.saldo), 0);
-    n.versato = cent(propria); n.saldo = cent(saldo);
+    const dentro = propria + n.figli.reduce((t, f) => t + Number(f.dentro), 0);
+    n.versato = cent(propria); n.dentro = cent(dentro);
     let traguardo: number | null;
+    let pagata = false;
     const s = n.spesa_id ? spese.find((x) => x.id === n.spesa_id) : undefined;
     if (s) {
-      const { data, pagata } = await prossima(s);
-      const cifra = Number(s.mia_quota);
-      const manca = pagata ? 0 : Math.max(0, cifra - saldo);
-      const mesi = data ? mesiFino(data, adesso, inizio) : null;
-      n.spesa = { id: s.id, nome: s.nome, importo: cent(cifra), scadenza: data && s.senza_giorno ? `${meseDi(data, inizio)}-01` : data, senza_giorno: s.senza_giorno && s.ogni_mesi !== 1, ogni_mesi: s.ogni_mesi, pagata };
-      n.manca = cent(manca); n.mesi = mesi; n.al_mese = mesi ? cent(manca / mesi) : cent(0);
-      traguardo = cifra;
+      const { data, pagata: p } = await prossima(s);
+      pagata = p;
+      traguardo = Number(s.mia_quota);
+      n.nome = s.nome;
+      n.scadenza = data && s.senza_giorno ? `${meseDi(data, inizio)}-01` : data;
+      n.spesa = { id: s.id, nome: s.nome, importo: cent(traguardo), scadenza: n.scadenza, senza_giorno: s.senza_giorno && s.ogni_mesi !== 1, ogni_mesi: s.ogni_mesi, pagata };
     } else {
-      const daFigli = n.figli.reduce((t, f) => t + Number(f.traguardo_effettivo ?? 0), 0);
-      traguardo = n.traguardo !== null ? Number(n.traguardo) : daFigli > 0 ? daFigli : null;
+      const daFigli = n.figli.reduce((t, f) => t + Number(f.traguardo ?? 0), 0);
+      traguardo = n.traguardo_scritto !== null ? Number(n.traguardo_scritto) : daFigli > 0 ? daFigli : null;
     }
-    n.traguardo_effettivo = traguardo === null ? null : cent(traguardo);
-    n.percentuale = traguardo ? percento(saldo, traguardo) : null;
-    n.traguardi = traguardi.filter((t) => t.cesta_id === n.id).map(({ cesta_id: _, ...t }) => ({ ...t, percentuale: percento(Math.max(0, saldo), Number(t.importo)) }));
+    n.traguardo = traguardo === null ? null : cent(traguardo);
+    n.percentuale = traguardo ? percento(Math.max(0, dentro), traguardo) : null;
+    if (traguardo !== null) {
+      const manca = pagata ? 0 : Math.max(0, traguardo - dentro);
+      n.mancano = cent(manca);
+      if (n.scadenza) {
+        n.mesi = mesiFino(n.scadenza, adesso, inizio);
+        n.metti_al_mese = cent(manca / n.mesi);
+      }
+    }
+    n.traguardi = traguardi.filter((t) => t.cesta_id === n.id).map(({ cesta_id: _, ...t }) => ({ ...t, percentuale: percento(Math.max(0, dentro), Number(t.importo)) }));
   };
   for (const r of radici) await calcola(r);
   return radici;
 }
 
-export function trova(radici: Cesta[], id: string): Cesta | undefined {
+export function trova(radici: Salvadanaio[], id: string): Salvadanaio | undefined {
   for (const n of radici) {
     if (n.id === id) return n;
     const f = trova(n.figli, id);
@@ -100,19 +115,61 @@ export function trova(radici: Cesta[], id: string): Cesta | undefined {
   return undefined;
 }
 
-// Quando una spesa collegata a una cesta si spunta: la cesta scende della quota di chi spunta (`mia`), ma non sotto zero; se contiene meno,
-// si svuota e il resto esce dai liberi (cioè non si fa nulla: i liberi sono saldo - ceste). Lo spostamento è legato alla spunta: togliendo la
-// spunta sparisce e la cesta torna com'era.
-export async function scalaCestaDellaSpesa(db: PoolClient, spesaId: string, spunta: string, mia: number, descrizione: string): Promise<void> {
+// Quanto c'è nella parte propria di un salvadanaio (senza i sotto-salvadanai).
+export async function versatoProprio(db: PoolClient, id: string): Promise<number> {
+  return Number((await db.query<{ v: string }>(
+    `select coalesce(sum(case when a_cesta_id = $1 then importo else -importo end), 0)::text as v from spostamenti_ceste where a_cesta_id = $1 or da_cesta_id = $1`, [id])).rows[0].v);
+}
+
+// «Spese annuali»: il salvadanaio in cima con questo nome (il più vecchio); se manca si crea.
+export async function assicuraSpeseAnnuali(db: PoolClient): Promise<string> {
+  const c = (await db.query<{ id: string }>(
+    `select id from ceste where padre_id is null and nome = $1 and proprietario_id = fp_me() order by creata_il, id limit 1`, [NOME_SPESE_ANNUALI])).rows[0];
+  if (c) return c.id;
+  return (await db.query<{ id: string }>(
+    `insert into ceste (proprietario_id, nome, icona) values (fp_me(), $1, 'calendar-clock') returning id`, [NOME_SPESE_ANNUALI])).rows[0].id;
+}
+
+// «Metti da parte» acceso: la spesa ha il suo salvadanaio dentro «Spese annuali» (uno solo). Se c'è già, ne segue il nome.
+export async function accendiMettiDaParte(db: PoolClient, spesa: { id: string; nome: string }): Promise<void> {
+  const c = (await db.query<{ id: string }>('select id from ceste where spesa_id = $1', [spesa.id])).rows[0];
+  if (c) { await db.query('update ceste set nome = $2 where id = $1', [c.id, spesa.nome]); return; }
+  const padre = await assicuraSpeseAnnuali(db);
+  await db.query(`insert into ceste (proprietario_id, padre_id, nome, icona, spesa_id) values (fp_me(), $1, $2, 'piggy-bank', $3)`, [padre, spesa.nome, spesa.id]);
+}
+
+// «Metti da parte» spento (o spesa eliminata): i soldi del salvadanaio collegato vanno nel salvadanaio che lo contiene («Spese annuali») e
+// il salvadanaio sparisce.
+export async function spegniMettiDaParte(db: PoolClient, spesaId: string): Promise<void> {
+  const c = (await db.query<{ id: string }>('select id from ceste where spesa_id = $1', [spesaId])).rows[0];
+  if (c) await eliminaSalvadanaio(db, c.id);
+}
+
+// Eliminando un salvadanaio: i sotto-salvadanai salgono in quello che lo conteneva (con i loro soldi, che stanno su di loro) e i suoi soldi
+// propri vanno lì; se era in cima, escono da ogni salvadanaio.
+export async function eliminaSalvadanaio(db: PoolClient, id: string): Promise<void> {
+  const n = (await db.query<{ padre_id: string | null; nome: string }>('select padre_id, nome from ceste where id = $1 for update', [id])).rows[0];
+  if (!n) return;
+  const propria = await versatoProprio(db, id);
+  await db.query('update ceste set padre_id = $2 where padre_id = $1', [id, n.padre_id]);
+  // Prima si scrive l'entrata nel padre, poi si cancella il salvadanaio: con lui spariscono i suoi spostamenti, compreso quello in uscita.
+  if (n.padre_id && propria >= 0.005) {
+    await db.query(
+      `insert into spostamenti_ceste (utente_id, da_cesta_id, a_cesta_id, importo, descrizione) values (fp_me(), null, $1, $2, $3)`,
+      [n.padre_id, cent(propria), `Da «${n.nome}», eliminato`]);
+  }
+  await db.query('delete from ceste where id = $1', [id]);
+}
+
+// Quando una spesa collegata a un salvadanaio si spunta: il salvadanaio scende della quota di chi spunta (`mia`), ma non sotto zero (se
+// contiene meno, si svuota). Lo spostamento è legato alla spunta: togliendo la spunta sparisce e il salvadanaio torna com'era.
+export async function scalaSalvadanaioDellaSpesa(db: PoolClient, spesaId: string, spunta: string, mia: number, descrizione: string): Promise<void> {
   if (mia < 0.005) return;
-  const cesta = (await db.query<{ id: string; conto_id: string }>('select id, conto_id from ceste where spesa_id = $1', [spesaId])).rows[0];
-  if (!cesta) return;
-  await db.query('select 1 from conti where id = $1 for update', [cesta.conto_id]);
-  const dentro = Number((await db.query<{ v: string }>(
-    `select coalesce(sum(case when a_cesta_id = $1 then importo else -importo end), 0)::text as v from spostamenti_ceste where a_cesta_id = $1 or da_cesta_id = $1`, [cesta.id])).rows[0].v);
-  const quanto = Math.min(Math.max(0, dentro), mia);
+  const c = (await db.query<{ id: string }>('select id from ceste where spesa_id = $1 for update', [spesaId])).rows[0];
+  if (!c) return;
+  const quanto = Math.min(Math.max(0, await versatoProprio(db, c.id)), mia);
   if (quanto < 0.005) return;
   await db.query(
     `insert into spostamenti_ceste (utente_id, da_cesta_id, a_cesta_id, importo, descrizione, spunta_id) values (fp_me(), $1, null, $2, $3, $4)`,
-    [cesta.id, cent(quanto), descrizione, spunta]);
+    [c.id, cent(quanto), descrizione, spunta]);
 }

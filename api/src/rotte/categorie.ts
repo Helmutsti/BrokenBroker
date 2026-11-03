@@ -4,7 +4,6 @@ import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { periodoRichiesto } from '../periodo.ts';
 import { SQL_USCITA } from '../transazioni.ts';
-import { leggiRate, scadenzaRata } from '../rate.ts';
 import { speseDelMese } from '../spese.ts';
 import * as v from '../valida.ts';
 
@@ -13,8 +12,6 @@ export const rotteCategorie = Router();
 const CAMPI = 'id, padre_id, nome, tipo, colore, icona, ordine';
 
 type Categoria = { id: string; padre_id: string | null; nome: string; tipo: string; colore: string | null; icona: string | null; ordine: number;
-  // Il budget di questa categoria, se c'è (decisione 49): uno per categoria.
-  budget: { id: string; importo: string; attivo: boolean } | null;
   n_uscite: number }; // quante uscite (transazioni) hanno questa categoria
 type Nodo = Categoria & { figli: Nodo[] };
 
@@ -50,24 +47,21 @@ rotteCategorie.get('/', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) =>
     (await db.query<Categoria>(
       `select ${CAMPI.split(', ').map((x) => `c.${x}`).join(', ')},
-              (select jsonb_build_object('id', b.id, 'importo', b.importo::text, 'attivo', b.attivo)
-                 from budget b where b.categoria_id = c.id) as budget,
               (select count(*)::int from movimenti m where m.categoria_id = c.id) as n_uscite
          from categorie c where c.proprietario_id = fp_me() order by c.ordine, c.nome`)).rows);
   res.json(req.query.formato === 'elenco' ? righe : albero(righe));
 });
 
 // Quanto pesa ogni categoria nel mese (?mese=AAAA-MM), senza le sottocategorie (la somma sui rami la fa chi legge l'albero). Due numeri (decisione 71):
-//  - `previste`: le spese previste del mese (la quota di chi guarda) e le rate che scadono, spuntate o no. Le spese che si ripetono
+//  - `previste`: le spese previste del mese (la quota di chi guarda), spuntate o no; le rate non hanno categoria (decisione 72). Le spese che si ripetono
 //    ogni più mesi (annuali comprese) contano ogni mese con importo / N; quelle una volta sola solo nel mese in cui cadono;
-//  - `uscite`: le uscite vere del mese personale con quella categoria, scritte a mano o nate da una spunta (la stessa regola dello speso del budget).
-// Il budget (un limite di spesa) non è una spesa: non pesa qui.
+//  - `uscite`: le uscite vere del mese personale con quella categoria, scritte a mano o nate da una spunta.
 rotteCategorie.get('/spese', async (req, res) => {
   const righe = await conUtente(res.locals.utenteId, async (db) => {
     const p = await periodoRichiesto(db, req.query.mese);
     const previste = new Map<string, number>();
     for (const s of await speseDelMese(db, p)) {
-      if (!s.categoria_id || !s.attiva || s.a_conto_id) continue;
+      if (!s.categoria_id || !s.attiva) continue;
       let quota: number;
       if (s.ogni_mesi !== null && s.ogni_mesi > 1) {
         // Spesa che si ripete ogni N mesi: conta ogni mese con 1/N della quota. La data salvata è solo la prossima uscita, non un inizio.
@@ -77,10 +71,6 @@ rotteCategorie.get('/spese', async (req, res) => {
         quota = Number(s.mia_quota);
       }
       previste.set(s.categoria_id, (previste.get(s.categoria_id) ?? 0) + quota);
-    }
-    for (const r of await leggiRate(db)) {
-      // Conta anche l'ultima rata già passata: vale per tutto il mese in cui scade.
-      if (r.categoria_id && scadenzaRata(r, p)) previste.set(r.categoria_id, (previste.get(r.categoria_id) ?? 0) + Number(r.importo_rata));
     }
     const uscite = new Map<string, number>();
     const { rows } = await db.query<{ categoria_id: string; tot: string }>(
@@ -137,14 +127,13 @@ rotteCategorie.patch('/:id', async (req, res) => {
 });
 
 // Cancellare una categoria in uso richiede ?sposta_su=<id>: spese (anche quelle condivise
-// ricevute), rate, uscite e sottocategorie passano a quella categoria.
+// ricevute), uscite e sottocategorie passano a quella categoria.
 rotteCategorie.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const destinazione = typeof req.query.sposta_su === 'string' ? v.idPercorso(req.query.sposta_su) : undefined;
   await conUtente(res.locals.utenteId, async (db) => {
     const esiste = await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id]);
     if (!esiste.rowCount) throw nonTrovato('Categoria');
-    if ((await db.query('select 1 from budget where categoria_id = $1', [id])).rowCount) throw new ErroreApi(409, 'Questa categoria ha un budget: toglilo prima dalla finestra di modifica della categoria, svuotando la cifra del budget');
 
     if (destinazione) {
       if (destinazione === id) throw new ErroreApi(400, 'La categoria di destinazione deve essere diversa');
@@ -152,9 +141,7 @@ rotteCategorie.delete('/:id', async (req, res) => {
       if (!ok.rowCount) throw nonTrovato('Categoria di destinazione');
       await controllaPadre(db, id, destinazione);
       await db.query('update categorie set padre_id = $2 where padre_id = $1', [id, destinazione]);
-      for (const tabella of ['spese_previste', 'rate']) {
-        await db.query(`update ${tabella} set categoria_id = $2 where categoria_id = $1`, [id, destinazione]);
-      }
+      await db.query('update spese_previste set categoria_id = $2 where categoria_id = $1', [id, destinazione]);
       // Anche le spese condivise ricevute, che hanno la categoria in spese_dati_utente (decisione 43).
       await db.query('update spese_dati_utente set categoria_id = $2 where categoria_id = $1 and utente_id = fp_me()', [id, destinazione]);
       await db.query('select fp_sposta_uscite_categoria($1, $2)', [id, destinazione]);
@@ -163,7 +150,6 @@ rotteCategorie.delete('/:id', async (req, res) => {
         `select exists (select 1 from categorie where padre_id = $1)
              or exists (select 1 from spese_previste where categoria_id = $1)
              or exists (select 1 from spese_dati_utente where categoria_id = $1)
-             or exists (select 1 from rate where categoria_id = $1)
              or exists (select 1 from movimenti where categoria_id = $1) as in_uso`, [id]);
       if (rows[0].in_uso) throw new ErroreApi(409, 'La categoria è in uso: indica dove spostare le voci con ?sposta_su=<id>');
     }

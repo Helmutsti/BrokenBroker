@@ -14,8 +14,9 @@ import { LogoApp } from './LogoApp.tsx';
 
 // ---- CMP-20 Barra laterale ----
 export type VoceMenu = { chiave: string; testo: string; breve?: string; icona: string };
-export function BarraLaterale({ voci, attiva, onNaviga, profilo, onProfilo, onEsci }: {
+export function BarraLaterale({ voci, attiva, onNaviga, profilo, onProfilo, onEsci, azionePrincipale }: {
   voci: VoceMenu[]; attiva: string; onNaviga: (k: string) => void; profilo: string; onProfilo: () => void; onEsci: () => void;
+  azionePrincipale?: { testo: string; icona: string; onPress: () => void }; // il pulsante in cima al menu (es. Nuova spesa)
 }) {
   const { c } = useTema();
   const voce = (v: VoceMenu | { chiave: string; testo: string; icona: string }, onPress: () => void) => {
@@ -35,6 +36,7 @@ export function BarraLaterale({ voci, attiva, onNaviga, profilo, onProfilo, onEs
         <LogoApp misura={32} />
         <Testo stile="logo">BrokenBroker</Testo>
       </View>
+      {azionePrincipale ? <Pulsante tipo="primario" etichetta={azionePrincipale.testo} icona={azionePrincipale.icona} larghezzaPiena onPress={azionePrincipale.onPress} /> : null}
       <View style={{ gap: d['spazio-elenco'] }}>{voci.map((v) => voce(v, () => onNaviga(v.chiave)))}</View>
       <View style={{ flex: 1 }} />
       <View style={{ gap: d['spazio-elenco'] }}>
@@ -178,27 +180,48 @@ export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, tito
 
 // ---- CMP-32 Finestra ----
 // Su telefono occupa tutto lo schermo: titolo in alto, campi che scorrono, Annulla/Salva sempre in fondo.
-export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, onElimina, etichettaElimina = 'Elimina', larghezza, intestazioneDestra }: {
+export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, azioniSinistra, onElimina, etichettaElimina = 'Elimina', larghezza, intestazioneDestra, testaTelefono, senzaTessera }: {
   titolo: string; icona?: string; aperta: boolean; onChiudi: () => void; children: ReactNode; azioni?: ReactNode; onElimina?: () => void; etichettaElimina?: string; larghezza?: number;
   intestazioneDestra?: ReactNode; // facoltativo: accanto al titolo, prima del pulsante Chiudi
+  azioniSinistra?: ReactNode; // a sinistra del piede (dopo Elimina), per i pulsanti che non sono Annulla e Salva
+  // Telefono: Annulla (testo) a sinistra, titolo al centro e il pulsante principale a destra, nella testata; in fondo resta solo Elimina.
+  testaTelefono?: { annulla: ReactNode; salva: ReactNode };
+  senzaTessera?: boolean; // niente tessera con l'icona accanto al titolo
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
   const intestazione = (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-      {icona ? <Tessera icona={icona} misura="media" /> : null}
+      {icona && !senzaTessera ? <Tessera icona={icona} misura="media" /> : null}
       <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} style={{ flex: 1, fontSize: 20, lineHeight: 26 }}>{titolo}</Testo>
       {intestazioneDestra}
       <PulsanteIcona icona="x" etichetta="Chiudi" fantasma onPress={onChiudi} />
     </View>
   );
-  const piede = azioni || onElimina ? (
+  const iconaElimina = onElimina ? 'trash-2' : undefined;
+  const piede = azioni || onElimina || azioniSinistra ? (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], paddingTop: d['spazio-blocco'] }}>
-      {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} onPress={onElimina} /> : null}
+      {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} icona={iconaElimina} onPress={onElimina} /> : null}
+      {azioniSinistra}
       <View style={{ flex: 1 }} />
       {azioni}
     </View>
   ) : null;
+  if (compatto && testaTelefono) return (
+    <Modal transparent visible={aperta} onRequestClose={onChiudi} animationType="fade">
+      <View accessibilityRole="dialog" aria-modal aria-label={titolo} style={{ flex: 1, backgroundColor: c['sfondo-scheda'] }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], padding: 16, paddingTop: 'max(12px, env(safe-area-inset-top))', borderBottomWidth: d['misura-bordo'], borderBottomColor: c['bordo-separatore'] } as object}>
+          <View style={{ flex: 1, alignItems: 'flex-start' }}>{testaTelefono.annulla}</View>
+          <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2} numberOfLines={1} style={{ flexShrink: 1, textAlign: 'center', fontSize: 18, lineHeight: 24 }}>{titolo}</Testo>
+          <View style={{ flex: 1, alignItems: 'flex-end' }}>{testaTelefono.salva}</View>
+        </View>
+        <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: d['spazio-gruppo'] }}>
+          {children}
+          {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} icona={iconaElimina} larghezzaPiena onPress={onElimina} /> : null}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
   if (compatto) return (
     <Modal transparent visible={aperta} onRequestClose={onChiudi} animationType="fade">
       <View accessibilityRole="dialog" aria-modal aria-label={titolo} style={{ flex: 1, backgroundColor: c['sfondo-scheda'] }}>
@@ -387,41 +410,6 @@ export function VoceDaSpuntare({ nome, conto, importo, sottoImporto, icona, fatt
   );
 }
 
-// ---- CMP-25 Voce budget ----
-export type StatoBudget = 'normale' | 'attenzione' | 'superato';
-export function VoceBudget({ nome, nota, conto, importo, icona, valore, stato, onApri }: { nome: string; nota: string; conto: string; importo: string; icona?: string | null; valore: number; stato: StatoBudget; onApri?: () => void }) {
-  const tono: ToneAvanzamento = stato === 'normale' ? 'accento' : stato === 'attenzione' ? 'attenzione' : 'errore';
-  const colNota: NomeColore = stato === 'normale' ? 'testo-secondario' : stato === 'attenzione' ? 'testo-attenzione' : 'testo-errore';
-  const compatto = useCompatto();
-  if (compatto) return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44, paddingVertical: d['spazio-testo'], paddingHorizontal: d['margine-voce-h'] }}>
-      <Anello valore={valore} tono={tono} />
-      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
-        <Testo numberOfLines={1}>{nome}</Testo>
-        <Barra valore={valore} tono={tono} />
-        <Testo stile="dettaglio-normale" colore={colNota}>{nota}</Testo>
-        <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo>
-      </View>
-      <Testo stile="corpo-forte" colore={stato === 'normale' ? 'testo-primario' : colNota}>{importo}</Testo>
-    </Pressable>
-  );
-  return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
-      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
-        <View style={{ width: d['misura-bersaglio'], alignItems: 'center' }}><Anello valore={valore} tono={tono} /></View>
-        {icona ? <Icona nome={icona} misura={16} /> : null}
-        <View style={{ flex: 1, gap: d['spazio-testo'] }}>
-          <Testo>{nome}</Testo>
-          <Barra valore={valore} tono={tono} />
-          <Testo stile="dettaglio-normale" colore={colNota}>{nota}</Testo>
-        </View>
-      </View>
-      <Col w={140}><Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{conto}</Testo></Col>
-      <Col w={110} destra><Testo stile="corpo-forte" colore={stato === 'normale' ? 'testo-primario' : colNota}>{importo}</Testo></Col>
-    </Pressable>
-  );
-}
-
 // ---- CMP-26 Riga spesa prevista ----
 export function RigaSpesa({ tipo = 'voce', nome, categoria, conto, quando, totale, quota, icona, avviso, onApri }: {
   tipo?: 'voce' | 'intestazione' | 'riassunto'; nome: string; categoria?: string; conto?: string; quando?: string; totale: string; quota: string; icona?: string;
@@ -495,34 +483,45 @@ export function SchedaConto({ nome, nota, saldo, saldoNegativo, dettaglio, detta
 
 // ---- CMP-29 Riga di avanzamento ----
 export type StatoAvanzamento = 'in-corso' | 'completo' | 'attenzione';
-export function RigaAvanzamento({ nome, importo, percentuale, valore, stato = 'in-corso', icona, compatta, onApri }: {
-  nome: string; importo: string; percentuale?: string; valore: number; stato?: StatoAvanzamento; icona: string; compatta?: boolean; onApri?: () => void;
+export function RigaAvanzamento({ nome, importo, percentuale, valore, stato = 'in-corso', icona, compatta, onApri, onCifra, etichettaCifra }: {
+  nome: string; importo: string; percentuale?: string; valore: number; stato?: StatoAvanzamento; icona: string; compatta?: boolean; onApri?: () => void; onCifra?: () => void; etichettaCifra?: string;
 }) {
+  const { c } = useTema();
   const tono: ToneAvanzamento = stato === 'completo' ? 'ok' : stato === 'attenzione' ? 'attenzione' : 'accento';
   const stretto = useCompatto();
   const colPct: NomeColore = stato === 'completo' ? 'testo-ok' : stato === 'attenzione' ? 'testo-attenzione' : 'testo-secondario';
   const testa = (
-    <View style={{ flex: compatta || stretto ? undefined : 1, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
+    <Pressable onPress={onApri} disabled={!onApri} style={{ flex: compatta || stretto ? undefined : 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'] }}>
       <Icona nome={icona} misura={20} /><Testo numberOfLines={1} style={{ flex: 1 }}>{nome}</Testo>
-    </View>
+    </Pressable>
   );
+  // La cifra si preme per versare o prelevare (se c'è onCifra); il resto della riga apre la modifica.
+  const cifra = (colore?: NomeColore, stile: 'corpo-forte' | 'corpo-normale' = 'corpo-normale') => onCifra ? (
+    <Pressable accessibilityRole="button" accessibilityLabel={etichettaCifra ?? `Versa o preleva da ${nome}`} onPress={onCifra}
+      style={(s: StatoPressione) => [{ flexShrink: 0, minHeight: stretto ? 44 : ALTEZZA_CONTROLLO, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
+        backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent', cursor: 'pointer' } as object, anelloFocus(c, s.focused)]}>
+      <Testo stile={stile} colore={colore} numberOfLines={1}>{importo}</Testo>
+    </Pressable>
+  ) : <Testo stile={stile} colore={colore}>{importo}</Testo>;
   if (compatta || stretto) return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ gap: d['spazio-testo'], minHeight: stretto ? 44 : undefined, paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
+    <View style={{ gap: d['spazio-testo'], minHeight: stretto ? 44 : undefined, paddingVertical: d['margine-voce-v'] / 2, paddingHorizontal: d['margine-voce-h'] }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
         <View style={{ flex: 1, minWidth: 0 }}>{testa}</View>
-        <Testo stile="corpo-forte">{importo}</Testo>
+        {cifra(undefined, 'corpo-forte')}
         {percentuale ? <Testo stile="corpo-forte" colore={colPct}>{percentuale}</Testo> : null}
       </View>
-      <Barra valore={valore} tono={tono} />
-    </Pressable>
+      <Pressable onPress={onApri} disabled={!onApri}><Barra valore={valore} tono={tono} /></Pressable>
+    </View>
   );
   return (
-    <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'] }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'] }}>
       {testa}
-      <Col w={150} destra><Testo colore="testo-secondario">{importo}</Testo></Col>
-      <Barra valore={valore} tono={tono} larghezza={260} />
-      <Col w={72} destra><Testo stile="corpo-forte" colore={colPct}>{percentuale ?? ''}</Testo></Col>
-    </Pressable>
+      <Col w={150} destra>{cifra('testo-secondario')}</Col>
+      <Pressable onPress={onApri} disabled={!onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+        <Barra valore={valore} tono={tono} larghezza={260} />
+        <Col w={72} destra><Testo stile="corpo-forte" colore={colPct}>{percentuale ?? ''}</Testo></Col>
+      </Pressable>
+    </View>
   );
 }
 
@@ -553,12 +552,12 @@ export function TestataObiettivo({ nome, descrizione, valore, percentuale, avanz
 
 // ---- CMP-31 Riga categoria ----
 // Misure delle colonne su computer: strette, così il nome ha lo spazio (la pagina Categorie le usa anche per l'intestazione).
-export const LARGHEZZE_CATEGORIA = { budget: 136, previste: 136, uscite: 136 };
+export const LARGHEZZE_CATEGORIA = { previste: 136, uscite: 136 };
 export const LATO_AZIONI_CATEGORIA = 32;
 export const LARGHEZZA_AZIONI_CATEGORIA = LATO_AZIONI_CATEGORIA;
-// Le cifre di budget, previste e uscite arrivano già scritte con la percentuale sullo stipendio tra parentesi, es. «200,00 € (8,5%)».
-export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, icona, ereditata, colore, onApriChiudi, onModifica, budget, budgetAttivo = true }: {
-  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; budget?: string; budgetAttivo?: boolean; previste: string; speso: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void;
+// Le cifre previste e uscite arrivano già scritte con la percentuale sullo stipendio tra parentesi, es. «200,00 € (8,5%)».
+export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, speso, icona, ereditata, colore, onApriChiudi, onModifica }: {
+  livello: number; ramo: 'aperto' | 'chiuso' | 'foglia'; nome: string; sottocategorie?: string; previste: string; speso: string; icona: string; ereditata: boolean; colore: string | null; onApriChiudi?: () => void; onModifica: () => void;
 }) {
   const { c } = useTema();
   const compatto = useCompatto();
@@ -570,8 +569,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
   );
   if (compatto) {
     // Telefono: il nome ha tutta la larghezza che resta; sotto vengono le cifre e la matita. Rientro piccolo per livello.
-    const cifre = `Budget ${budget ?? '—'} · Uscite ${speso}`;
-    const cifre2 = `Previste ${previste}`;
+    const cifre = `Previste ${previste} · Uscite ${speso}`;
     return (
       <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
         style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingLeft: livello * 12 }}>
@@ -582,8 +580,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
         <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
           <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'} style={{ flexShrink: 1 }}>{nome}</Testo>
           {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
-          <Testo stile="dettaglio-forte" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{cifre}</Testo>
-          <Testo stile="dettaglio-normale" colore="testo-secondario">{cifre2}</Testo>
+          <Testo stile="dettaglio-forte">{cifre}</Testo>
           <View style={{ alignSelf: 'flex-start' }}>{pulsanti}</View>
         </View>
       </View>
@@ -602,7 +599,6 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
         <Testo stile={livello === 0 ? 'corpo-forte' : 'corpo-normale'}>{nome}</Testo>
         {sottocategorie ? <Testo stile="dettaglio-normale" colore="testo-secondario">{sottocategorie}</Testo> : null}
       </View>
-      <Col w={LARGHEZZE_CATEGORIA.budget} destra><Testo stile="corpo-normale" colore={budget && !budgetAttivo ? 'testo-secondario' : undefined}>{budget ?? '—'}</Testo></Col>
       <Col w={LARGHEZZE_CATEGORIA.previste} destra><Testo stile="corpo-normale">{previste}</Testo></Col>
       <Col w={LARGHEZZE_CATEGORIA.uscite} destra><Testo stile="corpo-forte">{speso}</Testo></Col>
       {pulsanti}

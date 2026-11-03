@@ -1,7 +1,8 @@
-// Prove delle ceste (decisione 71): parti del saldo di un conto; liberi = saldo - ceste; spostamenti a mano; cesta collegata a una spesa.
+// Prove dei salvadanai (decisione 72; la tabella si chiama `ceste`): liberi, annidabili, versare e prelevare a mano, eliminare, collegamento con
+// le spese annuali («metti da parte»).
 // Uso: node api/prove/prove-ceste.mjs [indirizzo]   (di base http://localhost:3000)
 // Serve l'API con REGISTRAZIONE_APERTA=si: crea utenti di prova nuovi e alla fine li cancella con i loro dati
-// (con `docker compose exec db psql`; se non può lo dice).
+// (con `docker compose exec db psql`, scegliendo il progetto con COMPOSE_PROJECT_NAME; se non può lo dice).
 
 import { execSync } from 'node:child_process';
 
@@ -23,169 +24,177 @@ const regB = (await r('POST', '/accesso/registrazione', null, { email: `ceste-b$
 const Bt = regB.token;
 
 try {
-  const conto = async (nome, saldo, T = A) => {
-    const k = (await r('POST', '/conti', T, { nome })).j;
-    if (saldo !== undefined) await r('PUT', `/conti/${k.id}/saldo`, T, { importo: saldo });
-    return k;
-  };
-  const datiConto = async (k, T = A) => (await r('GET', '/conti', T)).j.find((x) => x.id === k.id);
-  const tutte = async (T = A) => (await r('GET', '/ceste', T)).j;
-  const piatte = (xs) => xs.flatMap((k) => [k, ...piatte(k.figli)]);
-  const cesta = async (id, T = A) => piatte(await tutte(T)).find((k) => k.id === id);
-  const nuova = async (corpo, T = A) => (await r('POST', '/ceste', T, corpo)).j;
-  const sposta = (da, a, importo, T = A) => r('POST', '/ceste/sposta', T, { da, a, importo });
+  const tutti = async (T = A) => (await r('GET', '/salvadanai', T)).j;
+  const piatti = (xs) => xs.flatMap((k) => [k, ...piatti(k.figli)]);
+  const sal = async (id, T = A) => piatti(await tutti(T)).find((k) => k.id === id);
+  const nuovo = async (corpo, T = A) => (await r('POST', '/salvadanai', T, corpo)).j;
+  const sposta = (da, a, importo, T = A) => r('POST', '/salvadanai/sposta', T, { da, a, importo });
+  const saldo = async () => (await r('GET', '/saldo', A)).j;
+  const meseA = (await r('GET', '/spese-previste', A)).j.periodo.mese;
+  const fra3 = `${spostaMese(meseA, 3)}-20`;
 
-  const principale = await conto('Principale', '1000');
-  const secondo = await conto('Secondo', '500');
-  const senzaSaldo = await conto('Senza saldo');
+  // Salvadanai nuovi: in cima, vuoti, con traguardo e data facoltativi; con data e traguardo si sa quanto mettere al mese.
+  const A1 = await nuovo({ nome: 'Fondo emergenza', traguardo: '2000', scadenza: fra3 });
+  const B1 = await nuovo({ nome: 'Giappone' });
+  verifica(A1.padre_id === null && A1.dentro === '0.00' && A1.versato === '0.00' && A1.traguardo === '2000.00' && A1.scadenza === fra3 && A1.collegato === false, 'salvadanaio nuovo: in cima, vuoto, con traguardo e data', A1);
+  verifica(A1.mancano === '2000.00' && A1.mesi === 4 && A1.metti_al_mese === '500.00' && A1.percentuale === 0, 'con traguardo e data: mancano 2000 in 4 mesi, 500 al mese', A1);
+  verifica(B1.traguardo === null && B1.scadenza === null && B1.mancano === null && B1.metti_al_mese === null, 'senza traguardo: niente mancano né al mese', B1);
+  verifica((await r('POST', '/salvadanai', A, { nome: 'Con padre altrui', padre_id: (await nuovo({ nome: 'Di Bruno' }, Bt)).id })).s === 404, 'un salvadanaio superiore che non vedi: 404');
+  verifica((await r('POST', '/salvadanai', A, { nome: 'Traguardo zero', traguardo: '0' })).s === 400, 'traguardo zero: 400');
+  verifica((await r('POST', '/ceste', A, { nome: 'Vecchio indirizzo' })).s === 201, 'il vecchio indirizzo /ceste funziona ancora');
+  verifica((await r('GET', '/salvadanai', Bt)).j.every((k) => k.nome !== 'Fondo emergenza'), 'B non vede i salvadanai di A');
+  verifica((await r('GET', `/salvadanai/${A1.id}`, Bt)).s === 404, 'B: 404 sul salvadanaio di A');
 
-  // Liberi = saldo - ceste.
-  let k = await datiConto(principale);
-  verifica(k.saldo === '1000.00' && k.nelle_ceste === '0.00' && k.liberi === '1000.00', 'conto senza ceste: liberi = saldo', k);
-  verifica((await datiConto(senzaSaldo)).liberi === null, 'conto senza saldo: liberi null');
-
-  const A1 = await nuova({ nome: 'Fondo emergenza', conto_id: principale.id, traguardo: '2000' });
-  const B1 = await nuova({ nome: 'Giappone', conto_id: principale.id });
-  verifica(A1.conto_id === principale.id && A1.saldo === '0.00' && A1.traguardo_effettivo === '2000.00' && A1.percentuale === 0 && B1.traguardo_effettivo === null, 'cesta nuova: vuota, col traguardo scritto', A1);
-  verifica((await r('POST', '/ceste', A, { nome: 'Senza conto' })).s === 400, 'una cesta senza conto è rifiutata (400)');
-  verifica((await r('POST', '/ceste', A, { nome: 'Conto altrui', conto_id: (await conto('Di Bruno', '10', Bt)).id })).s === 404, 'un conto che non vedi: 404');
-
-  // Dai liberi a una cesta, e ritorno: il saldo del conto non cambia, cambiano i liberi.
+  // Versare e prelevare: i soldi non vengono dal saldo, e il saldo non cambia.
+  await r('PUT', '/saldo', A, { importo: '1000' });
   const s1 = await sposta(null, A1.id, '300');
-  verifica(s1.s === 201, 'sposta liberi -> cesta', s1);
-  k = await datiConto(principale);
-  verifica(k.saldo === '1000.00' && k.nelle_ceste === '300.00' && k.liberi === '700.00', 'dopo 300 nella cesta: saldo uguale, liberi 700', k);
-  verifica((await cesta(A1.id)).saldo === '300.00' && (await cesta(A1.id)).percentuale === 15, 'la cesta ha 300 (15%)', await cesta(A1.id));
-  verifica((await sposta(A1.id, null, '100')).s === 201 && (await cesta(A1.id)).saldo === '200.00' && (await datiConto(principale)).liberi === '800.00', 'sposta cesta -> liberi: 200 nella cesta, liberi 800');
-  verifica((await sposta(A1.id, null, '200.01')).s === 400, 'dalla cesta non si prende più di quanto c\'è (400)');
-  verifica((await sposta(null, A1.id, '800.01')).s === 400, 'dai liberi non si prende più dei liberi (400)');
+  verifica(s1.s === 201 && Array.isArray(s1.j), 'versa fuori -> salvadanaio (risponde con l\'albero)', s1);
+  verifica((await sal(A1.id)).dentro === '300.00' && (await sal(A1.id)).percentuale === 15 && (await sal(A1.id)).mancano === '1700.00' && (await sal(A1.id)).metti_al_mese === '425.00', 'dentro 300 (15%), mancano 1700, 425 al mese', await sal(A1.id));
+  verifica((await saldo()).effettivo === '1000.00', 'versare non cambia il saldo');
+  verifica((await sposta(null, A1.id, '5000')).s === 201, 'versare non ha limiti (non è il saldo)');
+  await sposta(A1.id, null, '5000');
+  verifica((await sposta(A1.id, null, '100')).s === 201 && (await sal(A1.id)).dentro === '200.00', 'preleva salvadanaio -> fuori: 200 dentro');
+  verifica((await sposta(A1.id, null, '200.01')).s === 400, 'prelevare più di quanto c\'è: 400');
   verifica((await sposta(null, A1.id, '0')).s === 400 && (await sposta(null, A1.id, '-5')).s === 400, 'importo zero o negativo: 400');
-  verifica((await sposta(null, null, '5')).s === 400 && (await sposta(A1.id, A1.id, '5')).s === 400, 'senza ceste o con lo stesso posto: 400');
-  verifica((await sposta(null, A1.id, '10', Bt)).s === 404, 'una cesta che non vedi: 404');
-  // Tra ceste dello stesso conto.
-  verifica((await sposta(A1.id, B1.id, '50')).s === 201 && (await cesta(A1.id)).saldo === '150.00' && (await cesta(B1.id)).saldo === '50.00' && (await datiConto(principale)).nelle_ceste === '200.00', 'sposta tra due ceste: 150 e 50, in totale 200 nelle ceste');
-  // Tra ceste di conti diversi: no.
-  const C2 = await nuova({ nome: 'Su un altro conto', conto_id: secondo.id });
-  verifica((await sposta(A1.id, C2.id, '10')).s === 400, 'tra ceste di conti diversi: 400');
-  // Conto senza saldo: niente liberi da cui prendere.
-  const D0 = await nuova({ nome: 'Senza saldo', conto_id: senzaSaldo.id });
-  verifica((await sposta(null, D0.id, '10')).s === 400, 'conto senza saldo: nei liberi non c\'è niente (400)');
+  verifica((await sposta(null, null, '5')).s === 400 && (await sposta(A1.id, A1.id, '5')).s === 400, 'senza salvadanai o con lo stesso posto: 400');
+  verifica((await sposta(null, A1.id, '10', Bt)).s === 404, 'un salvadanaio che non vedi: 404');
+  verifica((await sposta(A1.id, B1.id, '50')).s === 201 && (await sal(A1.id)).dentro === '150.00' && (await sal(B1.id)).dentro === '50.00', 'sposta tra due salvadanai: 150 e 50');
 
-  // Sotto-ceste: il padre ne fa la somma, la parte propria è a sé.
-  const f1 = await nuova({ nome: 'Un mese', padre_id: A1.id, traguardo: '1000' });
-  verifica(f1.conto_id === principale.id && f1.padre_id === A1.id, 'la sotto-cesta sta nel conto del padre', f1);
+  // Annidare: il padre fa la somma, la parte propria è a sé; niente cicli.
+  const f1 = await nuovo({ nome: 'Un mese', padre_id: A1.id, traguardo: '1000' });
   await sposta(null, f1.id, '100');
-  const padre = await cesta(A1.id);
-  verifica(padre.saldo === '250.00' && padre.versato === '150.00' && padre.figli[0].saldo === '100.00', 'il padre fa la somma: 150 propri + 100 nella sotto-cesta', padre);
-  verifica((await datiConto(principale)).nelle_ceste === '300.00', 'nelle ceste del conto: 150 + 100 + 50', await datiConto(principale));
+  let padre = await sal(A1.id);
+  verifica(f1.padre_id === A1.id && padre.dentro === '250.00' && padre.versato === '150.00' && padre.figli[0].dentro === '100.00', 'il padre fa la somma: 150 propri + 100 nel figlio', padre);
   verifica((await sposta(A1.id, null, '200')).s === 400, 'dal padre si prende solo la parte propria (400)');
-  verifica((await r('PATCH', `/ceste/${A1.id}`, A, { traguardo: null })).j.traguardo_effettivo === '1000.00', 'senza traguardo scritto il padre prende la somma di quelli delle sotto-ceste');
-  verifica((await r('POST', '/ceste', A, { nome: 'Altro conto', padre_id: A1.id, conto_id: secondo.id })).s === 400, 'una sotto-cesta nello stesso conto del padre (400)');
-  verifica((await r('DELETE', `/ceste/${A1.id}`, A)).s === 409, 'una cesta con sotto-ceste non si elimina (409)');
-  verifica((await r('DELETE', `/ceste/${f1.id}`, A)).s === 409, 'una cesta con dei soldi non si elimina (409)');
-  await sposta(f1.id, null, '100');
-  verifica((await r('DELETE', `/ceste/${f1.id}`, A)).s === 204, 'vuota, la sotto-cesta si elimina');
+  verifica((await r('PATCH', `/salvadanai/${A1.id}`, A, { padre_id: f1.id })).s === 400, 'un salvadanaio non sta dentro un suo figlio (400)');
+  verifica((await r('PATCH', `/salvadanai/${A1.id}`, A, { padre_id: A1.id })).s === 400, 'né dentro se stesso (400)');
+  const mosso = await r('PATCH', `/salvadanai/${B1.id}`, A, { padre_id: A1.id, nome: 'Giappone 2027', scadenza: null, traguardo: '3000', icona: 'plane' });
+  verifica(mosso.s === 200 && mosso.j.padre_id === A1.id && mosso.j.nome === 'Giappone 2027' && mosso.j.icona === 'plane' && mosso.j.traguardo === '3000.00', 'si cambiano nome, icona, traguardo e posto', mosso.j);
+  verifica((await r('PATCH', `/salvadanai/${B1.id}`, A, { padre_id: null })).j.padre_id === null, 'tornato in cima');
+  verifica((await r('PATCH', `/salvadanai/${B1.id}`, Bt, { nome: 'x' })).s === 404, 'B non modifica i salvadanai di A');
 
   // Traguardi di copertura.
-  const t = await r('POST', `/ceste/${A1.id}/traguardi`, A, { nome: 'Auto', importo: '300' });
-  verifica(t.s === 201 && (await cesta(A1.id)).traguardi[0].percentuale === 50, 'traguardo di copertura: 150 su 300 = 50%', await cesta(A1.id));
-  verifica((await r('DELETE', `/ceste/traguardi/${t.j.id}`, A)).s === 204 && (await cesta(A1.id)).traguardi.length === 0, 'il traguardo si elimina');
+  const t = await r('POST', `/salvadanai/${A1.id}/traguardi`, A, { nome: 'Auto', importo: '300' });
+  verifica(t.s === 201 && (await sal(A1.id)).traguardi[0].percentuale === 83, 'traguardo di copertura: 250 su 300 = 83%', await sal(A1.id));
+  verifica((await r('DELETE', `/salvadanai/traguardi/${t.j.id}`, A)).s === 204 && (await sal(A1.id)).traguardi.length === 0, 'il traguardo si elimina');
 
-  // Cesta collegata a una spesa: cifra e data dalla spesa; spuntata, scende della stessa cifra (non sotto zero); tolta la spunta, torna.
-  const p = (await r('GET', '/spese-previste', A)).j.periodo;
-  const meseA = p.mese;
-  const spesa = async (corpo) => (await r('POST', '/spese-previste', A, { conto_id: principale.id, ogni_mesi: 12, ...corpo })).j;
-  const ass = await spesa({ nome: 'Assicurazione', importo: '400', prossima_scadenza: `${spostaMese(meseA, 3)}-20` });
-  const cAss = await nuova({ nome: 'Assicurazione', conto_id: principale.id, spesa_id: ass.id, traguardo: '999' });
-  verifica(cAss.traguardo === null && cAss.traguardo_effettivo === '400.00' && cAss.spesa.importo === '400.00' && cAss.spesa.scadenza === `${spostaMese(meseA, 3)}-20`, 'collegata: cifra e data dalla spesa, niente traguardo scritto', cAss);
-  verifica(cAss.manca === '400.00' && cAss.mesi === 4 && cAss.al_mese === '100.00', 'collegata vuota: mancano 400 in 4 mesi, 100 al mese', cAss);
-  await sposta(null, cAss.id, '100');
-  const cAss2 = await cesta(cAss.id);
-  verifica(cAss2.manca === '300.00' && cAss2.al_mese === '75.00' && cAss2.percentuale === 25, 'con 100 dentro: mancano 300, 75 al mese', cAss2);
-  verifica((await r('POST', '/ceste', A, { nome: 'Doppia', conto_id: principale.id, spesa_id: ass.id })).s === 409, 'due ceste sulla stessa spesa: 409');
-  verifica((await r('POST', '/ceste', A, { nome: 'Dentro la collegata', padre_id: cAss.id })).s === 400, 'una cesta collegata non contiene altre ceste (400)');
-  const figlia = await nuova({ nome: 'Provvisoria', padre_id: A1.id });
-  verifica((await r('PATCH', `/ceste/${A1.id}`, A, { spesa_id: ass.id })).s === 400 && (await r('PATCH', `/ceste/${A1.id}`, A, { spesa_id: 'non-un-id' })).s === 400, 'una cesta che contiene sotto-ceste non si collega a una spesa (400)');
-  verifica((await r('POST', '/ceste', A, { nome: 'Spesa altrui', conto_id: principale.id, spesa_id: '11111111-1111-1111-1111-111111111111' })).s === 404, 'una spesa che non esiste: 404');
+  // Eliminare: i figli salgono e i soldi propri vanno nel contenitore (che resta uguale come totale); in cima i soldi escono.
+  const T = await nuovo({ nome: 'Tetto' }), M = await nuovo({ nome: 'Mezzo', padre_id: T.id }), L = await nuovo({ nome: 'Foglia', padre_id: M.id });
+  await sposta(null, T.id, '10'); await sposta(null, M.id, '70'); await sposta(null, L.id, '30');
+  verifica((await sal(T.id)).dentro === '110.00', 'albero di prova: 10 + 70 + 30');
+  verifica((await r('DELETE', `/salvadanai/${M.id}`, A)).s === 204, 'si elimina un salvadanaio con soldi e figli');
+  const dopo = await sal(T.id);
+  verifica(await sal(M.id) === undefined && dopo.versato === '80.00' && dopo.dentro === '110.00' && dopo.figli.length === 1 && dopo.figli[0].id === L.id && dopo.figli[0].dentro === '30.00', 'il figlio sale nel padre con i suoi soldi, i soldi propri del eliminato vanno nel padre: 80 propri + 30 nel figlio', dopo);
+  verifica((await r('DELETE', `/salvadanai/${T.id}`, A)).s === 204, 'si elimina un salvadanaio in cima con soldi');
+  const orfano = await sal(L.id);
+  verifica(await sal(T.id) === undefined && orfano && orfano.padre_id === null && orfano.dentro === '30.00', 'il figlio resta, ora in cima, con i suoi soldi', orfano);
+  verifica((await r('DELETE', `/salvadanai/${T.id}`, A)).s === 404 && (await r('DELETE', `/salvadanai/${L.id}`, Bt)).s === 404, 'già eliminato o di un altro: 404');
+  verifica((await saldo()).effettivo === '1000.00', 'eliminare non cambia il saldo');
 
-  // La spunta: la spesa cade in questo mese (scadenza il 15).
-  const bolloM = await spesa({ nome: 'Bollo', importo: '400', prossima_scadenza: `${meseA}-15` });
-  const cBollo = await nuova({ nome: 'Bollo', conto_id: principale.id, spesa_id: bolloM.id });
+  // ---- Il legame con le annuali ----
+  const spesa = async (corpo, T = A) => (await r('POST', '/spese-previste', T, { importo: '400', ogni_mesi: 12, ...corpo })).j;
+  const spesaDi = async (id) => (await r('GET', `/spese-previste/${id}`, A)).j;
+  const annuali = async () => (await tutti()).filter((k) => k.nome === 'Spese annuali' && k.padre_id === null);
+  verifica((await annuali()).length === 0, 'prima di metterne una da parte «Spese annuali» non c\'è');
+
+  const ass = await spesa({ nome: 'Assicurazione', prossima_scadenza: fra3, metti_da_parte: true });
+  verifica(ass.metti_da_parte === true, 'la spesa dice metti_da_parte', ass);
+  verifica((await annuali()).length === 1 && (await annuali())[0].icona === 'calendar-clock', 'creato «Spese annuali» in cima (icona calendario)', await annuali());
+  let cAss = (await annuali())[0].figli.find((k) => k.spesa_id === ass.id);
+  verifica(cAss && cAss.nome === 'Assicurazione' && cAss.collegato === true && cAss.traguardo === '400.00' && cAss.scadenza === fra3 && cAss.mancano === '400.00' && cAss.mesi === 4 && cAss.metti_al_mese === '100.00', 'sotto-salvadanaio collegato: traguardo = quota, data = scadenza, 100 al mese', cAss);
+  verifica(cAss.spesa && cAss.spesa.importo === '400.00' && cAss.spesa.scadenza === fra3, 'e porta i dati della spesa', cAss.spesa);
+  const ass2 = await spesa({ nome: 'Bollo auto', importo: '120', prossima_scadenza: `${spostaMese(meseA, 5)}-10`, metti_da_parte: true });
+  verifica((await annuali()).length === 1 && (await annuali())[0].figli.length === 2 && (await annuali())[0].traguardo === '520.00', 'la seconda va nello stesso «Spese annuali», che fa la somma dei traguardi (520)', await annuali());
+
+  // Collegato: nome, traguardo, data e posto si cambiano solo dalla spesa; versare e prelevare si può.
+  const bloccato = async (corpo) => r('PATCH', `/salvadanai/${cAss.id}`, A, corpo);
+  const rn = await bloccato({ nome: 'Altro' });
+  verifica(rn.s === 409 && rn.j.errore === 'Si cambia dalla spesa', 'nome del collegato: 409 «Si cambia dalla spesa»', rn);
+  verifica((await bloccato({ traguardo: '5' })).s === 409 && (await bloccato({ scadenza: '2030-01-01' })).s === 409 && (await bloccato({ padre_id: null })).s === 409, 'traguardo, data e posto del collegato: 409');
+  verifica((await bloccato({ icona: 'car' })).s === 200, 'l\'icona del collegato si cambia');
+  verifica((await r('DELETE', `/salvadanai/${cAss.id}`, A)).s === 409, 'il collegato non si elimina da qui (409)');
+  verifica((await r('POST', '/salvadanai', A, { nome: 'Dentro il collegato', padre_id: cAss.id })).s === 400, 'il collegato non contiene altri salvadanai (400)');
+  verifica((await sposta(null, cAss.id, '100')).s === 201 && (await sal(cAss.id)).mancano === '300.00' && (await sal(cAss.id)).metti_al_mese === '75.00' && (await sal(cAss.id)).percentuale === 25, 'versare nel collegato: dentro 100, mancano 300, 75 al mese');
+
+  // La spesa cambia, il salvadanaio segue.
+  await r('PATCH', `/spese-previste/${ass.id}`, A, { importo: '600', nome: 'Assicurazione auto' });
+  cAss = await sal(cAss.id);
+  verifica(cAss.nome === 'Assicurazione auto' && cAss.traguardo === '600.00' && cAss.mancano === '500.00', 'cambiando importo e nome della spesa il salvadanaio segue', cAss);
+  await r('PATCH', `/spese-previste/${ass.id}`, A, { importo: '400', nome: 'Assicurazione' });
+
+  // Spesa condivisa: il traguardo è la mia quota.
+  const cond = await spesa({ nome: 'Condivisa', importo: '400', prossima_scadenza: `${meseA}-16`, metti_da_parte: true });
+  await r('POST', '/condivisioni', A, { voce: 'spesa', id: cond.id, utente_id: regB.utente_id });
+  verifica((await piatti(await tutti()).find((k) => k.spesa_id === cond.id)).traguardo === '200.00', 'collegato a una spesa condivisa: il traguardo è la mia quota (200)');
+
+  // La spunta: la spesa cade in questo mese (scadenza il 15). Il salvadanaio scende della quota (non sotto zero) e il saldo della stessa cifra.
+  const bollo = await spesa({ nome: 'Bollo', prossima_scadenza: `${meseA}-15`, metti_da_parte: true });
+  const cBollo = piatti(await tutti()).find((k) => k.spesa_id === bollo.id);
   const spunta = (id, T = A) => r('POST', `/spese-previste/${id}/spunta`, T, { mese: meseA });
   const togli = (id, T = A) => r('DELETE', `/spese-previste/${id}/spunta?mese=${meseA}`, T);
-  const stato = async () => ({ conto: (await datiConto(principale)), bollo: await cesta(cBollo.id) });
-  // a) La cesta contiene più della cifra: scende della cifra.
+  const stato = async () => ({ saldo: (await saldo()).effettivo, bollo: await sal(cBollo.id) });
+  // a) Contiene più della quota: scende della quota.
   await sposta(null, cBollo.id, '500');
   let x = await stato();
-  verifica(x.conto.saldo === '1000.00' && x.bollo.saldo === '500.00' && x.bollo.manca === '0.00', 'prima della spunta: 500 nella cesta, niente manca', x.bollo);
-  verifica((await spunta(bolloM.id)).s === 201, 'spunta della spesa collegata');
+  verifica(x.saldo === '1000.00' && x.bollo.dentro === '500.00' && x.bollo.mancano === '0.00' && x.bollo.metti_al_mese === '0.00', 'prima della spunta: 500 dentro, niente manca', x);
+  verifica((await spunta(bollo.id)).s === 201, 'spunta della spesa collegata');
   x = await stato();
-  verifica(x.conto.saldo === '600.00' && x.bollo.saldo === '100.00', 'spunta con 500 dentro: saldo 600, cesta 100', x);
-  verifica(x.bollo.spesa.scadenza > `${meseA}-31` && x.bollo.spesa.scadenza.startsWith(String(Number(meseA.slice(0, 4)) + 1)), 'dopo la spunta la data è la prossima volta (fra un anno)', x.bollo.spesa);
-  verifica((await togli(bolloM.id)).s === 204, 'tolta la spunta');
+  verifica(x.saldo === '600.00' && x.bollo.dentro === '100.00', 'spunta con 500 dentro: saldo 600, salvadanaio 100', x);
+  verifica(x.bollo.scadenza > `${meseA}-31` && x.bollo.scadenza.startsWith(String(Number(meseA.slice(0, 4)) + 1)) && x.bollo.mancano === '300.00', 'dopo la spunta la data è la prossima volta (fra un anno) e il traguardo riparte (300 da mettere)', x.bollo);
+  verifica((await togli(bollo.id)).s === 204, 'tolta la spunta');
   x = await stato();
-  verifica(x.conto.saldo === '1000.00' && x.bollo.saldo === '500.00' && x.bollo.spesa.scadenza === `${meseA}-15`, 'tolta la spunta: tutto com\'era (saldo 1000, cesta 500, data di questo mese)', x);
-  // b) Contiene meno della cifra: si svuota e il resto esce dai liberi.
+  verifica(x.saldo === '1000.00' && x.bollo.dentro === '500.00' && x.bollo.scadenza === `${meseA}-15`, 'tolta la spunta: tutto com\'era (saldo 1000, salvadanaio 500, data di questo mese)', x);
+  // b) Contiene meno della quota: si svuota (non va sotto zero), il saldo scende dell'intera quota.
   await sposta(cBollo.id, null, '350');
-  const prima = await stato();
-  verifica(prima.bollo.saldo === '150.00', 'prima: 150 nella cesta', prima.bollo);
-  await spunta(bolloM.id);
+  await spunta(bollo.id);
   x = await stato();
-  verifica(x.conto.saldo === '600.00' && x.bollo.saldo === '0.00', 'cesta con 150 e spesa da 400: la cesta si svuota (non va sotto zero), il saldo scende di 400', x);
-  verifica(Number(x.conto.liberi) === Number(prima.conto.liberi) - 250, 'il resto (250) esce dai liberi', [x.conto.liberi, prima.conto.liberi]);
-  await togli(bolloM.id);
+  verifica(x.saldo === '600.00' && x.bollo.dentro === '0.00', 'con 150 dentro e spesa da 400: il salvadanaio si svuota, il saldo scende di 400', x);
+  await togli(bollo.id);
   x = await stato();
-  verifica(x.conto.saldo === '1000.00' && x.bollo.saldo === '150.00' && x.conto.liberi === prima.conto.liberi, 'tolta la spunta: la cesta torna a 150 e i liberi come prima', x);
-  // c) Cesta vuota: la spunta non la tocca.
+  verifica(x.saldo === '1000.00' && x.bollo.dentro === '150.00', 'tolta la spunta: il salvadanaio torna a 150', x);
+  // c) Vuoto: la spunta non lo tocca. Rispuntando e togliendo più volte non va mai sotto zero.
   await sposta(cBollo.id, null, '150');
-  await spunta(bolloM.id);
-  x = await stato();
-  verifica(x.bollo.saldo === '0.00' && x.conto.saldo === '600.00', 'cesta vuota: resta a zero, scendono solo il saldo e i liberi', x);
-  await togli(bolloM.id);
-  // d) Il saldo della cesta non va sotto zero nemmeno rispuntando e togliendo più volte.
-  await sposta(null, cBollo.id, '100');
-  await spunta(bolloM.id); await togli(bolloM.id); await spunta(bolloM.id); await togli(bolloM.id);
-  verifica((await cesta(cBollo.id)).saldo === '100.00' && (await datiConto(principale)).saldo === '1000.00', 'spunta e tolta due volte: tutto com\'era');
-  // e) Spesa condivisa: la cesta scende della quota di chi spunta (metà).
-  const cond = await spesa({ nome: 'Condivisa', importo: '400', prossima_scadenza: `${meseA}-16` });
-  await r('POST', '/condivisioni', A, { voce: 'spesa', id: cond.id, utente_id: regB.utente_id });
-  const cCond = await nuova({ nome: 'Condivisa', conto_id: principale.id, spesa_id: cond.id });
-  verifica(cCond.spesa.importo === '200.00', 'collegata a una spesa condivisa: la cifra è la mia quota (200)', cCond.spesa);
-  await sposta(null, cCond.id, '300');
-  await spunta(cond.id);
-  verifica((await cesta(cCond.id)).saldo === '100.00' && (await datiConto(principale)).saldo === '800.00', 'condivisa spuntata: la cesta scende di 200 (la quota), non di 400', [(await cesta(cCond.id)).saldo, (await datiConto(principale)).saldo]);
-  await togli(cond.id);
-  verifica((await cesta(cCond.id)).saldo === '300.00' && (await datiConto(principale)).saldo === '1000.00', 'condivisa: tolta la spunta torna');
-  // f) Scollegare la cesta: torna a un traguardo scritto.
-  const scoll = await r('PATCH', `/ceste/${cBollo.id}`, A, { spesa_id: null, traguardo: '700' });
-  verifica(scoll.s === 200 && scoll.j.spesa === null && scoll.j.traguardo_effettivo === '700.00' && scoll.j.manca === null, 'scollegata: traguardo scritto e niente spesa', scoll.j);
-  await spunta(bolloM.id);
-  verifica((await cesta(cBollo.id)).saldo === '100.00', 'scollegata: la spunta non tocca più la cesta');
-  await togli(bolloM.id);
-  // g) Eliminando la spesa la cesta resta, scollegata.
-  await r('DELETE', `/spese-previste/${ass.id}`, A);
-  const dopoElimina = await cesta(cAss.id);
-  verifica(dopoElimina && dopoElimina.spesa === null && dopoElimina.saldo === '100.00', 'eliminata la spesa la cesta resta, scollegata e con i suoi soldi', dopoElimina);
+  await spunta(bollo.id); await togli(bollo.id); await spunta(bollo.id); await togli(bollo.id);
+  verifica((await sal(cBollo.id)).dentro === '0.00' && (await saldo()).effettivo === '1000.00', 'vuoto: resta a zero, rispuntato e tolto due volte: tutto com\'era');
+  // d) Spesa una tantum già spuntata: niente data, niente da mettere da parte.
+  const unaV = await spesa({ nome: 'Divano', importo: '300', ogni_mesi: null, prossima_scadenza: `${meseA}-12`, metti_da_parte: true });
+  const cUna = piatti(await tutti()).find((k) => k.spesa_id === unaV.id);
+  verifica(cUna && cUna.scadenza === `${meseA}-12` && cUna.traguardo === '300.00', 'una tantum: si mette da parte, data = la sua data', cUna);
+  await spunta(unaV.id);
+  const unaPagata = await sal(cUna.id);
+  verifica(unaPagata.spesa.pagata === true && unaPagata.scadenza === null && unaPagata.mancano === '0.00' && unaPagata.metti_al_mese === null, 'una tantum pagata: niente data, niente da mettere da parte', unaPagata);
+  await togli(unaV.id);
 
-  // Conto condiviso: l'altra persona vede le ceste e il saldo uguale, e può spostare i soldi.
-  verifica((await cesta(A1.id, Bt)) === undefined, 'prima della condivisione B non vede le ceste');
-  await r('POST', '/condivisioni', A, { voce: 'conto', id: principale.id, utente_id: regB.utente_id });
-  const viste = await cesta(A1.id, Bt);
-  verifica(viste && viste.nome === 'Fondo emergenza' && viste.saldo === (await cesta(A1.id)).saldo, 'conto condiviso: B vede la cesta con gli stessi soldi', viste);
-  const kB = await datiConto(principale, Bt);
-  verifica(kB.liberi === (await datiConto(principale)).liberi && kB.nelle_ceste === (await datiConto(principale)).nelle_ceste, 'i liberi sono uguali per tutti e due', kB);
-  verifica((await sposta(null, B1.id, '10', Bt)).s === 201 && (await cesta(B1.id)).saldo === '60.00', 'B sposta dei soldi in una cesta del conto condiviso');
-  verifica((await r('DELETE', `/ceste/${B1.id}`, Bt)).s === 409 || (await r('DELETE', `/ceste/${B1.id}`, Bt)).s === 403, 'B non cancella la cesta di A (403/409)');
+  // Spegnere: i soldi vanno in «Spese annuali» e il collegato sparisce; la spesa dice metti_da_parte falso.
+  const prima = await sal((await annuali())[0].id);
+  verifica((await r('PATCH', `/spese-previste/${ass.id}`, A, { metti_da_parte: false })).j.metti_da_parte === false, 'spenta la spesa: metti_da_parte falso');
+  const dopoSpento = await sal(prima.id);
+  verifica(await sal(cAss.id) === undefined && dopoSpento.versato === '100.00' && Number(dopoSpento.dentro) === Number(prima.dentro), 'il collegato sparisce, i suoi 100 sono in «Spese annuali» (stesso totale)', dopoSpento);
+  // Riaccendere: ne nasce uno nuovo, vuoto.
+  verifica((await r('PATCH', `/spese-previste/${ass.id}`, A, { metti_da_parte: true })).j.metti_da_parte === true, 'riaccesa');
+  verifica(piatti(await tutti()).filter((k) => k.spesa_id === ass.id).length === 1 && (await annuali()).length === 1, 'un solo collegato, un solo «Spese annuali»');
+  // Cambiare in mensile spegne; la mensile non si mette da parte.
+  verifica((await r('PATCH', `/spese-previste/${ass2.id}`, A, { ogni_mesi: 1, giorno_mese: 5 })).j.metti_da_parte === false && piatti(await tutti()).every((k) => k.spesa_id !== ass2.id), 'una spesa che diventa mensile perde il collegato');
+  verifica((await r('PATCH', `/spese-previste/${ass2.id}`, A, { metti_da_parte: true })).s === 400, 'una mensile non si mette da parte (400)');
+  // Eliminare la spesa: i soldi del collegato vanno in «Spese annuali».
+  await sposta(null, piatti(await tutti()).find((k) => k.spesa_id === ass.id).id, '40');
+  const prima2 = await sal((await annuali())[0].id);
+  verifica((await r('DELETE', `/spese-previste/${ass.id}`, A)).s === 204 && piatti(await tutti()).every((k) => k.spesa_id !== ass.id), 'eliminata la spesa sparisce il suo collegato');
+  const dopo2 = await sal(prima2.id);
+  verifica(dopo2.versato === (Number(prima2.versato) + 40).toFixed(2), 'e i suoi 40 vanno in «Spese annuali»', [prima2.versato, dopo2.versato]);
+  // Chi riceve una spesa non la mette da parte.
+  verifica((await r('PATCH', `/spese-previste/${cond.id}`, Bt, { metti_da_parte: true })).s === 403, 'chi riceve una spesa condivisa non la mette da parte (403)');
 
-  // Eliminare un conto porta via le sue ceste.
-  const tmp = await conto('Provvisorio', '100');
-  const cTmp = await nuova({ nome: 'Provvisoria', conto_id: tmp.id });
-  verifica((await r('DELETE', `/conti/${tmp.id}`, A)).s === 204 && (await cesta(cTmp.id)) === undefined, 'eliminato il conto spariscono le sue ceste');
+  // Un «Spese annuali» già esistente in cima si riusa.
+  const miaB = await nuovo({ nome: 'Spese annuali' }, Bt);
+  const sB = await spesa({ nome: 'Di Bruno', prossima_scadenza: fra3, metti_da_parte: true }, Bt);
+  const treB = await tutti(Bt);
+  verifica(treB.filter((k) => k.nome === 'Spese annuali' && k.padre_id === null).length === 1 && (await sal(miaB.id, Bt)).figli.some((k) => k.spesa_id === sB.id), 'un «Spese annuali» già in cima si riusa', treB);
 } finally {
   try {
     psql(`delete from utenti where email like 'ceste%${n}@prova.it'`);
   } catch { console.log(`Utenti di prova da cancellare a mano: ceste${n}@prova.it, ceste-b${n}@prova.it`); }
 }
 
-console.log(`prove delle ceste: ${ok} passate, ${ko} fallite`);
+console.log(`prove dei salvadanai: ${ok} passate, ${ko} fallite`);
 process.exit(ko ? 1 : 0);

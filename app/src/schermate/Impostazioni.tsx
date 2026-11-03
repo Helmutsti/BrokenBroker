@@ -76,7 +76,7 @@ export function Impostazioni() {
               <Meta><Campo etichetta="Giorno di paga" valore={paga} onCambia={setPaga} inputMode="numeric" /></Meta>
             </Affiancati>
             <Campo etichetta="Il mese dell'app parte il giorno" valore={inizio} onCambia={setInizio} inputMode="numeric"
-              aiuto={inizioN > 1 ? `Il mese va dal ${inizioN} al ${inizioN - 1} del mese dopo: totali, budget e lista da spuntare seguono questo periodo.` : 'Il mese va dal 1 all’ultimo giorno.'} />
+              aiuto={inizioN > 1 ? `Il mese va dal ${inizioN} al ${inizioN - 1} del mese dopo: totali e lista da spuntare seguono questo periodo.` : 'Il mese va dal 1 all’ultimo giorno.'} />
             {mese.esito ? <Esito tono={mese.esito.ok ? 'ok' : 'errore'} testo={mese.esito.testo} /> : null}
             <Pulsante etichetta="Salva" onPress={mese.salva(() => modifica('/profilo', {
               stipendio_netto: stipendio.trim() ? leggiImporto(stipendio) ?? (() => { throw new Error('Scrivi lo stipendio, es. 1.800,00'); })() : null,
