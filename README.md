@@ -9,7 +9,7 @@ Oggi c'è la versione per **computer** (pagina web). La versione per iPhone usa 
 - **Spese** (pagina iniziale): si guarda un conto alla volta (o «Tutti i conti»): la carta in alto è anche la tendina per sceglierlo e mostra il saldo, che si riscrive con un tocco; accanto, uscite totali, quanto deve ancora uscire e l'avanzo. La scelta filtra tutta la pagina (voci, rate e annuali) e l'app ricorda l'ultimo conto scelto. Le spese del mese sono raggruppate per conto di partenza. Ogni spesa è un'uscita o un giroconto: spuntarla sposta davvero i soldi (la tua quota), togliendo la spunta tornano indietro.
 - **Spese previste** ogni mese, ogni N mesi o una volta sola, divise a metà o con altre quote con l'altra persona.
 - **Salvadanai**: «ceste» dentro i conti (una parte del saldo di un conto), annidabili, con traguardo e traguardi di copertura; i soldi li sposti tu dai liberi del conto alle ceste e viceversa. Una cesta può essere collegata a una spesa (es. l'assicurazione): dice quanto manca e quanto mettere al mese, e scende quando spunti la spesa.
-- **Movimenti**: i budget (limiti di spesa creati dalle Categorie) con quanto si riempiono e la griglia delle uscite del mese, con «Nuova uscita». **Conti** come etichette, **investimenti** con prezzo medio di carico, **categorie** con icone.
+- **Conti** come etichette, **investimenti** con prezzo medio di carico, **categorie** con icone.
 
 ## Installare su un computer
 
@@ -51,7 +51,7 @@ Porte usate (si cambiano in `.env`): app `8080`, API `3000`, database `5433` (so
 
 ## Per chi sviluppa
 
-- `api/`: API in Node 24 + TypeScript + Express, database Postgres 17 con le regole di visibilità nel database. Prove: `node api/prove/prove-spunta-spese.mjs`, `prove-ceste.mjs` e `prove-budget.mjs` con l'API avviata.
+- `api/`: API in Node 24 + TypeScript + Express, database Postgres 17 con le regole di visibilità nel database. Prove: `node api/prove/prove-spunta-spese.mjs`, `prove-ceste.mjs` e `prove-categorie.mjs` con l'API avviata.
 - `app/`: app in React Native; sul web con react-native-web e Vite. In sviluppo: `cd app`, `npm install`, `npm run web` (http://localhost:5173, usa l'API in Docker).
 - `docs/design/`: flussi, schermate, componenti, token e registro del design (Figma).
 - `DECISIONI.md`: scopo, tappe e decisioni del progetto. `AGENTS.md`: istruzioni per gli assistenti di programmazione.

@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-const B = 'http://localhost:3000';
+const B = process.argv[3] ?? 'http://localhost:3000';
 const cartella = process.argv[2];
 let ok = 0, ko = 0;
 const verifica = (cond, msg) => { if (cond) ok++; else { ko++; console.log('FALLITO:', msg); } };
@@ -30,13 +30,13 @@ verifica(albero.find((x) => x.nome === 'Entrate').figli.every((x) => x.tipo === 
 const supermercato = elenco.find((x) => x.nome === 'Supermercato');
 
 verifica((await r('PATCH', '/profilo', A, { stipendio_netto: '1800', giorno_paga: 27 })).j.stipendio_netto === '1800.00', 'profilo');
-const sulConto = (await r('PATCH', '/profilo', A, { sul_conto: '1234.50' })).j;
-verifica(sulConto.sul_conto === '1234.50' && sulConto.sul_conto_al, 'il saldo unico è sul profilo (sul_conto)');
+const sulConto = (await r('PUT', '/saldo', A, { importo: '1234.50' })).j;
+verifica(sulConto.sul_conto === '1234.50' && sulConto.effettivo === '1234.50' && sulConto.scritto_il, 'il saldo unico si scrive su /saldo (decisione 72)');
 
-// I conti sono solo etichette (decisione 59): nome, icona, archiviato.
+// I conti sono solo etichette (decisioni 59 e 72): nome, icona, archiviato.
 const comune = (await r('POST', '/conti', A, { nome: 'Revolut comune' })).j;
 const privato = (await r('POST', '/conti', A, { nome: 'Intesa', icona: 'piggy-bank' })).j;
-verifica(comune.nome === 'Revolut comune' && comune.icona === 'landmark' && comune.archiviato === false && !('saldo' in comune) && !('mio' in comune), 'conto creato (solo etichetta)');
+verifica(comune.nome === 'Revolut comune' && comune.icona === 'landmark' && comune.archiviato === false && !('saldo' in comune) && !('saldo_scritto' in comune), 'conto creato (solo etichetta, niente saldo)');
 verifica(privato.icona === 'piggy-bank', 'icona scelta');
 
 const m1 = await r('POST', '/movimenti', A, { tipo: 'uscita', conto_id: privato.id, importo: '45.30', descrizione: 'Esselunga', categoria_id: supermercato.id, data: '2026-10-20' });
@@ -44,7 +44,7 @@ verifica(m1.s === 201, 'movimento');
 const m2 = await r('POST', '/movimenti', A, { tipo: 'entrata', importo: '12' });
 verifica(m2.s === 201, 'movimento senza conto');
 const mov = (await r('GET', '/movimenti', A)).j.movimenti;
-verifica(mov.length === 2 && mov.find((x) => x.id === m1.j.id).conto === 'Intesa' && mov.find((x) => x.id === m1.j.id).categoria === 'Supermercato', 'elenco movimenti');
+verifica(mov.length === 2 && mov.find((x) => x.id === m1.j.id).da === 'Intesa' && mov.find((x) => x.id === m1.j.id).categoria === 'Supermercato', 'elenco movimenti');
 verifica((await r('GET', `/movimenti?conto=${privato.id}`, A)).j.movimenti.length === 1, 'filtro per conto');
 verifica((await r('POST', '/movimenti', A, { tipo: 'giroconto', da_conto_id: privato.id, a_conto_id: comune.id, importo: '50' })).s === 400, 'giroconto non esiste più');
 
@@ -79,7 +79,7 @@ verifica((await r('PATCH', '/categorie/' + cibo.id, Bt, { nome: 'x' })).s === 40
 
 // Eliminare un conto: le voci restano senza etichetta
 verifica((await r('DELETE', '/conti/' + privato.id, A)).s === 204, 'conto eliminato');
-verifica((await r('GET', '/movimenti', A)).j.movimenti.find((x) => x.id === m1.j.id)?.conto_id === null, 'il movimento resta senza conto');
+verifica((await r('GET', '/movimenti', A)).j.movimenti.find((x) => x.id === m1.j.id)?.da_conto_id === null, 'il movimento resta senza conto');
 
 // Uscita
 verifica((await r('POST', '/accesso/uscita', A)).s === 204, 'uscita');

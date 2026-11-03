@@ -111,10 +111,10 @@ Le prove creano utenti nuovi, quindi vogliono la registrazione aperta: si avvia 
 ```
 node api/prove/prove-spunta-spese.mjs
 node api/prove/prove-ceste.mjs
-node api/prove/prove-budget.mjs
+node api/prove/prove-categorie.mjs
 ```
 
-Creano ogni volta utenti nuovi e provano spese e spunte, ceste dei conti e budget.
+Creano ogni volta utenti nuovi e provano spese e spunte, salvadanai, categorie e conti.
 `api/prove/prove-basi.mjs` (accesso, conti, categorie, movimenti) e `api/prove/prove-obiettivi-db.mjs` (regole del database sugli obiettivi) vogliono come argomento la cartella del progetto.
 
 Dati di prova per vedere l'app piena: `node api/prove/dati-esempio.mjs` (le credenziali di prova sono scritte in cima al file).
@@ -147,14 +147,14 @@ La versione per iPhone usa lo stesso codice (`app/index.js`); il progetto iOS va
 | GET, PATCH, DELETE | `/conti/:id` | dettaglio, modifica (nome, icona, archiviato), cancellazione |
 | GET, POST | `/categorie` | albero (`?formato=elenco` per la lista piatta), nuova categoria |
 | PATCH, DELETE | `/categorie/:id` | modifica (nome, padre, colore, icona, ordine), cancellazione (`?sposta_su=<id>` se in uso) |
-| GET, POST | `/movimenti` | entrate e uscite scritte a mano (`?conto=<id>\|senza`, `?mese=AAAA-MM`, `?limite=`), nuovo movimento; strumento a parte con i budget |
+| GET, POST | `/movimenti` | entrate e uscite scritte a mano (`?conto=<id>\|senza`, `?mese=AAAA-MM`, `?limite=`), nuovo movimento |
 | PATCH, DELETE | `/movimenti/:id` | modifica, cancellazione (solo chi l'ha scritto) |
 | GET | `/categorie/spese?mese=` | speso nel mese per categoria (senza sottocategorie) |
 | GET, POST | `/spese-previste` | elenco con lo stato nel mese (`?mese=AAAA-MM`, `?solo_mese=true`), nuova spesa (fissa, investimento; ogni N mesi o una volta sola) |
 | GET, PATCH, DELETE | `/spese-previste/:id` | dettaglio con le quote, modifica, cancellazione (solo chi l'ha creata) |
 | POST, DELETE | `/spese-previste/:id/spunta` | spunta "uscito" del mese (solo un segno: non muove soldi) |
 | PUT | `/spese-previste/:id/quote` | divisione tra le persone (`[{utente_id, percentuale}]`, somma 100; vuoto = di base) |
-| GET, POST | `/condivisioni` | cosa è condiviso; condividere una spesa, un budget o un obiettivo con un'email |
+| GET, POST | `/condivisioni` | cosa è condiviso; condividere una spesa con un'email |
 | DELETE | `/condivisioni/:id` | smettere di condividere (solo chi ha condiviso) |
 | GET | `/persone` | io e le persone con cui c'è una condivisione |
 | GET, POST | `/obiettivi` | albero con saldo, traguardo, percentuale e traguardi di copertura; nuovo obiettivo |

@@ -53,19 +53,17 @@ const spotify = await spesa('Spotify duo', '16.99', { conto_id: paypal, categori
 await spesa('Claude', '21.96', { conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 24) });
 await spesa('Figma', '25', { conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 26) });
 await spesa('Adobe', '18.45', { conto_id: paypal, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 27) });
-// I budget nascono da una categoria (decisione 49).
-const budget = async (categoria, importo, extra) => (await r('POST', '/budget', M, { categoria_id: categoria, importo, ...extra })).id;
-const metaBudget = async (id) => r('POST', '/condivisioni', M, { voce: 'budget', id, email: 'ele@brokenbroker.test' });
-await metaBudget(await budget(C('Cibo', null), '500'));
-await budget(C('Pranzo fuori'), '200');
-await metaBudget(await budget(C('Carburante'), '70'));
+// Cifre del mese di tutti i giorni: spese mensili normali (non c'è più il budget).
+await meta(await spesa('Spesa al supermercato', '500', { conto_id: comune, categoria_id: C('Supermercato'), prossima_scadenza: meseFa(6, 28) }));
+await spesa('Pranzo fuori', '200', { conto_id: revolut, categoria_id: C('Pranzo fuori'), prossima_scadenza: meseFa(6, 28) });
+await meta(await spesa('Carburante', '70', { conto_id: comune, categoria_id: C('Carburante'), prossima_scadenza: meseFa(6, 28) }));
 await spesa('ETF MSCI World', '500', { tipo: 'investimento', conto_id: tr, categoria_id: C('Risparmio e investimenti'), prossima_scadenza: meseFa(6, 2) });
 await spesa('Tari', '250', { ogni_mesi: 6, conto_id: bper, categoria_id: C('Tari'), prossima_scadenza: meseFa(-1, 20) });
 await spesa('Assicurazione auto', '430.86', { ogni_mesi: 6, conto_id: intesa, categoria_id: C('Assicurazione'), prossima_scadenza: meseFa(-2, 15) });
 await spesa('Vacanze invernali', '300', { ogni_mesi: 12, conto_id: revolut, categoria_id: C('Viaggi e vacanze'), prossima_scadenza: meseFa(-2, 20) });
 await spesa('Bollo Aygo', '150.52', { ogni_mesi: 12, conto_id: intesa, categoria_id: C('Bollo'), prossima_scadenza: meseFa(-7, 10) });
 
-// Movimenti scritti a mano negli ultimi mesi (entrate e uscite; le uscite con categoria contano nei budget) e spunte.
+// Movimenti scritti a mano negli ultimi mesi (entrate e uscite; le uscite con categoria) e spunte.
 const mov = (conto_id, importo, descrizione, categoria_id, data) => r('POST', '/movimenti', M, Number(importo) < 0
   ? { tipo: 'uscita', conto_id, importo: String(-Number(importo)), descrizione, categoria_id, data }
   : { tipo: 'entrata', conto_id, importo, descrizione, data });
@@ -85,17 +83,17 @@ await r('POST', '/rate', M, { oggetto: 'American Express', finanziaria: 'Amex', 
 await r('POST', '/rate', M, { oggetto: 'Pinguino', finanziaria: 'Cofidis', importo_rata: '83.60', numero_rate: 5, prima_scadenza: meseFa(3, 10), conto_id: intesa, categoria_id: C('Rate') });
 await r('POST', '/rate', M, { oggetto: 'Telefono', finanziaria: 'Findomestic', importo_rata: '69.25', ultima_scadenza: meseFa(-5, 5), prima_scadenza: meseFa(1, 5), conto_id: intesa, categoria_id: C('Rate') });
 
-// Ceste (decisione 71): parti del saldo di un conto. Fondo di emergenza con traguardi di copertura, viaggio con sotto-ceste, e una cesta legata a una spesa.
-const fondo = await r('POST', '/ceste', M, { nome: 'Fondo emergenza', conto_id: tr, traguardo: '8000' });
+// Salvadanai (decisione 72): liberi e annidabili. Fondo di emergenza con traguardi di copertura, viaggio con sotto-salvadanai, un salvadanaio a sé.
+const fondo = await r('POST', '/ceste', M, { nome: 'Fondo emergenza', traguardo: '8000' });
 await r('POST', '/ceste/sposta', M, { da: null, a: fondo.id, importo: '2500' });
 for (const [n, i] of [['Un mese di spese', '1770'], ['Due mesi di spese', '3540'], ['Riparazione auto', '2000'], ['PC o telefono nuovo', '2000'], ['Elettrodomestico', '1500'], ['Occhiali', '500']])
   await r('POST', `/ceste/${fondo.id}/traguardi`, M, { nome: n, importo: i });
-const viaggio = await r('POST', '/ceste', M, { nome: 'Viaggio insieme', conto_id: tr });
+const viaggio = await r('POST', '/ceste', M, { nome: 'Viaggio insieme' });
 for (const [n, t, v] of [['Volo', '600', '600'], ['Alloggio', '900', '300'], ['Spese sul posto', '500', null]]) {
   const parte = await r('POST', '/ceste', M, { nome: n, padre_id: viaggio.id, traguardo: t });
   if (v) await r('POST', '/ceste/sposta', M, { da: null, a: parte.id, importo: v });
 }
-const nikon = await r('POST', '/ceste', M, { nome: 'Obiettivo Nikon', conto_id: tr, traguardo: '400' });
+const nikon = await r('POST', '/ceste', M, { nome: 'Obiettivo Nikon', traguardo: '400' });
 void nikon;
 
 // Investimenti.

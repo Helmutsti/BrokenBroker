@@ -6,7 +6,7 @@ import { inizioMese, meseDi, periodoRichiesto } from '../periodo.ts';
 import * as v from '../valida.ts';
 
 // Transazioni (decisione 61): da un conto a un altro, o da/verso «fuori». tipo: 'entrata' (da fuori), 'uscita' (verso fuori) o
-// 'spostamento' (tra due conti). Le categorie e i budget contano solo entrate e uscite: uno spostamento non è una spesa.
+// 'spostamento' (tra due conti). Le categorie contano solo entrate e uscite: uno spostamento non è una spesa.
 // Le scrive la spunta di una spesa o di una rata (`da_spunta`: si cambiano togliendo la spunta) oppure si scrivono a mano.
 //   ?conto=<id> | senza   solo le transazioni da o verso quel conto (senza = nessun conto)
 //   ?mese=AAAA-MM         solo quel mese personale
@@ -30,7 +30,7 @@ rotteMovimenti.get('/', async (req, res) => {
     const filtro = `($1::text is null or ($1 = 'senza' and m.da_conto_id is null and m.a_conto_id is null) or m.da_conto_id::text = $1 or m.a_conto_id::text = $1)`;
     const movimenti = (await db.query(
       `select m.id, ${TIPO_SQL} as tipo, m.importo::text as importo, m.momento, m.momento::date as data, m.descrizione,
-              m.da_conto_id, cd.nome as da, m.a_conto_id, ca.nome as a, m.categoria_id, cat.nome as categoria, m.budget_id,
+              m.da_conto_id, cd.nome as da, m.a_conto_id, ca.nome as a, m.categoria_id, cat.nome as categoria,
               (m.spunta_id is not null) as da_spunta, u.nome as utente, (m.utente_id = fp_me() and m.spunta_id is null) as modificabile
          from movimenti m
          left join conti cd on cd.id = m.da_conto_id
@@ -147,8 +147,7 @@ rotteMovimenti.patch('/:id', async (req, res) => {
   await conUtente(res.locals.utenteId, async (db) => {
     const m = await leggiCorpo(db, c, await mioMovimento(db, id));
     await db.query(
-      `update movimenti set da_conto_id = $2, a_conto_id = $3, verso = $4, importo = $5, momento = $6::timestamptz, descrizione = $7, categoria_id = $8,
-              budget_id = case when $3::uuid is null then budget_id end where id = $1`,
+      `update movimenti set da_conto_id = $2, a_conto_id = $3, verso = $4, importo = $5, momento = $6::timestamptz, descrizione = $7, categoria_id = $8 where id = $1`,
       [id, m.da, m.a, m.verso, m.importo, m.momento, m.descrizione, m.categoria]);
   });
   res.json({ id });

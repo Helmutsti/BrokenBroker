@@ -9,27 +9,25 @@ import * as v from '../valida.ts';
 export const rotteCondivisioni = Router();
 export const rottePersone = Router();
 
-// Si condividono conti (con le loro ceste) e spese; i budget no (decisione 71).
-const COLONNA = { conto: 'conto_id', spesa: 'spesa_prevista_id' } as const;
+// Si condividono solo le spese (decisione 72: i conti sono etichette, i salvadanai no). Le vecchie condivisioni di conti restano
+// nel database ma non si vedono e non se ne creano di nuove.
+const COLONNA = { spesa: 'spesa_prevista_id' } as const;
 const VOCI = Object.keys(COLONNA) as (keyof typeof COLONNA)[];
 
 rotteCondivisioni.get('/', async (_req, res) => {
   const elenco = await conUtente(res.locals.utenteId, async (db) => (await db.query(
     `select s.id, s.creata_il, s.proprietario_id = fp_me() as mia,
-            case when s.conto_id is not null then 'conto' else 'spesa' end as voce,
-            coalesce(s.conto_id, s.spesa_prevista_id) as voce_id,
-            coalesce(c.nome, sp.nome) as nome,
+            'spesa' as voce, s.spesa_prevista_id as voce_id, sp.nome as nome,
             s.proprietario_id, up.nome as proprietario, s.condiviso_con_id, uc.nome as condiviso_con
        from condivisioni s
-       left join conti c on c.id = s.conto_id
-       left join spese_previste sp on sp.id = s.spesa_prevista_id
+       join spese_previste sp on sp.id = s.spesa_prevista_id
        join utenti up on up.id = s.proprietario_id
        join utenti uc on uc.id = s.condiviso_con_id
       order by s.creata_il desc`)).rows);
   res.json(elenco);
 });
 
-// Corpo: { voce: conto|spesa, id, utente_id | email }
+// Corpo: { voce: spesa, id, utente_id | email }
 rotteCondivisioni.post('/', async (req, res) => {
   const c = v.corpo(req.body);
   const voce = v.scelta(c, 'voce', VOCI, true)!;
@@ -43,7 +41,7 @@ rotteCondivisioni.post('/', async (req, res) => {
     if (!altro) throw new ErroreApi(404, utenteId ? 'Persona non trovata' : 'Nessuna persona con questa email');
     const possiede = (await db.query<{ ok: boolean }>(
       `select fp_possiede_voce($1, $2) as ok`,
-      VOCI.map((k) => (k === voce ? id : null)))).rows[0].ok;
+      [null, id])).rows[0].ok;
     if (!possiede) throw new ErroreApi(403, "Può condividere solo chi ha creato la voce");
     return (await db.query(
       `insert into condivisioni (proprietario_id, condiviso_con_id, ${COLONNA[voce]}) values (fp_me(), $1, $2)

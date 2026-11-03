@@ -4,8 +4,7 @@ import { meseDi } from '../mesePersonale.ts';
 import { useDati } from './api.ts';
 import type { Categoria, Conto, Profilo } from './tipi.ts';
 
-// Dati che servono a tutte le schermate: profilo, conti, categorie, mese scelto,
-// e il mese scelto.
+// Dati che servono a tutte le schermate: profilo, conti (etichette), categorie e mese scelto.
 
 type Riferimenti = {
   profilo: Profilo | null; conti: Conto[]; categorie: Categoria[];
@@ -14,7 +13,10 @@ type Riferimenti = {
   iconaCategoria: (id: string | null | undefined) => string;
   conto: (id: string | null | undefined) => Conto | undefined;
   mese: string; meseOggi: string; setMese: (m: string) => void;
+  // Richieste tra schermate (barra laterale, «Apri la spesa», «Apri il salvadanaio»): la schermata che le gestisce le legge e le azzera.
+  richiesta: Richiesta; chiedi: (r: Richiesta) => void;
 };
+export type Richiesta = { nuovaSpesa?: boolean; spesa?: string; salvadanaio?: string };
 
 const Contesto = createContext<Riferimenti | null>(null);
 
@@ -23,9 +25,10 @@ export const meseInCorso = (inizio: number): string => meseDi(oggiIso(), inizio)
 
 export function FornitoreRiferimenti({ children }: { children: ReactNode }) {
   const profilo = useDati<Profilo>('/profilo').dati;
-  const conti = useDati<Conto[]>('/conti').dati ?? [];
+  const conti = useDati<Conto[]>('/conti?archiviati=true').dati ?? [];
   const categorie = useDati<Categoria[]>('/categorie?formato=elenco').dati ?? [];
   const [meseScelto, setMese] = useState<string | null>(null);
+  const [richiesta, chiedi] = useState<Richiesta>({});
   const valore = useMemo<Riferimenti>(() => {
     const perId = new Map(categorie.map((c) => [c.id, c]));
     const categoria = (id: string | null | undefined) => (id ? perId.get(id) : undefined);
@@ -40,9 +43,9 @@ export function FornitoreRiferimenti({ children }: { children: ReactNode }) {
     return {
       profilo, conti, categorie, categoria, percorsoCategoria, iconaCategoria,
       conto: (id) => conti.find((c) => c.id === id),
-      mese: meseScelto ?? meseInCorso(profilo?.inizio_mese ?? 1), meseOggi: meseInCorso(profilo?.inizio_mese ?? 1), setMese,
+      mese: meseScelto ?? meseInCorso(profilo?.inizio_mese ?? 1), meseOggi: meseInCorso(profilo?.inizio_mese ?? 1), setMese, richiesta, chiedi,
     };
-  }, [profilo, conti, categorie, meseScelto]);
+  }, [profilo, conti, categorie, meseScelto, richiesta]);
   return <Contesto.Provider value={valore}>{children}</Contesto.Provider>;
 }
 
@@ -52,17 +55,11 @@ export function useRiferimenti(): Riferimenti {
   return r;
 }
 
-// Opzioni per le tendine dei conti. Gli archiviati solo se sono in `tenere` (già scelti); `escludi` li toglie.
+// Opzioni per le tendine dei conti: tutti, anche i vecchi archiviati (decisione 72: niente archivio); `escludi` li toglie.
 export function opzioniConti(conti: Conto[], { tenere = [], escludi = [] }: { tenere?: (string | null | undefined)[]; escludi?: (string | null | undefined)[] } = {}) {
-  return conti.filter((c) => (!c.archiviato || tenere.includes(c.id)) && !escludi.includes(c.id))
+  return conti.filter((c) => !escludi.includes(c.id))
     .sort((a, b) => a.nome.localeCompare(b.nome, 'it'))
     .map((conto) => ({ valore: conto.id, testo: conto.nome, icona: conto.icona, rientro: 0 }));
-}
-
-// Un conto è condiviso se lo è lui o se è di un’altra persona.
-export function contoCondiviso(conti: Conto[], id: string | null | undefined): boolean {
-  const c = conti.find((x) => x.id === id);
-  return !!c && (c.condiviso || !c.mio);
 }
 
 // Albero per le tendine: categorie con rientro, di un tipo.

@@ -1,180 +1,194 @@
+import { useNavigation } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Interruttore, SceltaSegmenti } from '../componenti/base.tsx';
+import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina, TendinaGiorni } from '../componenti/campi.tsx';
-import { cancella, modifica, crea } from '../dati/api.ts';
+import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, opzioniConti, useRiferimenti } from '../dati/contesto.tsx';
-import type { Spesa, TipoSpesa } from '../dati/tipi.ts';
-import { dataInTesto, importoInTesto, leggiData, leggiImporto, nomeMese, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
-import { d, Testo } from '../tema/tema.tsx';
+import type { Salvadanaio, Spesa } from '../dati/tipi.ts';
+import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, oggiIso } from '../formato.ts';
 import { primaOccorrenzaPersonale } from '../mesePersonale.ts';
-import { proxSpesa } from './comuni.tsx';
-import { Affiancati, ConErrore, ErroreCampo, FinestraModulo, Meta, Riquadro, SezioneDivisione, serve, useDivisione, Voce } from './moduli.tsx';
-import { useCompatto } from '../tema/compatto.ts';
+import { d, Testo } from '../tema/tema.tsx';
+import { poiDate, proxSpesaDaPagare } from './comuni.tsx';
+import { Affiancati, ConErrore, FinestraModulo, Meta, serve, useDivisione, Voce } from './moduli.tsx';
 
-type Frequenza = 'mese' | 'anno' | 'biennale' | 'n' | 'una';
-
-const OPZIONI_MESE = [{ valore: '', testo: '—' }, ...Array.from({ length: 12 }, (_, i) => ({ valore: String(i + 1), testo: nomeMese(`2000-${String(i + 1).padStart(2, '0')}`, false) }))];
+type Frequenza = 'mese' | 'n' | 'una';
 
 // La data intera che si salva (l'anno non si chiede e non si mostra): la prima occorrenza di giorno e mese da oggi in poi,
 // contando per mesi personali (il mese personale in corso è ancora buono). Senza giorno vale tutto il mese personale: si salva il giorno 1.
 export const primaOccorrenza = primaOccorrenzaPersonale;
 
-// SC-03 Aggiungi o modifica una spesa prevista (finestra al centro, variante B).
+// Il salvadanaio collegato a una spesa e quello che lo contiene, se ci sono.
+function collegato(albero: Salvadanaio[] | null, spesaId: string | undefined): { nodo: Salvadanaio; padre: Salvadanaio | null } | null {
+  if (!albero || !spesaId) return null;
+  const visita = (xs: Salvadanaio[], padre: Salvadanaio | null): { nodo: Salvadanaio; padre: Salvadanaio | null } | null => {
+    for (const x of xs) {
+      if (x.spesa_id === spesaId) return { nodo: x, padre };
+      const dentro = visita(x.figli, x);
+      if (dentro) return dentro;
+    }
+    return null;
+  };
+  return visita(albero, null);
+}
+
+// Aggiungi o modifica una spesa (decisione 72): nome e categoria, quando si ripete, importo e conto (solo etichetta), divisione e, per le non mensili, «Metti da parte ogni mese».
 export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void }) {
   const rif = useRiferimenti();
+  const navigation = useNavigation<{ navigate: (k: string) => void }>();
+  const inizio = rif.profilo?.inizio_mese ?? 1;
   const [nome, setNome] = useState('');
-  const [importo, setImporto] = useState('');
-  const [giornoMese, setGiornoMese] = useState('');
-  const [meseScad, setMeseScad] = useState('');
-  const [dataUna, setDataUna] = useState(''); // "una volta sola": la data intera, GG/MM/AAAA
-  const div = useDivisione({ aperta, voce: 'spesa', rotta: '/spese-previste', origine: spesa ? { id: spesa.id, mia: spesa.mia, condiviso: spesa.condivisa, miaPercentuale: spesa.mia_percentuale } : null });
+  const [categoria, setCategoria] = useState<string | null>(null);
   const [frequenza, setFrequenza] = useState<Frequenza>('mese');
   const [ogniN, setOgniN] = useState('6');
-  const [tipo, setTipo] = useState<TipoSpesa>('fissa');
+  const [dataScad, setDataScad] = useState(''); // GG/MM/AAAA: la prossima scadenza (o l'unica)
+  const [dataIniziale, setDataIniziale] = useState('');
+  const [giornoMese, setGiornoMese] = useState('');
+  const [importo, setImporto] = useState('');
   const [conto, setConto] = useState<string | null>(null);
-  const [aConto, setAConto] = useState(''); // il conto di arrivo (decisione 61)
-  // Decisione 71: una spesa è un'uscita (da un conto, con categoria) oppure un giroconto (da un conto a un altro, senza categoria).
-  const [giro, setGiro] = useState(false);
-  const [categoria, setCategoria] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-  const [attiva, setAttiva] = useState(true);
+  const [mettiDaParte, setMettiDaParte] = useState(false);
+  const div = useDivisione({ aperta, voce: 'spesa', rotta: '/spese-previste', origine: spesa ? { id: spesa.id, mia: spesa.mia, condiviso: spesa.condivisa, miaPercentuale: spesa.mia_percentuale } : null });
+  const albero = useDati<Salvadanaio[]>(aperta && spesa ? '/salvadanai' : null).dati;
+  const legato = collegato(albero, spesa?.id);
 
   // Aprire una spesa ricevuta la segna come vista: sparisce l'etichetta «Nuova».
   useEffect(() => {
     if (aperta && spesa?.nuova) crea(`/spese-previste/${spesa.id}/vista`).catch(() => {});
-  }, [aperta, spesa?.id]);
+  }, [aperta, spesa?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!aperta) return;
     const s = spesa;
-    setNome(s?.nome ?? ''); setImporto(importoInTesto(s?.importo)); setGiornoMese(s?.ogni_mesi === 1 ? (s.giorno_mese ? String(s.giorno_mese) : '') : s?.prossima_scadenza && !s.senza_giorno ? String(Number(s.prossima_scadenza.slice(8, 10))) : '');
-    // Il mese si chiede solo se la spesa non esce ogni mese; l'anno non si mostra mai.
-    setMeseScad(s?.prossima_scadenza && s.ogni_mesi !== 1 ? String(Number((proxSpesa(s, oggiIso(), rif.profilo?.inizio_mese ?? 1) ?? s.prossima_scadenza).slice(5, 7))) : '');
-    setDataUna(s && s.ogni_mesi === null ? dataInTesto(s.prossima_scadenza) : '');
-    setFrequenza(!s || s.ogni_mesi === 1 ? 'mese' : s.ogni_mesi === null ? 'una' : s.ogni_mesi === 12 ? 'anno' : s.ogni_mesi === 24 ? 'biennale' : 'n'); setOgniN(String(s?.ogni_mesi && s.ogni_mesi > 1 ? s.ogni_mesi : 6));
-    setTipo(s?.tipo ?? 'fissa'); setConto(s?.conto_id ?? null); setAConto(s?.a_conto_id ?? ''); setGiro(!!s?.a_conto_id); setCategoria(s?.categoria_id ?? null);
-    setNote(s?.note ?? ''); setAttiva(s?.attiva ?? true);
+    setNome(s?.nome ?? ''); setCategoria(s?.categoria_id ?? null); setImporto(importoInTesto(s?.importo)); setConto(s?.conto_id ?? null);
+    setFrequenza(!s || s.ogni_mesi === 1 ? 'mese' : s.ogni_mesi === null ? 'una' : 'n'); setOgniN(String(s?.ogni_mesi && s.ogni_mesi > 1 ? s.ogni_mesi : 6));
+    setGiornoMese(s?.ogni_mesi === 1 && s.giorno_mese ? String(s.giorno_mese) : '');
+    const prossima = s && s.ogni_mesi !== 1 ? (s.ogni_mesi === null ? s.prossima_scadenza : proxSpesaDaPagare(s, oggiIso(), inizio) ?? s.prossima_scadenza) : null;
+    setDataScad(dataInTesto(prossima)); setDataIniziale(dataInTesto(prossima));
+    setMettiDaParte(s?.metti_da_parte ?? false);
   }, [aperta, spesa]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Un giroconto non è una spesa: niente categoria (non conterebbe).
-  const spostamento = giro;
-  const arrivo = giro ? aConto : '';
 
   const salva = async () => {
     if (!spesa || spesa.mia) div.controlla();
-    if (giro && !aConto) throw new ErroreCampo('a_conto', 'Scegli il conto su cui arrivano i soldi');
-    if (arrivo && arrivo === conto) throw new ErroreCampo('a_conto', 'Il conto di arrivo deve essere diverso da quello di partenza');
-    if (!conto) throw new ErroreCampo('conto', 'Scegli il conto da cui parte la spesa: ogni spesa ne ha uno');
     const valore = serve(leggiImporto(importo), 'Scrivi l’importo, es. 117,80', 'importo');
-    const ogni = frequenza === 'mese' ? 1 : frequenza === 'anno' ? 12 : frequenza === 'biennale' ? 24 : frequenza === 'una' ? null : Number(ogniN);
-    // Ogni mese basta il giorno del mese (giorno_mese, nessuna data: decisione 44); altrimenti servono almeno il mese, e l'anno lo sceglie l'app.
+    const ogni = frequenza === 'mese' ? 1 : frequenza === 'una' ? null : Number(ogniN);
+    if (ogni !== null && (!Number.isInteger(ogni) || ogni < 1)) serve(null, 'Scrivi ogni quanti mesi, es. 6', 'ogniN');
     let prima: string | null = null;
     let senzaGiorno = false;
+    if (ogni !== 1) {
+      const iso = serve(leggiData(dataScad), ogni === null ? 'Scegli il giorno in cui esce' : 'Scegli la prossima scadenza', 'scadenza');
+      // Se la data non è stata toccata resta quella salvata (anche «senza giorno»).
+      if (spesa && dataScad === dataIniziale && spesa.prossima_scadenza && spesa.ogni_mesi !== 1) { prima = spesa.prossima_scadenza; senzaGiorno = spesa.senza_giorno; } else prima = iso;
+    }
     const g = giornoMese ? Number(giornoMese) : null;
-    if (ogni !== null && (!Number.isInteger(ogni) || ogni < 1)) serve(null, 'Scrivi ogni quanti mesi, es. 6', 'ogniN');
-    if (ogni === null) prima = serve(leggiData(dataUna), 'Scegli il giorno in cui esce', 'scadenza');
-    else if (ogni === 1) prima = null;
-    else if (meseScad) {
-      prima = primaOccorrenza(g, Number(meseScad), oggiIso(), rif.profilo?.inizio_mese ?? 1);
-      senzaGiorno = g === null;
-    } else if (g !== null) serve(null, 'Scegli anche il mese: una spesa che non esce ogni mese ha bisogno almeno del mese', 'scadenza');
-    else serve(null, 'Scegli almeno il mese in cui esce: da lì si ripete', 'scadenza');
-    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 ? g : null, tipo, conto_id: conto, a_conto_id: arrivo || null, categoria_id: spostamento ? null : categoria,
-      note: note.trim() || null, attiva };
+    const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 ? g : null,
+      conto_id: conto, categoria_id: categoria, ...(ogni !== 1 && (!spesa || spesa.mia) ? { metti_da_parte: mettiDaParte } : {}) };
     const salvata = spesa ? await modifica<Spesa>(`/spese-previste/${spesa.id}`, corpo) : await crea<Spesa>('/spese-previste', corpo);
     if (spesa && !spesa.mia) return; // la divisione la decide chi l'ha creata
     await div.salva(salvata.id);
   };
 
-  const compatto = useCompatto();
-  const isoUna = frequenza === 'una' ? leggiData(dataUna) : null;
-  const nomeM = isoUna ? `${nomeMeseMinuscolo(isoUna)} ${isoUna.slice(0, 4)}` : meseScad ? nomeMeseMinuscolo(`2000-${meseScad.padStart(2, '0')}`) : '';
-  const poi = frequenza === 'anno' ? ', ogni anno' : frequenza === 'biennale' ? ', ogni due anni' : frequenza === 'n' ? `, poi ogni ${ogniN || 'N'} mesi` : '';
-  const aiutoScadenza = frequenza === 'una'
-    ? (isoUna ? `Esce il ${Number(isoUna.slice(8, 10))} ${nomeM}, una volta sola.` : 'Scegli il giorno in cui esce.')
-    : frequenza === 'mese'
-    ? (giornoMese ? `Esce il ${giornoMese} di ogni mese.` : 'Facoltativo: senza giorno vale per tutto il mese. Il giorno serve a metterla in ordine nella lista.')
-    : nomeM && giornoMese ? `Esce il ${giornoMese} ${nomeM}${poi}.`
-      : nomeM ? `Esce a ${nomeM}, senza un giorno preciso${poi}.`
-        : giornoMese ? 'Scegli anche il mese.' : 'Scegli almeno il mese; il giorno è facoltativo. L’anno lo sceglie l’app.';
+  const apriSalvadanaio = () => { if (!legato) return; onChiudi(); rif.chiedi({ salvadanaio: legato.nodo.id }); navigation.navigate('salvadanai'); };
+
+  const percentuale = div.divisione === 'no' ? 100 : div.divisione === 'meta' ? 50 : Number(div.miaQuota.replace(',', '.')) || 0;
+  const cifra = leggiImporto(importo);
+  const aiutoImporto = cifra ? `La tua quota: ${euro((Number(cifra) * percentuale) / 100)}` : undefined;
+  const isoScad = leggiData(dataScad);
+  const nN = Number(ogniN);
+  const aiutoScadenza = frequenza === 'n' && isoScad && Number.isInteger(nN) && nN >= 1 ? `Poi ${poiDate(isoScad, nN)}` : undefined;
+  const altro = div.nomeAltro ?? 'l’altra persona';
+  const nessuno = !!div.persone && div.persone.length === 0;
+  const mostraQuota = div.condiviso || div.divisione !== 'no';
+  const possoMettereDaParte = !spesa || spesa.mia;
+
+  // Come l'API: ognuno ha la sua quota calcolata da sola e arrotondata al centesimo (api/src/spese.ts).
+  let avvisoCentesimi: string | null = null;
+  if (div.condiviso && div.divisione !== 'no' && cifra && percentuale > 0 && percentuale < 100) {
+    const tondo = (n: number) => Math.round(n * 100) / 100;
+    const importoNum = Number(cifra);
+    const esatta = (importoNum * percentuale) / 100;
+    const mia = tondo(esatta);
+    const sua = tondo((importoNum * (100 - percentuale)) / 100);
+    const differenza = Math.round((importoNum - mia - sua) * 100);
+    if (Math.abs(esatta * 100 - Math.round(esatta * 100)) > 1e-6 || differenza !== 0) {
+      const dettaglio = differenza > 0 ? `manca ${euro(differenza / 100)}` : differenza < 0 ? `avanza ${euro(-differenza / 100)}` : 'la somma torna';
+      avvisoCentesimi = `${euro(importoNum)} non si divide ${div.divisione === 'meta' ? 'a metà ' : ''}al centesimo: la tua quota sarà ${euro(mia)} e quella di ${altro} ${euro(sua)} (${dettaglio}). Se vuoi che torni, scegli «Altra quota» e scrivi le cifre.`;
+    }
+  }
+
+  let aiutoDaParte: string;
+  if (mettiDaParte && legato) {
+    const n = legato.nodo;
+    const stato = [n.traguardo ? `${euro(n.dentro)} su ${euro(n.traguardo)}` : euro(n.dentro), n.scadenza ? `entro il ${data(n.scadenza)}` : null].filter(Boolean).join(' ');
+    aiutoDaParte = `Legata al sotto-salvadanaio ${legato.padre?.nome ?? 'Spese annuali'} › ${n.nome}: ${stato}${n.metti_al_mese ? `, metti ${euro(n.metti_al_mese)} al mese` : ''}. Nome, traguardo e data vengono da questa spesa e si cambiano solo qui. Quando spunti la spesa, la cifra esce da lì.`;
+  } else {
+    aiutoDaParte = 'Accendilo e crea un sotto-salvadanaio dentro «Spese annuali» con la cifra della prossima scadenza e la sua data: ti dice quanto mettere da parte ogni mese.';
+  }
+
   return (
-    <FinestraModulo titolo={spesa ? 'Modifica spesa prevista' : 'Nuova spesa prevista'} icona={spesa?.icona ?? 'calendar-check'} aperta={aperta} onChiudi={onChiudi} onSalva={salva}
-      onElimina={spesa?.mia ? () => cancella(`/spese-previste/${spesa.id}`).then(() => undefined) : undefined}
-      confermaElimina={spesa ? { nome: `«${spesa.nome}»`, dettaglio: spesa.condivisa ? 'Sparisce anche per l’altra persona.' : 'Sparisce dalla lista del mese.' } : undefined}
-      intestazioneDestra={(
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-testo'] }}>
-          <Testo stile="dettaglio-forte" colore="testo-secondario">{attiva ? 'Attiva' : 'Non attiva'}</Testo>
-          <Interruttore acceso={attiva} onCambia={setAttiva} etichetta="Attiva" />
-        </View>
-      )}>
-      <Testo stile="dettaglio-normale" colore="testo-secondario">{attiva ? 'Attiva: compare nella lista da spuntare del mese.' : 'Non attiva: resta salvata ma non conta.'}</Testo>
-      <Riquadro titolo="Che spesa è" nota="Come si chiama, di che tipo è e quanto costa.">
-        <ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} /></ConErrore>
-        <Voce etichetta="Che tipo di spesa" aiuto={giro ? 'Sposta i soldi da un tuo conto a un altro.' : 'I soldi escono da un conto, con una categoria.'}>
-          <SceltaSegmenti etichetta="Che tipo di spesa" larghezzaPiena valore={giro ? 'giro' : 'uscita'} onCambia={(v) => setGiro(v === 'giro')} opzioni={[{ valore: 'uscita', testo: 'Uscita' }, { valore: 'giro', testo: 'Giroconto' }]} />
-        </Voce>
-        {spesa?.tipo === 'investimento' ? <Voce etichetta="Tipo" aiuto="Un importo che metti da parte per investire.">
-          <SceltaSegmenti etichetta="Tipo di spesa" larghezzaPiena valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'fissa', testo: 'Fissa' }, { valore: 'investimento' as const, testo: 'Investimento' }]} />
-        </Voce> : null}
-        <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'flex-start', gap: compatto ? d['spazio-blocco'] : d['spazio-icona'] }}>
-          <View style={{ flex: compatto ? undefined : 1, minWidth: 0 }}>
-            <ConErrore campo="importo"><Campo etichetta="Importo totale" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" /></ConErrore>
+    <FinestraModulo titolo={spesa ? 'Modifica spesa' : 'Nuova spesa'} aperta={aperta} onChiudi={onChiudi} onSalva={salva} testaTelefono senzaTessera
+      onElimina={spesa?.mia ? () => cancella(`/spese-previste/${spesa.id}`).then(() => undefined) : undefined} etichettaElimina="Elimina spesa"
+      confermaElimina={spesa ? { nome: `«${spesa.nome}»`, dettaglio: spesa.condivisa ? 'Sparisce anche per l’altra persona.' : spesa.metti_da_parte ? 'Sparisce anche il suo sotto-salvadanaio: i soldi tornano in «Spese annuali».' : 'Sparisce dalla lista.' } : undefined}>
+      <Affiancati>
+        <Meta><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} /></ConErrore></Meta>
+        <Meta>
+          <View style={{ gap: d['spazio-testo'] }}>
+            <Tendina etichetta="Categoria" valore={categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags" segnaposto="Scegli la categoria" />
+            {spesa && !spesa.mia ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`La categoria è solo tua: ${spesa.creata_da ?? 'chi l’ha creata'} ha la sua.`}</Testo> : null}
           </View>
-          <View style={{ flex: compatto ? undefined : 1.5, minWidth: 0, gap: d['spazio-testo'] }}>
-            <Tendina etichetta="Categoria" valore={spostamento ? null : categoria} opzioni={opzioniCategorie(rif.categorie, 'uscita')} onCambia={setCategoria} iconaPrima="tags"
-              disattivato={spostamento} segnaposto={spostamento ? 'Nessuna: è un giroconto' : undefined} />
-            {spostamento ? <Testo stile="dettaglio-normale" colore="testo-secondario">I soldi restano tuoi, su un altro conto: non è una spesa, quindi non ha categoria.</Testo>
-            : spesa && !spesa.mia ? <Testo stile="dettaglio-normale" colore="testo-secondario">{`La categoria è solo tua: ${spesa.creata_da ?? 'chi l’ha creata'} ha la sua.`}</Testo> : null}
-          </View>
-        </View>
-      </Riquadro>
-      <Riquadro titolo="Regole di uscita" nota="Ogni quanto si ripete, in quale giorno o mese esce e da quale conto.">
-        {(
-          <>
-            <Voce etichetta="Ogni quanto esce">
-              <SceltaSegmenti etichetta="Ogni quanto esce" larghezzaPiena valore={frequenza} onCambia={setFrequenza} opzioni={[{ valore: 'mese', testo: 'Ogni mese' }, { valore: 'anno', testo: 'Ogni anno' }, { valore: 'biennale', testo: 'Ogni 2 anni' }, { valore: 'n', testo: 'Ogni N mesi' }, { valore: 'una', testo: 'Una volta sola' }]} />
-            </Voce>
-            <View style={{ gap: d['spazio-testo'] }}>
-              <View style={{ gap: d['spazio-blocco'] }}>
-                {frequenza === 'n' ? <ConErrore campo="ogniN"><Campo etichetta="Ogni quanti mesi" valore={ogniN} onCambia={setOgniN} inputMode="numeric" segnaposto="Es. 6" /></ConErrore> : null}
-                <ConErrore campo="scadenza">
-                {frequenza === 'una' ? <CampoData etichetta="Giorno in cui esce" valore={dataUna} onCambia={setDataUna} /> : (
-                <View style={{ flexDirection: 'row', gap: compatto ? d['spazio-icona'] : d['spazio-colonne'] }}>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <TendinaGiorni etichetta="Giorno (facoltativo)" valore={giornoMese} onCambia={setGiornoMese} />
-                  </View>
-                  {frequenza !== 'mese' ? (
-                    <View style={{ flex: 1, minWidth: 0 }}>
-                      <Tendina etichetta="Mese" valore={meseScad} opzioni={OPZIONI_MESE} onCambia={setMeseScad} />
-                    </View>
-                  ) : null}
-                </View>
-                )}
-                </ConErrore>
-              </View>
-              <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoScadenza}</Testo>
-            </View>
-          </>
-        )}
+        </Meta>
+      </Affiancati>
+      <Voce etichetta="Quando si ripete">
+        <SceltaSegmenti etichetta="Quando si ripete" larghezzaPiena valore={frequenza} onCambia={setFrequenza}
+          opzioni={[{ valore: 'mese', testo: 'Ogni mese' }, { valore: 'n', testo: 'Ogni N mesi' }, { valore: 'una', testo: 'Una volta' }]} />
+      </Voce>
+      {frequenza === 'n' ? (
         <Affiancati>
-          <Meta><ConErrore campo="conto"><Tendina etichetta={giro ? 'Da quale conto parte' : 'Da quale conto esce'} valore={conto} opzioni={opzioniConti(rif.conti, { tenere: [conto] })} onCambia={setConto} iconaPrima="landmark" segnaposto="Scegli il conto" /></ConErrore></Meta>
-          {giro ? (
-            <Meta>
-              <ConErrore campo="a_conto">
-                <Tendina etichetta="Verso quale conto" valore={aConto || null} onCambia={setAConto} iconaPrima="landmark" segnaposto="Scegli il conto"
-                  opzioni={opzioniConti(rif.conti, { tenere: [aConto], escludi: [conto] })} />
-              </ConErrore>
-            </Meta>
-          ) : null}
+          <Meta><ConErrore campo="ogniN"><Campo etichetta="Si ripete ogni (mesi)" valore={ogniN} onCambia={(t) => setOgniN(t.replace(/\D/g, ''))} inputMode="numeric" segnaposto="Es. 6" aiuto="12 mesi = una volta l’anno" /></ConErrore></Meta>
+          <Meta><ConErrore campo="scadenza"><CampoData etichetta="Prossima scadenza" valore={dataScad} onCambia={setDataScad} aiuto={aiutoScadenza} /></ConErrore></Meta>
         </Affiancati>
-        <Testo stile="dettaglio-normale" colore="testo-secondario">{spostamento
-          ? 'Con la spunta la tua quota passa dal conto di partenza a quello di arrivo; togliendo la spunta torna indietro. Non è una spesa.'
-          : 'Con la spunta la tua quota esce dal saldo del conto; togliendo la spunta il saldo torna com’era.'}</Testo>
-      </Riquadro>
-      {!spesa || spesa.mia ? <SezioneDivisione stato={div} cosa="spesa" cifra={leggiImporto(importo)} testoCondividi="Condividi questa spesa con un'altra persona" />
-      : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condivisa con te: la tua quota è ${spesa.mia_percentuale}%. Può cambiarla solo chi l'ha creata.`}</Testo>}
-      <Campo etichetta="Note (facoltative)" valore={note} onCambia={setNote} />
+      ) : frequenza === 'una' ? (
+        <ConErrore campo="scadenza"><CampoData etichetta="Scadenza" valore={dataScad} onCambia={setDataScad} /></ConErrore>
+      ) : (
+        <TendinaGiorni etichetta="Giorno del mese (facoltativo)" valore={giornoMese} onCambia={setGiornoMese} />
+      )}
+      <Affiancati>
+        <Meta><ConErrore campo="importo"><Campo etichetta="Importo a ogni scadenza" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" aiuto={aiutoImporto} /></ConErrore></Meta>
+        <Meta><Tendina etichetta="Conto (solo etichetta)" valore={conto ?? ''} opzioni={[{ valore: '', testo: 'Nessun conto' }, ...opzioniConti(rif.conti, { tenere: [conto] })]} onCambia={(v) => setConto(v || null)} iconaPrima="wallet" /></Meta>
+      </Affiancati>
+      {!spesa || spesa.mia ? (
+        <View style={{ gap: d['spazio-blocco'] }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+            <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+              <Testo stile="dettaglio-forte">{`Divisa con ${altro}`}</Testo>
+              {nessuno ? <Testo stile="dettaglio-normale" colore="testo-secondario">Non c’è ancora nessun altro utente nel sistema.</Testo> : null}
+            </View>
+            <Interruttore acceso={div.condiviso} onCambia={(v) => { div.setCondiviso(v); if (!v) div.setDivisione('no'); else if (div.divisione === 'no') div.setDivisione('meta'); }} etichetta={`Divisa con ${altro}`} disattivato={nessuno && !div.condiviso} />
+          </View>
+          {div.persone && div.persone.length > 1 && div.condiviso ? (
+            <ConErrore campo="condivisione">
+              <Tendina etichetta="Con chi" valore={div.conEff} iconaPrima="user" disattivato={div.bloccata} onCambia={div.setCon} segnaposto="Scegli una persona" opzioni={div.persone.map((p) => ({ valore: p.id, testo: p.nome }))} />
+            </ConErrore>
+          ) : null}
+          {mostraQuota ? (
+            <>
+              <SceltaSegmenti etichetta="Come la dividete" larghezzaPiena valore={div.divisione} onCambia={div.setDivisione}
+                opzioni={[{ valore: 'no', testo: 'Solo io' }, { valore: 'meta', testo: 'A metà' }, { valore: 'altra', testo: 'Altra quota' }]} />
+              {div.divisione === 'altra' ? <ConErrore campo="quota"><Campo etichetta="La tua quota in %" valore={div.miaQuota} onCambia={div.setMiaQuota} inputMode="decimal" /></ConErrore> : null}
+              {avvisoCentesimi ? <Esito tono="attenzione" testo={avvisoCentesimi} /> : null}
+            </>
+          ) : null}
+        </View>
+      ) : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condivisa con te: la tua quota è ${spesa.mia_percentuale}%. Può cambiarla solo chi l'ha creata.`}</Testo>}
+      {frequenza !== 'mese' && possoMettereDaParte ? (
+        <View style={{ gap: d['spazio-icona'] }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+            <Testo stile="dettaglio-forte" style={{ flex: 1 }}>Metti da parte ogni mese</Testo>
+            <Interruttore acceso={mettiDaParte} onCambia={setMettiDaParte} etichetta="Metti da parte ogni mese" />
+          </View>
+          <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoDaParte}</Testo>
+          {mettiDaParte && legato ? <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta="Apri il salvadanaio" icona="piggy-bank" onPress={apriSalvadanaio} /></View> : null}
+        </View>
+      ) : null}
     </FinestraModulo>
   );
 }

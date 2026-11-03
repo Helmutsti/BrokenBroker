@@ -46,10 +46,15 @@ export function ConErrore({ campo, children }: { campo: string; children: ReactN
 }
 
 // Finestra con modulo: errori vicino al campo (o sopra i pulsanti), Annulla e Salva in fondo, Elimina a sinistra (sempre con conferma).
-export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onElimina, etichettaSalva = 'Salva', etichettaElimina, confermaElimina, children, larghezza, intestazioneDestra }: {
+export type AzioniModulo = { esegui: (fn: () => Promise<void>) => () => void; chiudi: () => void; lavoro: boolean };
+// Con `azioni` il piede si compone a mano (es. Versa e Preleva): riceve `esegui` (fa partire una funzione con gli errori sul modulo), `chiudi` e `lavoro`.
+// Con `testaTelefono` (stile delle finestre nuove) su telefono Annulla e Salva stanno nella testata.
+export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onElimina, etichettaSalva = 'Salva', etichettaElimina, confermaElimina, children, larghezza, intestazioneDestra, azioni, azioniSinistra, testaTelefono, senzaTessera, senzaSalva }: {
   titolo: string; icona?: string; aperta: boolean; onChiudi: () => void; onSalva: () => Promise<void>; onElimina?: () => Promise<void>;
   etichettaSalva?: string; etichettaElimina?: string; confermaElimina?: ConfermaElimina; children: ReactNode; larghezza?: number; intestazioneDestra?: ReactNode;
+  azioni?: (a: AzioniModulo) => ReactNode; azioniSinistra?: (a: AzioniModulo) => ReactNode; testaTelefono?: boolean; senzaTessera?: boolean; senzaSalva?: boolean;
 }) {
+  const compatto = useCompatto();
   const [chiede, setChiede] = useState(false);
   const [errore, setErrore] = useState<ErroreModulo>(null);
   const [lavoro, setLavoro] = useState(false);
@@ -66,13 +71,17 @@ export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onEli
     setErrore(null); setChiede(true);
   };
   const erroreSenzaCampo = errore && !errore.campo ? errore : null;
+  const a: AzioniModulo = { esegui, chiudi, lavoro };
+  const annulla = <Pulsante tipo={testaTelefono && compatto ? 'testo' : 'secondario'} etichetta="Annulla" onPress={chiudi} />;
+  const salva = <Pulsante tipo="primario" etichetta={etichettaSalva} onPress={esegui(onSalva)} disattivato={lavoro} />;
   const refErrore = useRef<ComponentRef<typeof View>>(null);
   useEffect(() => { if (erroreSenzaCampo) portaInVista(refErrore.current); }, [erroreSenzaCampo]);
   return (
     <ContestoCampi.Provider value={campi}><ContestoErrore.Provider value={errore}>
-      <Finestra titolo={titolo} icona={icona} aperta={aperta} onChiudi={chiudi} larghezza={larghezza} intestazioneDestra={intestazioneDestra}
-        onElimina={onElimina ? chiediElimina : undefined} etichettaElimina={etichettaElimina}
-        azioni={<><Pulsante etichetta="Annulla" onPress={chiudi} /><Pulsante tipo="primario" etichetta={etichettaSalva} onPress={esegui(onSalva)} disattivato={lavoro} /></>}>
+      <Finestra titolo={titolo} icona={icona} aperta={aperta} onChiudi={chiudi} larghezza={larghezza} intestazioneDestra={intestazioneDestra} senzaTessera={senzaTessera}
+        onElimina={onElimina ? chiediElimina : undefined} etichettaElimina={etichettaElimina} azioniSinistra={azioniSinistra?.(a)}
+        testaTelefono={testaTelefono && !azioni ? { annulla, salva } : undefined}
+        azioni={azioni ? azioni(a) : <>{annulla}{senzaSalva ? null : salva}</>}>
         <View style={{ gap: d['spazio-blocco'] }}>{children}</View>
         {erroreSenzaCampo ? <View ref={refErrore}><Esito tono="errore" testo={erroreSenzaCampo.messaggio} /></View> : null}
       </Finestra>
