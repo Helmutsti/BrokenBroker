@@ -51,7 +51,9 @@ export function Uscite() {
   const inizio = profilo.inizio_mese;
   const p = el.periodo;
   const oggi = oggiIso();
-  const da = oggi >= p.dal && oggi <= p.al ? oggi : p.dal;
+  const èMeseDiOggi = oggi >= p.dal && oggi <= p.al;
+  const da = èMeseDiOggi ? oggi : p.dal;
+  const partenza = èMeseDiOggi ? Number(oggi.slice(8, 10)) : inizio;
   const nomeDelMese = nomeMeseMinuscolo(mese);
 
   // ---- Le voci ----
@@ -62,8 +64,9 @@ export function Uscite() {
     let ordine: string;
     if (s.ogni_mesi === 1) {
       dettaglio = [categoriaDi(s), s.giorno_mese ? `il ${s.giorno_mese}` : null, quota].filter(Boolean).join(' · ');
-      // Ordine dei mensili: per giorno, a partire dal giorno di inizio mese (con inizio 27: 27…31, 1…26); senza giorno in fondo.
-      ordine = s.giorno_mese ? String((s.giorno_mese - inizio + 31) % 31).padStart(2, '0') : '99';
+      // Ordine dei mensili: per giorno, a rotazione. Nel mese che contiene oggi si parte dal giorno di oggi (oggi 8: 8…31, 1…7: prima le prossime scadenze);
+      // negli altri mesi dal giorno di inizio mese (con inizio 27: 27…31, 1…26). Senza giorno in fondo.
+      ordine = s.giorno_mese ? String((s.giorno_mese - partenza + 31) % 31).padStart(2, '0') : '99';
     } else if (s.ogni_mesi === null) {
       const quando = s.prossima_scadenza ? `${nomeMeseMinuscolo(s.prossima_scadenza.slice(0, 7))} ${s.prossima_scadenza.slice(0, 4)}` : '';
       dettaglio = [`una volta, a ${quando}`, quota].filter(Boolean).join(' · ');

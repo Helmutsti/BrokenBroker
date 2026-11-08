@@ -70,6 +70,7 @@ Codici in ordine di costruzione, dal basso (guida §6.1).
 | CMP-20 | Barra laterale | composto | tutte tranne SC-10 | Costruito |
 | CMP-21 | Intestazione di pagina (titolo, sottotitolo, azioni) | composto | tutte tranne SC-10 | Costruito |
 | CMP-22 | Scheda (contenitore con titolo e icona facoltativi) | composto | ovunque | Costruito |
+| CMP-22b | Riquadro a righe (intestazione, righe con separatori, riga d'azione) | composto | SC-U1 (Mensili, Rate, Annuali); nel codice anche Salvadanai, Categorie, Impostazioni | Costruito |
 | CMP-23 | Numero chiave | composto | SC-01, SC-02, SC-05, SC-07 | Costruito |
 | CMP-24 | Voce da spuntare | composto | SC-01 | Costruito |
 | CMP-25 | Voce budget | composto | SC-01 | Costruito |
@@ -92,6 +93,7 @@ Codici in ordine di costruzione, dal basso (guida §6.1).
 ### Parti interne
 - **Voce della barra laterale** (4 varianti) → dentro CMP-20.
 - **Contenuto (segnaposto)** → nella proprietà "Contenuto" di CMP-22 e CMP-32; si scambia con il componente da mostrare.
+- **Destra (totali)** (computer e telefono) e **Righe (segnaposto)** (computer e telefono) → nelle proprietà "Destra" e "Righe" di CMP-22b; si scambiano con il componente da mostrare.
 - **Selettore periodo** → usato in CMP-33 e nell'intestazione della Panoramica.
 - **Mese del grafico** (due barre: entrate e uscite) → dentro CMP-34.
 - **Voce della scheda esposizione** → dentro CMP-39.
@@ -786,6 +788,45 @@ Il fondo dei controlli tenui (segmenti, riquadri) non è mai uguale alla superfi
 ### Esempi
 - ✅ Corretto: scheda "Obiettivo" con tessera piccola, titolo, contenuto e azioni in fondo.
 - ❌ Scorretto: scheda dentro un'altra scheda; titolo scritto come `h1`.
+
+---
+
+## CMP-22b – Riquadro a righe
+**Tipo:** composto · **Usato in:** SC-U1 (Mensili, Rate, Annuali); nel codice anche Salvadanai, Categorie e Impostazioni (Condivisione) · **Figma:** libreria, pagina Componenti composti, sezione "CMP-22b · Riquadro a righe" (nel codice `RiquadroARighe`)
+
+**Scopo:** mostrare un elenco di righe con un'intestazione, in un riquadro che finisce subito dopo l'ultima riga.
+**Quando usarlo:** per un elenco di voci con titolo, nota e, a destra, totali o azioni: spese mensili, rate, annuali, sotto-salvadanai, categorie, condivisione.
+**Quando non usarlo:** per un blocco con contenuti diversi e un solo padding (Scheda, CMP-22) o per una tabella con colonne vere.
+
+### Varianti e dimensioni
+- **Varianti:** Superficie [Computer, Telefono] (2 varianti).
+- **Proprietà:** Titolo, Nota, Testo vuoto [testo]; Con nota, Con icona, Con destra, Con testo vuoto, Con azione [sì/no]; Destra · computer, Righe · computer, Destra · telefono, Righe · telefono [scambio].
+- Contenitore come la Scheda (CMP-22): fondo `sfondo/scheda`, contorno `bordo/scheda`, raggio `raggio/scheda`; padding 0, gap 0, contenuto tagliato sui raggi.
+- **Intestazione** con padding proprio: ai lati `margine/scheda` + `margine/voce-h` sul computer, solo `margine/voce-h` sul telefono; sopra `margine/scheda` (computer) o `margine/voce-h` (telefono, come nel codice); sotto `spazio/icona`. Titolo (Titolo/Scheda) e nota (Dettaglio/Normale, secondario) con gap `spazio/testo`; tessera piccola (CMP-02) facoltativa; contenuto a destra facoltativo (es. totali Al mese e All'anno). Nessuna linea sotto l'intestazione.
+- **Righe:** un componente scambiabile con le righe della schermata; ogni riga ha il suo padding (orizzontale `margine/scheda` fuori e `margine/voce-h` dentro sul computer, `margine/voce-h` sul telefono; verticale `margine/riga-v`), i Separatori stanno tra le righe e non dopo l'ultima.
+- **Testo vuoto** (facoltativo, `margine/voce-v` sopra e `margine/scheda` sotto) e **riga d'azione** (facoltativa, sotto un Separatore, con un Pulsante testo) in fondo. L'ultima riga finisce col proprio padding: nessuno spazio extra sotto.
+- Nell'uso riempie la larghezza.
+- Nota di costruzione: in Figma le istanze non accettano figli, quindi le righe si mettono con la proprietà "Righe" (un componente per riquadro); nel mockup SC-U1 questi componenti stanno nella pagina Prove, accanto alle schermate.
+
+### Stati
+| Stato | Descrizione |
+|---|---|
+| Default | Con o senza nota, icona, contenuto a destra, testo vuoto e riga d'azione |
+| Hover | Non previsto: il riquadro non ha uno stato di passaggio, lo danno le sue righe |
+| Focus | Non previsto: il focus va sulle righe e sui pulsanti |
+| Attivo | Non previsto: il riquadro non è interattivo |
+| Disabilitato | Non previsto: il riquadro non si disattiva |
+| Errore | Non previsto: gli errori stanno nei campi o nell'esito (CMP-15) |
+| Caricamento | Non previsto: il riquadro mostra righe già pronte |
+
+### Accessibilità
+- **Tastiera:** non riceve il focus; lo ricevono le righe e il pulsante d'azione.
+- **Lettori di schermo:** nel codice è una regione con titolo `h2`; le righe possono avere un ruolo proprio (`ruoloRighe`, es. albero nelle Categorie) e un'etichetta.
+- **Contrasti:** fondo e contorno usano i token della scheda; i testi dentro seguono le regole dei loro componenti.
+
+### Esempi
+- ✅ Corretto: riquadro "Rate" con nota, totali Al mese e All'anno, righe con separatori e «Nuova rata» in fondo, sotto un separatore.
+- ❌ Scorretto: spazio vuoto sotto l'ultima riga; linea tra intestazione e prima riga; separatore dopo l'ultima riga.
 
 ---
 
