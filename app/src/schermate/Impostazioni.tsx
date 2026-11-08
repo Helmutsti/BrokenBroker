@@ -2,7 +2,7 @@
 import { View } from 'react-native';
 import { Avatar, Esito, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo } from '../componenti/campi.tsx';
-import { Intestazione, Scheda, Vuoto } from '../componenti/composti.tsx';
+import { Intestazione, RiquadroARighe, Scheda } from '../componenti/composti.tsx';
 import { cancella, modifica, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Condivisione, Persona } from '../dati/tipi.ts';
@@ -85,26 +85,23 @@ export function Impostazioni() {
           </Scheda>
         </View>
         <View style={{ flex: compatto ? undefined : 1, gap: d['spazio-blocco'] }}>
-          <Scheda titolo="Condivisione" nota="L'altra persona vede e modifica solo ciò che condividi" icona="users">
+          <RiquadroARighe titolo="Condivisione" nota="L'altra persona vede e modifica solo ciò che condividi" icona="users"
+            vuoto={altra ? undefined : 'Ancora nessuna condivisione. Per condividere un conto (con le sue ceste) o una spesa aprilo e attiva Condividi: scegli con chi nel form.'}>
             {altra ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+              <View key="altra" style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] }}>
                 <Avatar nome={altra.nome} />
                 <View style={{ flex: 1, gap: d['spazio-testo'] }}><Testo stile="corpo-forte">{altra.nome}</Testo>
                   <Testo stile="dettaglio-normale" colore="testo-secondario">{`${condivisioni.filter((c) => c.mia).length} voci condivise da te · ${condivisioni.filter((c) => !c.mia).length} condivise con te`}</Testo></View>
               </View>
-            ) : <Vuoto testo="Ancora nessuna condivisione. Per condividere un conto (con le sue ceste) o una spesa aprilo e attiva Condividi: scegli con chi nel form." />}
-            {condivisioni.length ? (
-              <View>
-                {condivisioni.map((c) => (
-                  <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: compatto ? 'wrap' : 'nowrap', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] }}>
-                    <Testo style={{ flex: 1, minWidth: compatto ? 140 : undefined }} numberOfLines={compatto ? 2 : 1}>{`${NOME_VOCE[c.voce]} · ${c.nome ?? '—'}`}</Testo>
-                    <Testo stile="dettaglio-normale" colore="testo-secondario">{c.mia ? `con ${c.condiviso_con}` : `da ${c.proprietario}`}</Testo>
-                    {c.mia ? <Pulsante tipo="testo" etichetta="Smetti" onPress={() => cancella(`/condivisioni/${c.id}`)} /> : null}
-                  </View>
-                ))}
-              </View>
             ) : null}
-          </Scheda>
+            {condivisioni.map((c) => (
+              <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', flexWrap: compatto ? 'wrap' : 'nowrap', gap: d['spazio-colonne'], paddingVertical: d['margine-voce-v'] }}>
+                <Testo style={{ flex: 1, minWidth: compatto ? 140 : undefined }} numberOfLines={compatto ? 2 : 1}>{`${NOME_VOCE[c.voce]} · ${c.nome ?? '—'}`}</Testo>
+                <Testo stile="dettaglio-normale" colore="testo-secondario">{c.mia ? `con ${c.condiviso_con}` : `da ${c.proprietario}`}</Testo>
+                {c.mia ? <Pulsante tipo="testo" etichetta="Smetti" onPress={() => cancella(`/condivisioni/${c.id}`)} /> : null}
+              </View>
+            ))}
+          </RiquadroARighe>
         </View>
       </View>
     </>

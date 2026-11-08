@@ -5,7 +5,7 @@ import { Icona } from '../componenti/Icona.tsx';
 import { Check } from 'lucide-react-native';
 import { coloriCategorie, nomeColoreCategoria, suColoreCategoria } from '../tema/token.ts';
 import { Campo, Tendina, TendinaGriglia } from '../componenti/campi.tsx';
-import { Intestazione, LARGHEZZA_AZIONI_CATEGORIA, LARGHEZZE_CATEGORIA, RigaCategoria, Scheda } from '../componenti/composti.tsx';
+import { Intestazione, LARGHEZZA_AZIONI_CATEGORIA, LARGHEZZE_CATEGORIA, RigaCategoria, RiquadroARighe } from '../componenti/composti.tsx';
 import { cancella, crea, modifica, useDati } from '../dati/api.ts';
 import { opzioniCategorie, useRiferimenti } from '../dati/contesto.tsx';
 import type { Categoria, ElencoSpese } from '../dati/tipi.ts';
@@ -60,17 +60,17 @@ export function Categorie() {
         azioni={<Pulsante tipo="primario" etichetta="Nuova categoria" icona="plus" onPress={() => setAperta({ padre: null })} />} />
       <SceltaSegmenti etichetta="Uscite o entrate" valore={tipo} onCambia={setTipo} opzioni={[{ valore: 'uscita', testo: `Uscite · ${radici('uscita')}` }, { valore: 'entrata', testo: `Entrate · ${radici('entrata')}` }]} />
       <Esito tono="informazione" testo="Icona piena: scelta per la categoria. Icona chiara: presa dalla categoria padre. Con la matita si cambiano nome, icona, colore, e si elimina la categoria." />
-      <Scheda>
-        <View role="tree" aria-label="Categorie">
-          {compatto ? null : <View style={{ flexDirection: 'row', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
+      <RiquadroARighe righeConMargine={false} senzaSeparatori ruoloRighe="tree" etichettaRighe="Categorie"
+        testata={compatto ? undefined : (
+          <View style={{ flexDirection: 'row', gap: d['spazio-colonne'] }}>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ flex: 1, paddingLeft: 76 }}>Categoria</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: LARGHEZZE_CATEGORIA.previste, textAlign: 'right' }}>{`Previste a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <Testo stile="dettaglio-forte" colore="testo-secondario" style={{ width: LARGHEZZE_CATEGORIA.uscite, textAlign: 'right' }}>{`Uscite a ${nomeMeseMinuscolo(rif.mese)}`}</Testo>
             <View style={{ width: LARGHEZZA_AZIONI_CATEGORIA }} />
-          </View>}
-          {righe}
-        </View>
-      </Scheda>
+          </View>
+        )}>
+        {righe}
+      </RiquadroARighe>
       <FinestraCategoria stato={aperta} tipo={tipo} onChiudi={() => setAperta(null)} />
     </>
   );

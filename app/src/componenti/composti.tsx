@@ -1,11 +1,11 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { Children, type ReactNode, useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Modal, Pressable, ScrollView, View } from 'react-native';
 import Svg, { Line, Polyline } from 'react-native-svg';
 import { euro, nomeMese, numero, percento, spostaMese } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { coloriCategorie, ombre, tintaCategoria, type NomeColore } from '../tema/token.ts';
-import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
+import { ALTEZZA_CONTROLLO, Anello, anelloFocus, Barra, Etichetta, Pulsante, PulsanteIcona, Separatore, Spunta, type StatoPressione, Tessera, type Tono, type ToneAvanzamento } from './base.tsx';
 import { Icona } from './Icona.tsx';
 import { LogoApp } from './LogoApp.tsx';
 
@@ -175,6 +175,54 @@ export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, tito
       ) : null}
       {children}
     </View>
+  );
+}
+
+// ---- CMP-22b Riquadro a righe ----
+// Un riquadro con un elenco di righe e un'intestazione (2026-11-08). Il contenitore è una Scheda con padding 0 e gap 0 (contenuto tagliato sui raggi);
+// l'intestazione e ogni riga portano il proprio padding, uguale in orizzontale così le colonne restano allineate; nessuna linea tra intestazione e prima
+// riga, un Separatore tra le righe, nessuno spazio extra sotto l'ultima. Computer: margine-scheda + margine-voce-h ai lati; telefono: margine-voce-h.
+//  - intestazione: `titolo` + `nota` a sinistra (con `icona` facoltativa), `destra` per colonne, totali o azioni; oppure `testata` per un'intestazione tutta propria
+//  - righe: i figli (ognuno è una riga; i Separatori si mettono da soli, a meno di `senzaSeparatori`)
+//  - `righeConMargine={false}`: le righe hanno già il loro padding orizzontale (margine-voce-h), il riquadro aggiunge solo la differenza
+//  - `vuoto`: testo mostrato se non ci sono righe; `azione`: riga d'azione in fondo (es. «+ Nuova …»), sotto un Separatore
+export function RiquadroARighe({ titolo, nota, icona, destra, testata, children, vuoto, azione, senzaSeparatori, righeConMargine = true, ruoloRighe, etichettaRighe }: {
+  titolo?: string; nota?: string; icona?: string; destra?: ReactNode; testata?: ReactNode; children?: ReactNode; vuoto?: string; azione?: ReactNode;
+  senzaSeparatori?: boolean; righeConMargine?: boolean; ruoloRighe?: string; etichettaRighe?: string;
+}) {
+  const compatto = useCompatto();
+  const px = compatto ? d['margine-voce-h'] : d['margine-scheda'] + d['margine-voce-h'];
+  const pxRighe = righeConMargine ? px : px - d['margine-voce-h'];
+  const pTesta = compatto ? d['margine-voce-h'] : d['margine-scheda'];
+  const righe = Children.toArray(children);
+  const intestazione = testata ?? (titolo ? (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-colonne'] }}>
+      {icona ? <Tessera icona={icona} misura="piccola" /> : null}
+      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+        <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2}>{titolo}</Testo>
+        {nota ? <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo> : null}
+      </View>
+      {destra}
+    </View>
+  ) : null);
+  return (
+    <Scheda titolo={undefined} style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+      {intestazione ? <View style={{ paddingHorizontal: px, paddingTop: pTesta, paddingBottom: d['spazio-icona'] }}>{intestazione}</View> : null}
+      <View role={ruoloRighe as never} aria-label={etichettaRighe}>
+        {righe.length ? righe.map((r, i) => (
+          <View key={(r as { key?: string }).key ?? i}>
+            {i > 0 && !senzaSeparatori ? <Separatore /> : null}
+            <View style={{ paddingHorizontal: pxRighe }}>{r}</View>
+          </View>
+        )) : vuoto ? <Testo colore="testo-secondario" style={{ paddingVertical: d['margine-voce-v'], paddingHorizontal: px, paddingBottom: pTesta }}>{vuoto}</Testo> : null}
+      </View>
+      {azione ? (
+        <View>
+          {righe.length || vuoto || intestazione ? <Separatore /> : null}
+          <View style={{ alignItems: 'flex-start', gap: d['spazio-testo'], paddingHorizontal: px, paddingVertical: d['spazio-testo'] }}>{azione}</View>
+        </View>
+      ) : null}
+    </Scheda>
   );
 }
 
@@ -575,7 +623,7 @@ export function RigaCategoria({ livello, ramo, nome, sottocategorie, previste, s
     const cifre = `Previste ${previste} · Uscite ${speso}`;
     return (
       <View accessibilityRole={'treeitem' as never} aria-level={livello + 1} aria-expanded={ramo === 'foglia' ? undefined : ramo === 'aperto'}
-        style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingLeft: livello * 12 }}>
+        style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'], minWidth: 0, paddingVertical: d['margine-voce-v'], paddingLeft: d['margine-voce-h'] + livello * 12, paddingRight: d['margine-voce-h'] }}>
         <View style={{ width: 24, alignItems: 'center', paddingTop: 10 }}>
           {ramo !== 'foglia' ? <Pressable accessibilityRole="button" accessibilityLabel={ramo === 'aperto' ? `Chiudi ${nome}` : `Apri ${nome}`} onPress={onApriChiudi} hitSlop={10}><Icona nome={ramo === 'aperto' ? 'chevron-down' : 'chevron-right'} misura={16} /></Pressable> : null}
         </View>

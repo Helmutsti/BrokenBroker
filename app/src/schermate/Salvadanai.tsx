@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { ALTEZZA_CONTROLLO, anelloFocus, Barra, Pulsante, type StatoPressione, Tessera } from '../componenti/base.tsx';
-import { Intestazione, NumeroChiave, RigaAvanzamento, RigaNumeri, Scheda, Vuoto } from '../componenti/composti.tsx';
+import { Intestazione, NumeroChiave, RigaAvanzamento, RigaNumeri, RiquadroARighe, Scheda, Vuoto } from '../componenti/composti.tsx';
 import { useDati } from '../dati/api.ts';
 import type { Salvadanaio, Traguardo } from '../dati/tipi.ts';
 import { euro, nomeMeseMinuscolo, percento } from '../formato.ts';
@@ -53,41 +53,36 @@ export function Salvadanai() {
 
   const scheda = (k: Salvadanaio) => {
     return (
-      <Scheda key={k.id}>
-        <View style={{ gap: d['spazio-blocco'] }}>
-          <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'center', gap: d['spazio-colonne'] }}>
-            <Pressable accessibilityRole="button" accessibilityLabel={k.nome} onPress={() => setAperto({ nodo: k })}
-              style={{ flex: compatto ? undefined : 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-              <Tessera icona={k.icona} misura="grande" />
-              <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
-                <Testo stile="titolo-scheda" numberOfLines={1}>{k.nome}</Testo>
-                <Testo stile="dettaglio-normale" colore="testo-secondario">{nota(k)}</Testo>
-              </View>
-            </Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Versa o preleva da ${k.nome}`} onPress={() => setVersa(k)}
-              style={(s: StatoPressione) => [{ flexShrink: 0, minHeight: compatto ? 44 : ALTEZZA_CONTROLLO, justifyContent: 'center', alignItems: compatto ? 'flex-start' : 'flex-end', paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
-                backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent', cursor: 'pointer' } as object, anelloFocus(c, s.focused)]}>
-              <Testo stile={compatto ? 'titolo-scheda' : 'numero-grande'}>{euro(k.dentro)}</Testo>
-            </Pressable>
-          </View>
-          {k.percentuale !== null ? <Barra valore={k.percentuale} tono={k.percentuale >= 100 ? 'ok' : 'accento'} /> : null}
-          {k.figli.length ? <View>{righe(k.figli, 0)}</View> : null}
-          {k.traguardi.length ? (
-            <View>
-              {[...k.traguardi].sort((a, b) => Number(a.importo) - Number(b.importo)).map((t) => (
-                <RigaAvanzamento key={t.id} icona="shield" nome={t.nome} importo={euro(t.importo)} percentuale={percento(t.percentuale)} valore={t.percentuale}
-                  stato={t.percentuale >= 100 ? 'completo' : 'attenzione'} onApri={() => setTraguardo({ salvadanaio: k, traguardo: t })} />
-              ))}
+      <RiquadroARighe key={k.id} righeConMargine={false}
+        testata={
+          <View style={{ gap: d['spazio-blocco'] }}>
+            <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'stretch' : 'center', gap: d['spazio-colonne'] }}>
+              <Pressable accessibilityRole="button" accessibilityLabel={k.nome} onPress={() => setAperto({ nodo: k })}
+                style={{ flex: compatto ? undefined : 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+                <Tessera icona={k.icona} misura="grande" />
+                <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+                  <Testo stile="titolo-scheda" numberOfLines={1}>{k.nome}</Testo>
+                  <Testo stile="dettaglio-normale" colore="testo-secondario">{nota(k)}</Testo>
+                </View>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel={`Versa o preleva da ${k.nome}`} onPress={() => setVersa(k)}
+                style={(s: StatoPressione) => [{ flexShrink: 0, minHeight: compatto ? 44 : ALTEZZA_CONTROLLO, justifyContent: 'center', alignItems: compatto ? 'flex-start' : 'flex-end', paddingHorizontal: d['margine-etichetta-h'], borderRadius: d['raggio-controllo'],
+                  backgroundColor: s.hovered ? c['sfondo-hover'] : 'transparent', cursor: 'pointer' } as object, anelloFocus(c, s.focused)]}>
+                <Testo stile={compatto ? 'titolo-scheda' : 'numero-grande'}>{euro(k.dentro)}</Testo>
+              </Pressable>
             </View>
-          ) : null}
-          <View style={{ alignItems: 'flex-start' }}>
-            <Pulsante tipo="secondario" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => setTraguardo({ salvadanaio: k, traguardo: null })} />
-          </View>
-          <View style={{ alignItems: 'flex-start' }}>
-            <Pulsante tipo="testo" icona="plus" etichetta={k.figli.length ? 'Aggiungi sotto-salvadanaio' : 'Dividi in sotto-salvadanai'} onPress={() => setAperto({ nodo: null, padre: k })} />
-          </View>
-        </View>
-      </Scheda>
+            {k.percentuale !== null ? <Barra valore={k.percentuale} tono={k.percentuale >= 100 ? 'ok' : 'accento'} /> : null}
+          </View>}
+        azione={<>
+          <Pulsante tipo="secondario" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => setTraguardo({ salvadanaio: k, traguardo: null })} />
+          <Pulsante tipo="testo" icona="plus" etichetta={k.figli.length ? 'Aggiungi sotto-salvadanaio' : 'Dividi in sotto-salvadanai'} onPress={() => setAperto({ nodo: null, padre: k })} />
+        </>}>
+        {k.figli.map((f) => righe([f], 0))}
+        {[...k.traguardi].sort((a, b) => Number(a.importo) - Number(b.importo)).map((t) => (
+          <RigaAvanzamento key={t.id} icona="shield" nome={t.nome} importo={euro(t.importo)} percentuale={percento(t.percentuale)} valore={t.percentuale}
+            stato={t.percentuale >= 100 ? 'completo' : 'attenzione'} onApri={() => setTraguardo({ salvadanaio: k, traguardo: t })} />
+        ))}
+      </RiquadroARighe>
     );
   };
 

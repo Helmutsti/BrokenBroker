@@ -1,9 +1,9 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Barra, Esito, Etichetta, Pulsante, Separatore, Spunta, Tessera } from '../componenti/base.tsx';
+import { Barra, Esito, Etichetta, Pulsante, Spunta, Tessera } from '../componenti/base.tsx';
 import { Campo } from '../componenti/campi.tsx';
 import { Icona } from '../componenti/Icona.tsx';
-import { Intestazione, NumeroChiave, Scheda, SelettorePeriodo } from '../componenti/composti.tsx';
+import { Intestazione, NumeroChiave, RiquadroARighe, SelettorePeriodo } from '../componenti/composti.tsx';
 import { cancella, crea, sostituisci, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { ElencoSpese, Rata, Saldo, Spesa } from '../dati/tipi.ts';
@@ -165,23 +165,13 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
   // Nel riquadro delle rate la seconda colonna è quanto resta da pagare, non il totale all'anno.
   const alMese = voci.reduce((t, v) => t + v.alMese, 0), allAnno = voci.reduce((t, v) => t + (rimanenti ? v.residuo ?? 0 : v.all_anno), 0);
   const parola = rimanenti ? 'rimanenti' : 'all’anno';
-  const testata = compatto ? (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-colonne'] }}>
-      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
-        <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2}>{titolo}</Testo>
-        <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo>
-      </View>
-      <View style={{ alignItems: 'flex-end', gap: d['spazio-testo'] }}>
-        <Testo stile="dettaglio-normale" colore="testo-secondario">{`${euro(alMese)} al mese`}</Testo>
-        <Testo stile="dettaglio-normale" colore="testo-secondario">{`${euro(allAnno)} ${parola}`}</Testo>
-      </View>
+  const destra = compatto ? (
+    <View style={{ alignItems: 'flex-end', gap: d['spazio-testo'] }}>
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{`${euro(alMese)} al mese`}</Testo>
+      <Testo stile="dettaglio-normale" colore="testo-secondario">{`${euro(allAnno)} ${parola}`}</Testo>
     </View>
   ) : (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-colonne'] }}>
-      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
-        <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2}>{titolo}</Testo>
-        <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo>
-      </View>
+    <>
       <View style={{ width: AL_MESE, alignItems: 'flex-end', gap: d['spazio-testo'] }}>
         <Testo stile="etichetta-gruppo" colore="testo-secondario">AL MESE</Testo>
         <Testo stile="dettaglio-normale" colore="testo-terziario">{euro(alMese)}</Testo>
@@ -190,30 +180,12 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
         <Testo stile="etichetta-gruppo" colore="testo-secondario">{parola.toUpperCase()}</Testo>
         <Testo stile="dettaglio-normale" colore="testo-terziario">{euro(allAnno)}</Testo>
       </View>
-    </View>
+    </>
   );
-  // Box a righe (2026-11-08): il contenitore ha padding 0; l'intestazione e ogni riga portano il proprio padding (lo stesso in orizzontale, così le colonne
-  // restano allineate); l'ultima riga finisce col suo padding, senza spazio extra sotto.
-  const px = compatto ? d['margine-voce-h'] : d['margine-scheda'] + d['margine-voce-h'];
-  const pTesta = compatto ? d['margine-voce-h'] : d['margine-scheda'];
   return (
-    <Scheda style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
-      <View style={{ paddingHorizontal: px, paddingTop: pTesta, paddingBottom: d['spazio-icona'] }}>{testata}</View>
-      {voci.length ? voci.map((v, i) => (
-        <View key={v.chiave}>
-          {i > 0 ? <Separatore /> : null}
-          <View style={{ paddingHorizontal: px }}>
-            <Riga voce={v} onSpunta={() => onSpunta(v)} onApri={() => onApri(v)} />
-          </View>
-        </View>
-      )) : <Testo colore="testo-secondario" style={{ paddingVertical: d['margine-voce-v'], paddingHorizontal: px, paddingBottom: pTesta }}>{vuoto}</Testo>}
-      {azione ? (
-        <View>
-          <Separatore />
-          <View style={{ alignItems: 'flex-start', paddingHorizontal: px, paddingVertical: d['spazio-testo'] }}>{azione}</View>
-        </View>
-      ) : null}
-    </Scheda>
+    <RiquadroARighe titolo={titolo} nota={nota} destra={destra} vuoto={vuoto} azione={azione}>
+      {voci.map((v) => <Riga key={v.chiave} voce={v} onSpunta={() => onSpunta(v)} onApri={() => onApri(v)} />)}
+    </RiquadroARighe>
   );
 }
 
