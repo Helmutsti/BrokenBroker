@@ -1,12 +1,13 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Esito, Etichetta, Pulsante, Separatore, Spunta, Tessera } from '../componenti/base.tsx';
+import { Barra, Esito, Etichetta, Pulsante, Separatore, Spunta, Tessera } from '../componenti/base.tsx';
 import { Campo } from '../componenti/campi.tsx';
+import { Icona } from '../componenti/Icona.tsx';
 import { Intestazione, NumeroChiave, Scheda, SelettorePeriodo } from '../componenti/composti.tsx';
 import { cancella, crea, sostituisci, useDati } from '../dati/api.ts';
 import { useRiferimenti } from '../dati/contesto.tsx';
 import type { ElencoSpese, Rata, Saldo, Spesa } from '../dati/tipi.ts';
-import { euro, importoInTesto, leggiImporto, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
+import { data as dataTesto, euro, importoInTesto, leggiImporto, nomeMeseMinuscolo, oggiIso } from '../formato.ts';
 import { meseDi, periodoDi } from '../mesePersonale.ts';
 import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo } from '../tema/tema.tsx';
@@ -18,12 +19,12 @@ import { FinestraModulo, serve } from './moduli.tsx';
 // Uscite (decisione 72, la pagina iniziale): tutte le uscite, al mese e all'anno, con la tua quota. In alto quattro numeri sul saldo unico (scritto a mano;
 // spuntare una voce lo fa scendere). Sotto tre riquadri: Mensili, Rate e Annuali (ogni 2 mesi o più, anche una volta sola). Nel mese contano le mensili,
 // le rate che cadono quel mese e le annuali che scadono quel mese (importo pieno). La spunta delle mensili vale per il mese che si guarda; quella delle rate per la rata in corso (come le annuali, anche in anticipo: conta nel mese in cui la spunti); quella delle annuali
-// c'è in ogni mese e vale per la scadenza in corso (la prima da questo mese in poi): spuntata in anticipo, resta spuntata fino a quando passa quel mese e conta
-// come già uscita (non tra «Devono ancora uscire»); nel mese della scadenza conta comunque tra le «Uscite del mese».
+// c'è in ogni mese e segna la QUOTA DEL MESE (decisione 73): spuntarla fa scendere il saldo e salire la cesta («raccolti X di Y») e la toglie da «Quanto deve uscire».
+// «Segna pagata» sta nei pulsanti della finestra della spesa (FinestraSpesa): la spesa è uscita davvero (scadenza in corso, anche in anticipo); scende solo la cesta, il saldo no. Sulla riga resta « · pagata il …» nel sottotesto.
 
 type Voce = {
   chiave: string; tipo: 'spesa' | 'rata'; spesa?: Spesa; rata?: Rata; nome: string; dettaglio: string; conto: string | null;
-  alMese: number; all_anno: number; residuo?: number; importo: number; nelMese: boolean; contate: number; contatePagate: number; fatta: boolean; spuntabile: boolean; ordine: string; icona: string; colore: string | null;
+  alMese: number; all_anno: number; residuo?: number; raccolto?: number; importo: number; nelMese: boolean; contate: number; contatePagate: number; fatta: boolean; pagata?: boolean; pagataIl?: string | null; spuntabile: boolean; ordine: string; icona: string; colore: string | null;
 };
 
 const AL_MESE = 104, ALL_ANNO = 124;
@@ -40,15 +41,10 @@ export function Uscite() {
   const [rata, setRata] = useState<Rata | 'nuova' | null>(null);
   const [scriviSaldo, setScriviSaldo] = useState(false);
   const { richiesta, chiedi } = rif;
-  // Richieste da altre schermate: «Nuova spesa» della barra laterale, «Apri la spesa» di un salvadanaio.
+  // Richiesta da un'altra schermata: «Nuova spesa» della barra laterale.
   useEffect(() => {
     if (richiesta.nuovaSpesa) { setSpesa('nuova'); chiedi({}); }
-    else if (richiesta.spesa && spese.dati) {
-      const s = spese.dati.spese.find((x) => x.id === richiesta.spesa);
-      if (s) setSpesa(s);
-      chiedi({});
-    }
-  }, [richiesta, spese.dati]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [richiesta]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const el = spese.dati, profilo = rif.profilo;
   if (!el || !rate.dati || !saldo.dati || !profilo) return <Caricamento errore={spese.errore ?? rate.errore ?? saldo.errore} />;
@@ -81,7 +77,8 @@ export function Uscite() {
       ordine = prossima ?? '9999';
     }
     return { chiave: s.id, tipo: 'spesa', spesa: s, nome: s.nome, dettaglio, conto: s.conto, alMese: Number(s.al_mese), all_anno: Number(s.all_anno), importo: Number(s.mia_quota),
-      nelMese: s.nel_mese, contate: 1, contatePagate: s.uscita ? 1 : 0, fatta: s.uscita, spuntabile: true, ordine, icona: s.icona ?? 'ellipsis', colore: s.colore };
+      raccolto: s.ogni_mesi === 1 ? undefined : Number(s.raccolto),
+      nelMese: s.nel_mese, contate: 1, contatePagate: s.ogni_mesi === 1 ? (s.uscita ? 1 : 0) : (s.quota_spuntata ? 1 : 0), fatta: s.ogni_mesi === 1 ? s.uscita : s.quota_spuntata, pagata: s.ogni_mesi === 1 ? undefined : s.uscita, pagataIl: s.pagata_il, spuntabile: true, ordine, icona: s.icona ?? 'ellipsis', colore: s.colore };
   };
   const voceRata = (x: Rata): Voce => {
     const n = x.numero ?? Math.min(x.numero_rate, x.pagate + 1);
@@ -117,10 +114,11 @@ export function Uscite() {
   const avanzo = sal === null ? null : sal - devono;
   const voci = (n: number) => `${n} ${n === 1 ? 'voce' : 'voci'}`;
 
+  // Mensili e rate: la spunta. Annuali: la casella è la quota del mese.
   const spunta = async (v: Voce) => {
     setErrore(null);
     try {
-      const rotta = v.tipo === 'spesa' ? `/spese-previste/${v.chiave}/spunta` : `/rate/${v.chiave}/spunta`;
+      const rotta = v.tipo === 'rata' ? `/rate/${v.chiave}/spunta` : v.pagata !== undefined ? `/spese-previste/${v.chiave}/quota` : `/spese-previste/${v.chiave}/spunta`;
       if (v.fatta) await cancella(`${rotta}?mese=${mese}`); else await crea(rotta, { mese });
     } catch (e) { setErrore((e as Error).message); }
   };
@@ -152,8 +150,8 @@ export function Uscite() {
       <Riquadro titolo="Mensili" nota={`Ogni mese. La spunta vale per ${nomeDelMese}.`} voci={mensili} vuoto="Nessuna spesa mensile. Aggiungi affitto, bollette e abbonamenti." onSpunta={spunta} onApri={apri} />
       <Riquadro titolo="Rate" nota={`Senza categoria. La casella c’è quando la rata scade entro ${nomeDelMese}.`} voci={dellaRata} vuoto="Nessuna rata." rimanenti onSpunta={spunta} onApri={apri}
         azione={<Pulsante tipo="testo" etichetta="Nuova rata" icona="plus" onPress={() => setRata('nuova')} />} />
-      <Riquadro titolo="Annuali" nota="Ogni 2 mesi o più, anche una volta sola. La spunta vale per la scadenza in corso." voci={annuali} vuoto="Nessuna spesa annuale." onSpunta={spunta} onApri={apri} />
-      <FinestraSpesa spesa={spesa === 'nuova' ? null : spesa} aperta={!!spesa} onChiudi={() => setSpesa(null)} />
+      <Riquadro titolo="Annuali" nota="Ogni 2 mesi o più, anche una volta sola. La casella segna la quota del mese; dalla finestra della spesa la segni pagata quando esce per intero." voci={annuali} vuoto="Nessuna spesa annuale." onSpunta={spunta} onApri={apri} />
+      <FinestraSpesa spesa={spesa === 'nuova' ? null : spesa} aperta={!!spesa} onChiudi={() => setSpesa(null)} mese={mese} />
       <FinestraRata rata={rata === 'nuova' ? null : rata} aperta={!!rata} onChiudi={() => setRata(null)} />
       <FinestraSaldo saldo={saldo.dati} aperta={scriviSaldo} onChiudi={() => setScriviSaldo(false)} />
     </>
@@ -198,7 +196,7 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
     <Scheda>
       <View style={{ gap: d['spazio-icona'] }}>
         {testata}
-        <View>
+                <View>
           {voci.length ? voci.map((v, i) => (
             <View key={v.chiave}>
               {i > 0 ? <Separatore /> : null}
@@ -212,28 +210,42 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
   );
 }
 
-// Una riga: spunta (mensili e rate: solo nel mese che si guarda; annuali: sempre), icona della categoria, nome e dettaglio, conto, al mese e all'anno.
+// Una riga: spunta (mensili e rate: solo nel mese che si guarda; annuali: la quota del mese, sempre), icona della categoria, nome e dettaglio, conto, al mese e all'anno.
+// Annuali: se la scadenza in corso è pagata, il sottotesto finisce con « · pagata il 12 nov» (in verde).
 function Riga({ voce: v, onSpunta, onApri }: { voce: Voce; onSpunta: () => void; onApri: () => void }) {
   const compatto = useCompatto();
   const colNome = v.fatta ? 'testo-terziario' : 'testo-primario';
   // Una rata con la scadenza nel futuro non ha la casella: al suo posto uno spazio vuoto della stessa misura, così le righe restano allineate.
   const bersaglio = compatto ? 44 : d['misura-bersaglio'];
   const spunta = v.spuntabile
-    ? <Spunta fatta={v.fatta} tenue onPress={onSpunta} etichetta={`${v.nome}: ${v.fatta ? 'uscita' : 'da pagare'}`} />
+    ? <Spunta fatta={v.fatta} tenue onPress={onSpunta} etichetta={v.pagata !== undefined ? `${v.nome}: quota del mese ${v.fatta ? 'spuntata' : 'da spuntare'}` : `${v.nome}: ${v.fatta ? 'uscita' : 'da pagare'}`} />
     : <View style={{ width: bersaglio, height: bersaglio }} />;
+  const pagata = v.pagata && v.pagataIl ? <Testo stile="dettaglio-normale" colore="testo-ok">{` · pagata il ${dataTesto(v.pagataIl, 'corta')}`}</Testo> : null;
+  const sottotesto = (righe: number, testo: string) => (
+    <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={righe}>{testo}{pagata}</Testo>
+  );
+  const cifre = (
+    <>
+      <View style={{ width: AL_MESE, alignItems: 'flex-end' }}><Testo stile="corpo-forte" colore={colNome}>{euro(v.alMese)}</Testo></View>
+      <View style={{ width: ALL_ANNO, alignItems: 'flex-end' }}><Testo colore="testo-secondario">{euro(v.residuo ?? v.all_anno)}</Testo></View>
+    </>
+  );
   if (compatto) return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingVertical: d['spazio-testo'] }}>
       {spunta}
-      <Pressable accessibilityRole="button" accessibilityLabel={v.nome} onPress={onApri} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44 }}>
-        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-          <Testo stile="corpo-forte" colore={colNome} numberOfLines={1}>{v.nome}</Testo>
-          <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={3}>{[v.dettaglio, v.conto].filter(Boolean).join(' · ')}</Testo>
-        </View>
-        <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
-          <Testo stile="corpo-forte" colore={colNome}>{euro(v.alMese)}</Testo>
-          <Testo stile="dettaglio-normale" colore="testo-secondario">{v.residuo !== undefined ? `${euro(v.residuo)} rimanenti` : `${euro(v.all_anno)} /anno`}</Testo>
-        </View>
-      </Pressable>
+      <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+        <Pressable accessibilityRole="button" accessibilityLabel={v.nome} onPress={onApri} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], minHeight: 44 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Testo stile="corpo-forte" colore={colNome} numberOfLines={1}>{v.nome}</Testo>
+            {sottotesto(3, [v.dettaglio, v.conto].filter(Boolean).join(' · '))}
+            <Raccolti voce={v} />
+          </View>
+          <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 2 }}>
+            <Testo stile="corpo-forte" colore={colNome}>{euro(v.alMese)}</Testo>
+            <Testo stile="dettaglio-normale" colore="testo-secondario">{v.residuo !== undefined ? `${euro(v.residuo)} rimanenti` : `${euro(v.all_anno)} /anno`}</Testo>
+          </View>
+        </Pressable>
+      </View>
     </View>
   );
   return (
@@ -243,12 +255,25 @@ function Riga({ voce: v, onSpunta, onApri }: { voce: Voce; onSpunta: () => void;
         <Tessera icona={v.icona} misura="piccola" tono={v.colore ? 'accento' : 'neutro'} tinta={v.colore ?? undefined} />
         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
           <Testo stile="corpo-forte" colore={colNome} numberOfLines={1}>{v.nome}</Testo>
-          <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={2}>{v.dettaglio}</Testo>
+          {sottotesto(2, v.dettaglio)}
+          <Raccolti voce={v} />
         </View>
         {v.conto ? <Etichetta testo={v.conto} icona="wallet" tono="neutro" /> : null}
-        <View style={{ width: AL_MESE, alignItems: 'flex-end' }}><Testo stile="corpo-forte" colore={colNome}>{euro(v.alMese)}</Testo></View>
-        <View style={{ width: ALL_ANNO, alignItems: 'flex-end' }}><Testo colore="testo-secondario">{euro(v.residuo ?? v.all_anno)}</Testo></View>
       </Pressable>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>{cifre}</View>
+    </View>
+  );
+}
+
+// «raccolti X di Y» con la barra che si riempie, sotto il nome di una spesa non mensile (la sua cesta, decisione 73): larghezza contenuta come il testo;
+// in rosso se il raccolto è sotto zero, piena (ok) quando arriva a Y.
+function Raccolti({ voce: v }: { voce: Voce }) {
+  if (v.raccolto === undefined) return null;
+  const sotto = v.raccolto < -0.005, piena = v.importo > 0 && v.raccolto >= v.importo - 0.005;
+  return (
+    <View style={{ alignSelf: 'flex-start', width: 180, maxWidth: '100%', gap: 4, paddingVertical: 2 }}>
+      <Testo stile="dettaglio-forte" colore={sotto ? 'testo-errore' : piena ? 'testo-ok' : 'testo-secondario'}>{`raccolti ${euro(v.raccolto)} di ${euro(v.importo)}`}</Testo>
+      <Barra valore={v.importo > 0 ? (v.raccolto / v.importo) * 100 : 0} tono={sotto ? 'errore' : piena ? 'ok' : 'accento'} />
     </View>
   );
 }

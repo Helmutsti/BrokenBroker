@@ -21,8 +21,10 @@ export type SpesaDelMese = {
   scadenza_in_corso: string | null; mia_percentuale: number; mia_quota: string;
   // Quanto costa la tua quota al mese e all'anno (ogni N mesi: quota / N e quota x 12 / N; una tantum: quota / 12 e quota).
   al_mese: string; all_anno: string;
-  // «Metti da parte» acceso: la spesa (annuale o una tantum) ha il suo salvadanaio dentro «Spese annuali».
-  metti_da_parte: boolean;
+  // La cesta delle spese non mensili (decisione 73): quanto hai raccolto (solo un numero, può andare sotto zero; 0 per le mensili).
+  raccolto: string;
+  // Solo non mensili: la quota del mese che si guarda è spuntata (sale il raccolto, scende il saldo) e quando è stata pagata la scadenza in corso (AAAA-MM-GG, null se no).
+  quota_spuntata: boolean; pagata_il: string | null;
 };
 
 // Annuale o una tantum: ogni_mesi null o >= 2. Mensili e rate non cambiano.
@@ -42,10 +44,10 @@ export function meseScadenzaInCorso(s: { prossima_scadenza: string | null; ogni_
   return meseDi(prossimaUscita(s.prossima_scadenza, s.ogni_mesi, p.dal, s.senza_giorno, inizio), inizio);
 }
 
-// La scadenza del mese personale `mese` è pagata?
-export function scadenzaPagata(spunte: SpuntaFatta[], mese: string, inizio: number): boolean {
+// La scadenza del mese personale `mese` è pagata? Ritorna la spunta che la paga (o undefined).
+export function pagamentoDellaScadenza(spunte: SpuntaFatta[], mese: string, inizio: number): SpuntaFatta | undefined {
   const q = periodo(mese, inizio);
-  return spunte.some((x) => (x.per_mese ? x.per_mese.slice(0, 7) === mese : x.data >= q.dal && x.data <= q.al));
+  return spunte.find((x) => (x.per_mese ? x.per_mese.slice(0, 7) === mese : x.data >= q.dal && x.data <= q.al));
 }
 
 export async function spunteDellaSpesa(db: PoolClient, id: string): Promise<SpuntaFatta[]> {
@@ -57,7 +59,7 @@ const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string): Promise<SpesaDelMese[]> {
   const { rows } = await db.query(
     `select s.id, s.nome, s.importo::text as importo, s.ogni_mesi, s.prossima_scadenza, s.senza_giorno, s.giorno_mese, s.conto_id, co.nome as conto,
-            exists (select 1 from ceste k where k.spesa_id = s.id) as metti_da_parte,
+            s.raccolto::text as raccolto,
             c.id as categoria_id, c.nome as categoria, pc.nome as categoria_padre,
             (with recursive su as (
                select id, padre_id, icona from categorie where id = c.id
@@ -71,7 +73,8 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
             case when s.proprietario_id <> fp_me() then (select u.nome from utenti u where u.id = s.proprietario_id) end as creata_da,
             exists (select 1 from condivisioni x where x.spesa_prevista_id = s.id) as condivisa,
             (select q.percentuale::text from quote q where q.spesa_prevista_id = s.id and q.utente_id = fp_me()) as percentuale_scritta,
-            exists (select 1 from spunte x where x.spesa_prevista_id = s.id and x.data between $1 and $2) as spuntata
+            exists (select 1 from spunte x where x.spesa_prevista_id = s.id and x.data between $1 and $2) as spuntata,
+            exists (select 1 from quote_annuali qa where qa.spesa_prevista_id = s.id and qa.utente_id = fp_me() and qa.per_mese = $4::date) as quota_spuntata
        from spese_previste s
        left join conti co on co.id = s.conto_id
        left join spese_dati_utente d on d.spesa_prevista_id = s.id and d.utente_id = fp_me()
@@ -80,7 +83,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
        left join categorie pc on pc.id = c.padre_id
       where ($3::uuid is null or s.id = $3)
       order by s.tipo, coalesce(pc.nome, c.nome), s.nome`,
-    [p.dal, p.al, soloId ?? null]);
+    [p.dal, p.al, soloId ?? null, `${p.mese}-01`]);
 
   const spunteAnnuali = new Map<string, SpuntaFatta[]>();
   for (const x of (await db.query<SpuntaFatta & { spesa: string }>(
@@ -93,6 +96,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
     const scadenza = scadenzaNelPeriodo(s.prossima_scadenza, s.ogni_mesi, p, s.senza_giorno, s.giorno_mese);
     const pct = s.percentuale_scritta !== null ? Number(s.percentuale_scritta) : s.condivisa ? 50 : s.mia ? 100 : 0;
     const meseInCorso = eAnnuale(s.ogni_mesi) ? meseScadenzaInCorso(s, p) : null;
+    const pagamento = meseInCorso ? pagamentoDellaScadenza(spunteAnnuali.get(s.id) ?? [], meseInCorso, inizioMese) : undefined;
     const importo = Number(s.importo);
     const quota = importo * pct / 100;
     return {
@@ -100,9 +104,12 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
       importo: cent(importo),
       scadenza,
       nel_mese: s.attiva && scadenza !== null,
-      // Uscita: spuntata nel mese (la spunta crea la transazione, decisione 61); un'annuale: la scadenza in corso è pagata, anche in anticipo.
-      uscita: meseInCorso ? scadenzaPagata(spunteAnnuali.get(s.id) ?? [], meseInCorso, inizioMese) : s.spuntata,
+      // Uscita: spuntata nel mese (la spunta crea la transazione, decisione 61); un'annuale: la scadenza in corso è segnata pagata, anche in anticipo.
+      uscita: meseInCorso ? !!pagamento : s.spuntata,
+      pagata_il: pagamento?.data ?? null,
+      quota_spuntata: eAnnuale(s.ogni_mesi) && s.quota_spuntata,
       scadenza_in_corso: meseInCorso,
+      raccolto: cent(Number(s.raccolto)),
       mia_percentuale: pct,
       mia_quota: cent(quota),
       al_mese: cent(s.ogni_mesi === null ? quota / 12 : quota / s.ogni_mesi),

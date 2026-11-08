@@ -16,7 +16,7 @@ type Riferimenti = {
   // Richieste tra schermate (barra laterale, «Apri la spesa», «Apri il salvadanaio»): la schermata che le gestisce le legge e le azzera.
   richiesta: Richiesta; chiedi: (r: Richiesta) => void;
 };
-export type Richiesta = { nuovaSpesa?: boolean; spesa?: string; salvadanaio?: string };
+export type Richiesta = { nuovaSpesa?: boolean };
 
 const Contesto = createContext<Riferimenti | null>(null);
 

@@ -5,13 +5,10 @@ import { ErroreApi, nonTrovato } from '../errori.ts';
 import * as v from '../valida.ts';
 
 // I salvadanai (decisione 72): liberi (non stanno in nessun conto), annidabili, con traguardo e data facoltativi e traguardi di copertura.
-// Si versa e si preleva a mano (POST /sposta). Il collegamento con una spesa annuale non si fa da qui ma dalla spesa («metti_da_parte»,
-// rotte/spese.ts): il salvadanaio collegato ha nome, traguardo, data e posizione che vengono dalla spesa, e si cambiano solo da lì.
+// Si versa e si preleva a mano (POST /sposta). Sono obiettivi (decisione 73): le spese non mensili hanno la loro cesta, un numero sulla spesa.
 // Montate su /salvadanai (e, come prima, su /ceste).
 
 export const rotteCeste = Router();
-
-const DA_SPESA = 'Si cambia dalla spesa';
 
 // Gli errori che il database scrive con un messaggio chiaro (regole sui salvadanai) diventano 400.
 const traduci = (e: unknown): never => {
@@ -63,11 +60,7 @@ rotteCeste.patch('/:id', async (req, res) => {
   const c = v.corpo(req.body);
   const campi = leggi(c, false);
   const s = await conUtente(res.locals.utenteId, async (db) => {
-    const attuale = (await db.query<{ spesa_id: string | null }>('select spesa_id from ceste where id = $1', [id])).rows[0];
-    if (!attuale) return undefined;
-    if (attuale.spesa_id && (campi.nome !== undefined || campi.traguardo !== undefined || campi.scadenza !== undefined || campi.padre_id !== undefined)) {
-      throw new ErroreApi(409, DA_SPESA);
-    }
+    if (!(await db.query('select 1 from ceste where id = $1', [id])).rowCount) return undefined;
     if (campi.padre_id && !(await db.query('select 1 from ceste where id = $1', [campi.padre_id])).rowCount) throw nonTrovato('Salvadanaio superiore');
     const set = v.setParziale(campi, 2);
     try {
@@ -79,14 +72,12 @@ rotteCeste.patch('/:id', async (req, res) => {
   res.json(s);
 });
 
-// Si elimina sempre (tranne un salvadanaio collegato a una spesa: lo si spegne dalla spesa). I sotto-salvadanai salgono in quello che lo
+// Si elimina sempre. I sotto-salvadanai salgono in quello che lo
 // conteneva e i suoi soldi propri vanno lì (se è in cima, escono da ogni salvadanaio).
 rotteCeste.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    const n = (await db.query<{ spesa_id: string | null }>('select spesa_id from ceste where id = $1', [id])).rows[0];
-    if (!n) throw nonTrovato('Salvadanaio');
-    if (n.spesa_id) throw new ErroreApi(409, DA_SPESA);
+    if (!(await db.query('select 1 from ceste where id = $1', [id])).rowCount) throw nonTrovato('Salvadanaio');
     await eliminaSalvadanaio(db, id);
   });
   res.status(204).end();
@@ -94,7 +85,7 @@ rotteCeste.delete('/:id', async (req, res) => {
 
 // Versa e preleva: `da` e `a` sono un salvadanaio o null (= fuori da ogni salvadanaio); almeno uno è un salvadanaio. Versare da null è
 // sempre possibile (nessun limite: non è il saldo); da un salvadanaio si prende al massimo quanto c'è nella sua parte propria (i
-// sotto-salvadanai hanno i loro soldi). Funziona anche su quelli collegati a una spesa. Risponde con l'albero di tutti i salvadanai.
+// sotto-salvadanai hanno i loro soldi). Risponde con l'albero di tutti i salvadanai.
 rotteCeste.post('/sposta', async (req, res) => {
   const c = v.corpo(req.body);
   const da = v.annullabile(c, 'da', () => v.id(c, 'da')) ?? null;

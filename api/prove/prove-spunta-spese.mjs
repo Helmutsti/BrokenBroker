@@ -50,7 +50,7 @@ try {
 
   // Una spesa con categoria e un conto come etichetta: spuntata il saldo scende, tolta torna. L'uscita ha la categoria e nessun conto.
   const affitto = await spesa({ nome: 'Affitto', importo: '700', categoria_id: cat.id, conto_id: principale.id });
-  verifica(affitto.categoria_id === cat.id && affitto.conto === 'Principale' && affitto.metti_da_parte === false && !('a_conto_id' in affitto), 'spesa con categoria e conto come etichetta', affitto);
+  verifica(affitto.categoria_id === cat.id && affitto.conto === 'Principale' && affitto.raccolto === '0.00' && !('a_conto_id' in affitto), 'spesa con categoria e conto come etichetta', affitto);
   verifica(affitto.al_mese === '700.00' && affitto.all_anno === '8400.00', 'costo al mese e all\'anno di una mensile', [affitto.al_mese, affitto.all_anno]);
   const s1 = await spunta(affitto.id);
   verifica(s1.s === 201 && await effettivo() === '300.00', 'spesa spuntata: il saldo scende di 700', await saldo());
@@ -137,45 +137,39 @@ try {
   verifica((await r('GET', '/rate/' + rata.id, A)).j.conto_id === null, 'la rata resta, senza conto');
   verifica(sPrincipale.s === 201 && (await togli(usata.id)).s === 204, 'la spunta di una spesa il cui conto è stato eliminato si toglie');
 
-  // Annuali spuntate in anticipo (decisione 72, aggiunte): in un mese in cui non scadono la spunta vale per la scadenza in corso, abbassa il saldo, il
-  // salvadanaio collegato scende, la prossima scadenza passa alla successiva e nel mese della scadenza non è tra quelle che devono ancora uscire.
+  // Annuali spuntate in anticipo (decisione 72, aggiunte): in un mese in cui non scadono la spunta vale per la scadenza in corso, segnata pagata non tocca il saldo (decisione 73: scendono le quote del mese), il
+  // raccolto della spesa scende (decisione 73), la prossima scadenza passa alla successiva e nel mese della scadenza non è tra quelle che devono ancora uscire.
   await r('PUT', '/saldo', A, { importo: '1000' });
   const tra = (m) => { const [a, mm] = mese.split('-').map(Number), t = a * 12 + mm - 1 + m; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, '0')}`; };
   const scadenzaTra3 = `${tra(3)}-10`;
-  const anticipo = (await r('POST', '/spese-previste', A, { nome: 'Assicurazione', importo: '300', ogni_mesi: 6, prossima_scadenza: scadenzaTra3, metti_da_parte: true })).j;
+  const anticipo = (await r('POST', '/spese-previste', A, { nome: 'Assicurazione', importo: '300', ogni_mesi: 6, prossima_scadenza: scadenzaTra3 })).j;
   const trovaA = async (m) => (await r('GET', `/spese-previste?mese=${m}`, A)).j.spese.find((x) => x.id === anticipo.id);
-  const salv = async () => (await r('GET', '/salvadanai', A)).j;
-  const cercaS = (alberi) => { for (const n of alberi) { if (n.spesa_id === anticipo.id) return n; const f = cercaS(n.figli ?? []); if (f) return f; } };
-  const dentroS = async () => { const x = cercaS(await salv()); return x ? { dentro: x.dentro, scadenza: x.scadenza } : null; };
+  const raccolto = async () => (await trovaA(mese)).raccolto;
   verifica((await trovaA(mese)).nel_mese === false && (await trovaA(mese)).uscita === false, 'annuale non in scadenza: non è nel mese e non è uscita', await trovaA(mese));
-  const sp0 = await dentroS();
-  verifica(sp0 && sp0.scadenza === scadenzaTra3, 'il salvadanaio collegato ha la scadenza della prima scadenza', sp0);
-  const idS = cercaS(await salv()).id;
-  await r('POST', '/salvadanai/sposta', A, { da: null, a: idS, importo: '200' });
+  verifica(await raccolto() === '0.00', 'la cesta parte da zero');
+  await r('PATCH', `/spese-previste/${anticipo.id}`, A, { raccolto: '200' });
   const prima0 = await effettivo();
   const anti = await r('POST', `/spese-previste/${anticipo.id}/spunta`, A, { mese });
-  verifica(anti.s === 201 && await effettivo() === (Number(prima0) - 300).toFixed(2), 'annuale spuntata in un mese senza scadenza: il saldo scende di 300', [anti.j, await effettivo()]);
+  verifica(anti.s === 201 && await effettivo() === prima0, 'annuale segnata pagata in un mese senza scadenza: il saldo resta fermo', [anti.j, await effettivo()]);
   verifica((await trovaA(mese)).uscita === true, 'annuale spuntata in anticipo: risulta uscita');
   verifica((await trovaA(tra(1))).uscita === true, 'anche nel mese dopo (ancora prima della scadenza) risulta uscita');
   verifica((await r('POST', `/spese-previste/${anticipo.id}/spunta`, A, { mese })).s === 409, 'spuntarla due volte: 409');
-  const sp1 = await dentroS();
-  verifica(sp1 && sp1.dentro === '0.00', 'il salvadanaio collegato scende (200 versati, la quota è 300: si svuota)', sp1);
-  verifica(sp1 && sp1.scadenza === `${tra(9)}-10`, 'dopo il pagamento la prossima scadenza del salvadanaio passa alla successiva', sp1);
+  verifica(await raccolto() === '-100.00', 'il raccolto scende della quota (200 - 300 = -100, può andare sotto zero)', await raccolto());
+  verifica((await trovaA(tra(4))).scadenza_in_corso === tra(9) && (await trovaA(tra(4))).raccolto === '-100.00', 'dopo il pagamento la scadenza in corso (da dopo la scadenza) passa alla successiva', await trovaA(tra(4)));
   const delMese = await trovaA(tra(3));
   verifica(delMese.nel_mese === true && delMese.uscita === true, 'nel mese della scadenza conta nel mese ma non deve più uscire', delMese);
   const dopo = await trovaA(tra(4));
   verifica(dopo.uscita === false && dopo.nel_mese === false, 'passato il mese della scadenza la casella torna vuota (quella dopo)', dopo);
   verifica((await r('DELETE', `/spese-previste/${anticipo.id}/spunta?mese=${tra(2)}`, A)).s === 204 && await effettivo() === prima0, 'tolta la spunta il saldo torna com\'era', await effettivo());
-  const sp2 = await dentroS();
-  verifica((await trovaA(mese)).uscita === false && sp2 && sp2.dentro === '200.00' && sp2.scadenza === scadenzaTra3, 'tolta la spunta tornano la casella, il salvadanaio e la scadenza', sp2);
+  verifica((await trovaA(mese)).uscita === false && await raccolto() === '200.00' && (await trovaA(mese)).scadenza_in_corso === tra(3), 'tolta la spunta tornano la casella, il raccolto e la scadenza', await trovaA(mese));
   // Spuntata nel mese della scadenza: vale lo stesso e la si toglie da lì.
   const nelMese = await r('POST', `/spese-previste/${anticipo.id}/spunta`, A, { mese: tra(3) });
   verifica(nelMese.s === 201 && (await trovaA(tra(3))).uscita === true && (await trovaA(mese)).uscita === true, 'spuntata nel mese della scadenza: vale per quella scadenza');
   verifica((await r('DELETE', `/spese-previste/${anticipo.id}/spunta?mese=${tra(3)}`, A)).s === 204 && await effettivo() === prima0, 'tolta dal mese della scadenza il saldo torna');
 
-  // «Metti da parte» non vale per le mensili.
-  const mensile = await r('POST', '/spese-previste', A, { nome: 'Mensile da parte', importo: '10', giorno_mese: 3, metti_da_parte: true });
-  verifica(mensile.s === 400, 'una mensile non si mette da parte (400)', mensile.j);
+  // La cesta non vale per le mensili.
+  const mensile = await r('POST', '/spese-previste', A, { nome: 'Mensile con cesta', importo: '10', giorno_mese: 3, raccolto: '5' });
+  verifica(mensile.s === 400, 'una mensile non ha la cesta (400)', mensile.j);
 } finally {
   try {
     psql(`delete from utenti where email like 'spunta%${n}@prova.it' or email = '${email}'`);

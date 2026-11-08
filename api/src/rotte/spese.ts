@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import type { PoolClient } from 'pg';
-import { accendiMettiDaParte, scalaSalvadanaioDellaSpesa, spegniMettiDaParte } from '../ceste.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
 import { oggi, periodo, periodoRichiesto } from '../periodo.ts';
@@ -45,14 +44,14 @@ async function categoriaMia(db: PoolClient, id: string | null | undefined) {
   if (!(await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id])).rowCount) throw nonTrovato('Categoria');
 }
 
-const ERRORE_MENSILE_DA_PARTE = 'Una spesa mensile non si mette da parte: serve per le annuali e le una tantum';
-
 function leggi(c: Record<string, unknown>, nuova: boolean) {
   const importo = v.importo(c, 'importo', nuova);
   if (importo !== undefined && Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
   return {
     nome: v.testo(c, 'nome', nuova, 120),
     importo,
+    // La cesta (decisione 73): il raccolto si può correggere a mano, anche sotto zero.
+    raccolto: v.importo(c, 'raccolto'),
     ogni_mesi: v.annullabile(c, 'ogni_mesi', () => v.intero(c, 'ogni_mesi', 1, 120)),
     prossima_scadenza: v.annullabile(c, 'prossima_scadenza', () => v.data(c, 'prossima_scadenza')),
     senza_giorno: v.booleano(c, 'senza_giorno'),
@@ -66,6 +65,8 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
 }
 
 type Campi = ReturnType<typeof leggi>;
+
+const ERRORE_RACCOLTO_MENSILE = 'Una spesa mensile non ha la cesta: serve per le spese ogni 2 mesi o più e per quelle una volta sola';
 
 // Decisione 44: una spesa mensile ha solo il giorno del mese, non una data. `prossima_scadenza` con ogni_mesi = 1
 // non si rifiuta (compatibilità coi vecchi client): diventa il giorno di quella data (a meno che `giorno_mese` non
@@ -93,15 +94,13 @@ rotteSpese.post('/', async (req, res) => {
   normalizzaMensile(campi, undefined);
   if (campi.senza_giorno && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa senza giorno ha bisogno almeno del mese');
   if (campi.ogni_mesi === null && !campi.prossima_scadenza) throw new ErroreApi(400, 'Una spesa una tantum ha bisogno della data');
-  const mettiDaParte = v.booleano(c, 'metti_da_parte');
-  if (mettiDaParte && campi.ogni_mesi === 1) throw new ErroreApi(400, ERRORE_MENSILE_DA_PARTE);
+  if (campi.raccolto !== undefined && campi.ogni_mesi === 1) throw new ErroreApi(400, ERRORE_RACCOLTO_MENSILE);
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     await categoriaMia(db, campi.categoria_id);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
       `insert into spese_previste (proprietario_id, ${voci.map(([k]) => k).join(', ')})
        values (fp_me(), ${voci.map((_, i) => `$${i + 1}`).join(', ')}) returning id`, voci.map(([, x]) => x));
-    if (mettiDaParte) await accendiMettiDaParte(db, { id: rows[0].id, nome: campi.nome! });
     const p = await periodoRichiesto(db, undefined);
     return (await speseDelMese(db, p, rows[0].id))[0];
   });
@@ -112,15 +111,13 @@ rotteSpese.patch('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body);
   const campi = leggi(c, false);
-  const mettiDaParte = v.booleano(c, 'metti_da_parte');
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     const sua = (await db.query<{ mia: boolean }>('select proprietario_id = fp_me() as mia from spese_previste where id = $1', [id])).rows[0];
     if (!sua) return undefined;
-    const prima = (await db.query<{ ogni_mesi: number | null; nome: string }>('select ogni_mesi, nome from spese_previste where id = $1', [id])).rows[0];
-    if (mettiDaParte !== undefined && !sua.mia) throw new ErroreApi(403, 'Solo chi ha creato la spesa può metterla da parte');
+    const prima = (await db.query<{ ogni_mesi: number | null }>('select ogni_mesi from spese_previste where id = $1', [id])).rows[0];
     normalizzaMensile(campi, prima.ogni_mesi);
     const ogniDopo = campi.ogni_mesi !== undefined ? campi.ogni_mesi : prima.ogni_mesi;
-    if (mettiDaParte && ogniDopo === 1) throw new ErroreApi(400, ERRORE_MENSILE_DA_PARTE);
+    if (campi.raccolto !== undefined && ogniDopo === 1) throw new ErroreApi(400, ERRORE_RACCOLTO_MENSILE);
     // Da mensile a periodica serve la data (il mese): niente più «mensile» da cui ricavarla.
     if (prima.ogni_mesi === 1 && campi.ogni_mesi !== undefined && campi.ogni_mesi !== 1 && !campi.prossima_scadenza) {
       throw new ErroreApi(400, campi.ogni_mesi === null ? 'Una spesa una tantum ha bisogno della data' : 'Una spesa non mensile ha bisogno almeno del mese');
@@ -130,7 +127,7 @@ rotteSpese.patch('/:id', async (req, res) => {
     const categoriaRicevuta = sua.mia ? undefined : campi.categoria_id;
     const modifiche = sua.mia ? campi : { ...campi, categoria_id: undefined };
     const vuote = Object.values(modifiche).every((x) => x === undefined);
-    if (vuote && categoriaRicevuta === undefined && mettiDaParte === undefined) throw new ErroreApi(400, 'Nessun campo da modificare');
+    if (vuote && categoriaRicevuta === undefined) throw new ErroreApi(400, 'Nessun campo da modificare');
     const set = vuote ? null : v.setParziale(modifiche, 2);
     if (categoriaRicevuta !== undefined) {
       await db.query(
@@ -142,15 +139,6 @@ rotteSpese.patch('/:id', async (req, res) => {
       const { rowCount } = await db.query(`update spese_previste set ${set.sql} where id = $1`, [id, ...set.valori]);
       if (!rowCount) return undefined;
     } else if (!(await db.query('select 1 from spese_previste where id = $1', [id])).rowCount) return undefined;
-    // Il salvadanaio collegato segue la spesa: spento se la spesa diventa mensile o se lo si spegne, acceso se lo si accende, altrimenti
-    // ne segue il nome.
-    if (sua.mia) {
-      const nome = campi.nome ?? prima.nome;
-      if (mettiDaParte === false || ogniDopo === 1) await spegniMettiDaParte(db, id);
-      else if (mettiDaParte === true || campi.nome !== undefined) {
-        if (mettiDaParte === true || (await db.query('select 1 from ceste where spesa_id = $1', [id])).rowCount) await accendiMettiDaParte(db, { id, nome });
-      }
-    }
     const p = await periodoRichiesto(db, undefined);
     return (await speseDelMese(db, p, id))[0];
   });
@@ -171,8 +159,6 @@ rotteSpese.post('/:id/vista', async (req, res) => {
 rotteSpese.delete('/:id', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {
-    // Un salvadanaio collegato alla spesa si spegne prima (i suoi soldi vanno in «Spese annuali»); se la spesa non è di chi chiede non esiste per lui.
-    await spegniMettiDaParte(db, id);
     if ((await db.query('delete from spese_previste where id = $1', [id])).rowCount) return;
     const visibile = (await db.query('select 1 from spese_previste where id = $1', [id])).rowCount;
     throw visibile ? new ErroreApi(403, 'Solo chi ha creato la spesa può cancellarla') : nonTrovato('Spesa prevista');
@@ -180,10 +166,41 @@ rotteSpese.delete('/:id', async (req, res) => {
   res.status(204).end();
 });
 
-// La spunta dice che la spesa è uscita e crea la sua uscita (la tua quota, con la categoria): il saldo scende (rotte/saldo.ts) e, se c'è, il
-// salvadanaio collegato scende. Togliendo la spunta tutto torna com'era.
-// Mensili: si spunta solo nel mese in cui cadono. Annuali e una tantum (ogni_mesi null o >= 2): si spunta in qualunque mese e la spunta vale per la
-// scadenza in corso (vedi `meseScadenzaInCorso`), per intero; `per_mese` ricorda il mese della scadenza pagata, anche se si paga in anticipo.
+// Le non mensili (ogni_mesi null o >= 2, decisione 73) hanno due gesti. La QUOTA DEL MESE (`/quota`, la casella della riga): la spunti in ogni mese, una per mese
+// personale; salva la tua quota «Al mese» di quel momento (`quote_annuali.importo`), il raccolto sale e il saldo scende della stessa cifra (saldi.ts);
+// togliendola tutto torna esattamente com'era. La spesa PAGATA (`/spunta`, «Segna pagata»): è l'uscita vera della scadenza in corso, anche in anticipo;
+// scende solo il raccolto (la tua quota della scadenza, `raccolto_scalato`, via trigger), il saldo no (i soldi sono già usciti mese per mese con le quote)
+// e non nasce nessun movimento. Togliendo la spunta il raccolto torna com'era.
+// Mensili: la spunta crea la tua uscita (la tua quota, con la categoria) e il saldo scende; si spunta solo nel mese in cui cadono.
+// Annuali e una tantum: la spunta vale per la scadenza in corso (vedi `meseScadenzaInCorso`), per intero; `per_mese` ricorda il mese della scadenza pagata.
+rotteSpese.post('/:id/quota', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  const c = v.corpo(req.body ?? {});
+  const risultato = await conUtente(res.locals.utenteId, async (db) => {
+    const p = await periodoRichiesto(db, c.mese);
+    const [s] = await speseDelMese(db, p, id);
+    if (!s) throw nonTrovato('Spesa prevista');
+    if (!eAnnuale(s.ogni_mesi)) throw new ErroreApi(400, 'La quota del mese vale solo per le spese ogni 2 mesi o più e per quelle una volta sola');
+    if (!s.attiva) throw new ErroreApi(400, 'La spesa non è attiva');
+    if (s.quota_spuntata) throw new ErroreApi(409, 'La quota di questo mese è già spuntata');
+    return (await db.query<{ id: string; importo: string }>(
+      'insert into quote_annuali (spesa_prevista_id, utente_id, per_mese, importo) values ($1, fp_me(), $2, $3) returning id, importo::text as importo',
+      [id, `${p.mese}-01`, s.al_mese])).rows[0];
+  });
+  res.status(201).json(risultato);
+});
+
+rotteSpese.delete('/:id/quota', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  await conUtente(res.locals.utenteId, async (db) => {
+    const p = await periodoRichiesto(db, req.query.mese);
+    if (!(await db.query('select 1 from spese_previste where id = $1', [id])).rowCount) throw nonTrovato('Spesa prevista');
+    const { rowCount } = await db.query('delete from quote_annuali where spesa_prevista_id = $1 and utente_id = fp_me() and per_mese = $2', [id, `${p.mese}-01`]);
+    if (!rowCount) throw nonTrovato('Quota del mese');
+  });
+  res.status(204).end();
+});
+
 rotteSpese.post('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   const c = v.corpo(req.body ?? {});
@@ -206,16 +223,16 @@ rotteSpese.post('/:id/spunta', async (req, res) => {
       if (data < p.dal || data > p.al) throw new ErroreApi(400, 'La data deve cadere nel mese della spunta');
     }
     const spunta = (await db.query<{ id: string; data: string }>(
-      'insert into spunte (utente_id, spesa_prevista_id, data, per_mese) values (fp_me(), $1, $2, $3) returning id, data', [id, data, perMese])).rows[0];
-    await uscitaDaSpunta(db, { spunta, mia: Number(s.mia_quota), descrizione: s.nome, categoria: s.categoria_id });
-    // Se un salvadanaio è collegato a questa spesa, scende della stessa quota (non sotto zero); togliendo la spunta torna com'era.
-    await scalaSalvadanaioDellaSpesa(db, id, spunta.id, Number(s.mia_quota), s.nome);
+      'insert into spunte (utente_id, spesa_prevista_id, data, per_mese, raccolto_scalato) values (fp_me(), $1, $2, $3, $4) returning id, data',
+      [id, data, perMese, annuale ? s.mia_quota : '0.00'])).rows[0];
+    // Le non mensili segnate pagate non toccano il saldo (le quote del mese sono già uscite): niente uscita.
+    if (!annuale) await uscitaDaSpunta(db, { spunta, mia: Number(s.mia_quota), descrizione: s.nome, categoria: s.categoria_id });
     return spunta;
   });
   res.status(201).json(risultato);
 });
 
-// Toglie la spunta (e con lei la sua uscita e lo spostamento dal salvadanaio): per le annuali quella della scadenza in corso vista da `mese`.
+// Toglie la spunta (e con lei la sua uscita, se c'è; il raccolto torna com'era): per le annuali quella della scadenza in corso vista da `mese`.
 rotteSpese.delete('/:id/spunta', async (req, res) => {
   const id = v.idPercorso(req.params.id);
   await conUtente(res.locals.utenteId, async (db) => {

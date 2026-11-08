@@ -18,21 +18,22 @@ export type Spesa = {
   nuova: boolean; creata_da: string | null; // ricevuta e non ancora aperta né categorizzata (decisione 43); chi l'ha creata
   scadenza: string | null; nel_mese: boolean; uscita: boolean;
   scadenza_in_corso: string | null; // annuali e una tantum: mese (AAAA-MM) della scadenza in corso; `uscita` dice se è già pagata, anche in anticipo
-  mia_percentuale: number; mia_quota: string; al_mese: string; all_anno: string; metti_da_parte: boolean; // la tua quota al mese e all'anno; ha il suo sotto-salvadanaio dentro «Spese annuali»
+  mia_percentuale: number; mia_quota: string; al_mese: string; all_anno: string; // la tua quota al mese e all'anno
+  // La cesta delle non mensili (decisione 73): quanto hai raccolto (solo un numero, anche sotto zero).
+  raccolto: string;
+  quota_spuntata: boolean; pagata_il: string | null; // non mensili: la quota del mese è spuntata; giorno in cui è stata segnata pagata la scadenza in corso
   quote?: { utente_id: string; nome: string; percentuale: string }[];
 };
 export type Periodo = { mese: string; dal: string; al: string };
 export type ElencoSpese = { periodo: Periodo; spese: Spesa[] };
 
 export type Traguardo = { id: string; nome: string; importo: string; ordine: number; percentuale: number };
-// Un salvadanaio (decisione 72): libero, annidabile (`padre_id`). `dentro` comprende i sotto-salvadanai, `versato` è la parte propria. Con una spesa
-// annuale collegata (`collegato`) nome, traguardo e data vengono da lei e si cambiano solo lì.
-export type SpesaDelSalvadanaio = { id: string; nome: string; importo: string; scadenza: string | null; senza_giorno: boolean; ogni_mesi: number | null; pagata: boolean };
+// Un salvadanaio (decisione 72): libero, annidabile (`padre_id`). `dentro` comprende i sotto-salvadanai, `versato` è la parte propria. È un obiettivo, senza legami con le spese.
 export type Salvadanaio = {
-  id: string; padre_id: string | null; nome: string; icona: string; spesa_id: string | null; collegato: boolean; versato: string; dentro: string;
+  id: string; padre_id: string | null; nome: string; icona: string; versato: string; dentro: string;
   traguardo: string | null; traguardo_scritto: string | null; scadenza: string | null; percentuale: number | null;
   mancano: string | null; mesi: number | null; metti_al_mese: string | null;
-  spesa: SpesaDelSalvadanaio | null; traguardi: Traguardo[]; figli: Salvadanaio[];
+  traguardi: Traguardo[]; figli: Salvadanaio[];
 };
 
 export type Rata = {

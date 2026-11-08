@@ -49,10 +49,10 @@ export function ConErrore({ campo, children }: { campo: string; children: ReactN
 export type AzioniModulo = { esegui: (fn: () => Promise<void>) => () => void; chiudi: () => void; lavoro: boolean };
 // Con `azioni` il piede si compone a mano (es. Versa e Preleva): riceve `esegui` (fa partire una funzione con gli errori sul modulo), `chiudi` e `lavoro`.
 // Con `testaTelefono` (stile delle finestre nuove) su telefono Annulla e Salva stanno nella testata.
-export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onElimina, etichettaSalva = 'Salva', etichettaElimina, confermaElimina, children, larghezza, intestazioneDestra, azioni, azioniSinistra, testaTelefono, senzaTessera, senzaSalva }: {
+export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onElimina, etichettaSalva = 'Salva', etichettaElimina, confermaElimina, children, larghezza, intestazioneDestra, azioni, azioniExtra, azioniSinistra, testaTelefono, senzaTessera, senzaSalva }: {
   titolo: string; icona?: string; aperta: boolean; onChiudi: () => void; onSalva: () => Promise<void>; onElimina?: () => Promise<void>;
   etichettaSalva?: string; etichettaElimina?: string; confermaElimina?: ConfermaElimina; children: ReactNode; larghezza?: number; intestazioneDestra?: ReactNode;
-  azioni?: (a: AzioniModulo) => ReactNode; azioniSinistra?: (a: AzioniModulo) => ReactNode; testaTelefono?: boolean; senzaTessera?: boolean; senzaSalva?: boolean;
+  azioni?: (a: AzioniModulo) => ReactNode; azioniExtra?: (a: AzioniModulo) => ReactNode; azioniSinistra?: (a: AzioniModulo) => ReactNode; testaTelefono?: boolean; senzaTessera?: boolean; senzaSalva?: boolean;
 }) {
   const compatto = useCompatto();
   const [chiede, setChiede] = useState(false);
@@ -79,7 +79,7 @@ export function FinestraModulo({ titolo, icona, aperta, onChiudi, onSalva, onEli
   return (
     <ContestoCampi.Provider value={campi}><ContestoErrore.Provider value={errore}>
       <Finestra titolo={titolo} icona={icona} aperta={aperta} onChiudi={chiudi} larghezza={larghezza} intestazioneDestra={intestazioneDestra} senzaTessera={senzaTessera}
-        onElimina={onElimina ? chiediElimina : undefined} etichettaElimina={etichettaElimina} azioniSinistra={azioniSinistra?.(a)}
+        onElimina={onElimina ? chiediElimina : undefined} etichettaElimina={etichettaElimina} azioniSinistra={azioniSinistra?.(a)} azioniExtra={azioniExtra?.(a)}
         testaTelefono={testaTelefono && !azioni ? { annulla, salva } : undefined}
         azioni={azioni ? azioni(a) : <>{annulla}{senzaSalva ? null : salva}</>}>
         <View style={{ gap: d['spazio-blocco'] }}>{children}</View>

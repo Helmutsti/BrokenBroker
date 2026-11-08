@@ -1,9 +1,8 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { ALTEZZA_CONTROLLO, anelloFocus, Barra, Pulsante, type StatoPressione, Tessera } from '../componenti/base.tsx';
 import { Intestazione, NumeroChiave, RigaAvanzamento, RigaNumeri, Scheda, Vuoto } from '../componenti/composti.tsx';
 import { useDati } from '../dati/api.ts';
-import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Salvadanaio, Traguardo } from '../dati/tipi.ts';
 import { euro, nomeMeseMinuscolo, percento } from '../formato.ts';
 import { useCompatto } from '../tema/compatto.ts';
@@ -12,8 +11,8 @@ import { Caricamento } from './comuni.tsx';
 import { euroCorto, FinestraSalvadanaio, FinestraTraguardo, FinestraVersa, piatti } from './FinestreSalvadanai.tsx';
 
 // Salvadanai (decisione 72): dove metti quello che avanza. Liberi (non stanno in un conto), annidabili, con traguardo e data facoltativi. Versi e prelevi tu,
-// a mano; non abbassano l'avanzo. Un riquadro per ogni salvadanaio principale, con i sotto-salvadanai come righe di avanzamento. Quelli dentro «Spese annuali»
-// sono legati a una spesa: nome, traguardo e data si cambiano solo dalla spesa.
+// a mano; non abbassano l'avanzo. Un riquadro per ogni salvadanaio principale, con i sotto-salvadanai come righe di avanzamento. Sono obiettivi: le spese non mensili
+// hanno la loro cesta dentro la spesa (decisione 73), non qui.
 
 const entro = (iso: string) => `entro ${nomeMeseMinuscolo(iso.slice(0, 7))} ${iso.slice(0, 4)}`;
 
@@ -28,21 +27,12 @@ function nota(k: Salvadanaio): string {
 const mettiAlMese = (xs: Salvadanaio[]): number => xs.reduce((t, k) => t + (k.metti_al_mese ? Number(k.metti_al_mese) : mettiAlMese(k.figli)), 0);
 
 export function Salvadanai() {
-  const rif = useRiferimenti();
   const compatto = useCompatto();
   const { c } = useTema();
   const albero = useDati<Salvadanaio[]>('/salvadanai');
   const [aperto, setAperto] = useState<{ nodo: Salvadanaio | null; padre?: Salvadanaio } | null>(null);
   const [traguardo, setTraguardo] = useState<{ salvadanaio: Salvadanaio; traguardo: Traguardo | null } | null>(null);
   const [versa, setVersa] = useState<Salvadanaio | null>(null);
-  const { richiesta, chiedi } = rif;
-  // «Apri il salvadanaio» dalla finestra di una spesa.
-  useEffect(() => {
-    if (!richiesta.salvadanaio || !albero.dati) return;
-    const k = piatti(albero.dati).find((x) => x.id === richiesta.salvadanaio);
-    if (k) setAperto({ nodo: k });
-    chiedi({});
-  }, [richiesta, albero.dati]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!albero.dati) return <Caricamento errore={albero.errore} />;
 
   const radici = albero.dati;
@@ -62,7 +52,6 @@ export function Salvadanai() {
   ));
 
   const scheda = (k: Salvadanaio) => {
-    const legati = k.figli.some((f) => f.collegato);
     return (
       <Scheda key={k.id}>
         <View style={{ gap: d['spazio-blocco'] }}>
@@ -94,13 +83,9 @@ export function Salvadanai() {
           <View style={{ alignItems: 'flex-start' }}>
             <Pulsante tipo="secondario" etichetta="Aggiungi traguardo di copertura" icona="plus" onPress={() => setTraguardo({ salvadanaio: k, traguardo: null })} />
           </View>
-          {legati ? (
-            <Testo stile="dettaglio-normale" colore="testo-secondario">Legati alle spese annuali con «Metti da parte ogni mese». Nome, traguardo e data non si cambiano qui: tocca una riga per aprire la sua spesa. Si svuotano quando spunti la spesa.</Testo>
-          ) : (
-            <View style={{ alignItems: 'flex-start' }}>
-              <Pulsante tipo="testo" icona="plus" etichetta={k.figli.length ? 'Aggiungi sotto-salvadanaio' : 'Dividi in sotto-salvadanai'} onPress={() => setAperto({ nodo: null, padre: k })} />
-            </View>
-          )}
+          <View style={{ alignItems: 'flex-start' }}>
+            <Pulsante tipo="testo" icona="plus" etichetta={k.figli.length ? 'Aggiungi sotto-salvadanaio' : 'Dividi in sotto-salvadanai'} onPress={() => setAperto({ nodo: null, padre: k })} />
+          </View>
         </View>
       </Scheda>
     );
@@ -115,7 +100,7 @@ export function Salvadanai() {
         <NumeroChiave etichetta="Mancano ai traguardi" valore={euro(mancano)} icona="target" nota={`Con le date: ${euro(alMese)} al mese`} />
       </RigaNumeri>
       {radici.length ? radici.map(scheda) : <Scheda><Vuoto testo="Nessun salvadanaio. Creane uno con «Nuovo salvadanaio»." /></Scheda>}
-      <FinestraSalvadanaio stato={aperto} albero={radici} onChiudi={() => setAperto(null)} onSposta={setVersa} />
+      <FinestraSalvadanaio stato={aperto} albero={radici} onChiudi={() => setAperto(null)} />
       <FinestraTraguardo stato={traguardo} onChiudi={() => setTraguardo(null)} />
       <FinestraVersa stato={versa} onChiudi={() => setVersa(null)} />
     </>

@@ -1,18 +1,14 @@
-import { useNavigation } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Pulsante } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
-import { Icona } from '../componenti/Icona.tsx';
 import { cancella, crea, modifica } from '../dati/api.ts';
-import { useRiferimenti } from '../dati/contesto.tsx';
 import type { Salvadanaio, Traguardo } from '../dati/tipi.ts';
 import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, percento } from '../formato.ts';
-import { useCompatto } from '../tema/compatto.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
 import { Affiancati, ConErrore, ErroreCampo, FinestraModulo, Meta, serve } from './moduli.tsx';
 
-// Le finestre dei salvadanai (decisione 72): Versa e Preleva, e il salvadanaio (nuovo, da modificare, oppure legato a una spesa annuale e quindi bloccato).
+// Le finestre dei salvadanai (decisione 72): Versa e Preleva, e il salvadanaio (nuovo o da modificare).
 
 export const piatti = (xs: Salvadanaio[]): Salvadanaio[] => xs.flatMap((k) => [k, ...piatti(k.figli)]);
 
@@ -82,14 +78,10 @@ export function FinestraVersa({ stato, onChiudi }: { stato: Salvadanaio | null; 
 }
 
 // ---- Il salvadanaio ----
-export function FinestraSalvadanaio({ stato, albero, onChiudi, onSposta }: {
-  stato: { nodo: Salvadanaio | null; padre?: Salvadanaio } | null; albero: Salvadanaio[]; onChiudi: () => void; onSposta: (k: Salvadanaio) => void;
+export function FinestraSalvadanaio({ stato, albero, onChiudi }: {
+  stato: { nodo: Salvadanaio | null; padre?: Salvadanaio } | null; albero: Salvadanaio[]; onChiudi: () => void;
 }) {
   const k = stato?.nodo ?? null;
-  const rif = useRiferimenti();
-  const compatto = useCompatto();
-  const { c } = useTema();
-  const navigation = useNavigation<{ navigate: (k: string) => void }>();
   const [nome, setNome] = useState('');
   const [icona, setIcona] = useState('piggy-bank');
   const [padre, setPadre] = useState('');
@@ -100,7 +92,6 @@ export function FinestraSalvadanaio({ stato, albero, onChiudi, onSposta }: {
     setNome(k?.nome ?? ''); setIcona(k?.icona ?? 'piggy-bank'); setPadre(k?.padre_id ?? stato.padre?.id ?? '');
     setTraguardo(importoInTesto(k?.traguardo_scritto)); setScadenza(dataInTesto(k?.scadenza));
   }, [stato]); // eslint-disable-line react-hooks/exhaustive-deps
-  const bloccato = !!k?.collegato;
   // Dove può stare: in nessuno o in un altro salvadanaio (non lui né quelli che ha dentro).
   const esclusi = new Set(k ? piatti([k]).map((x) => x.id) : []);
   const opzioniPadre: { valore: string; testo: string; icona?: string; rientro: number }[] = [{ valore: '', testo: 'Nessuno: è un salvadanaio principale', rientro: 0 }];
@@ -116,7 +107,6 @@ export function FinestraSalvadanaio({ stato, albero, onChiudi, onSposta }: {
     };
     if (k) await modifica(`/salvadanai/${k.id}`, corpo); else await crea('/salvadanai', corpo);
   };
-  const apriSpesa = () => { if (!k?.spesa_id) return; onChiudi(); rif.chiedi({ spesa: k.spesa_id }); navigation.navigate('uscite'); };
 
   const dentro = k ? Number(k.dentro) : 0;
   const numeri = (
@@ -129,37 +119,17 @@ export function FinestraSalvadanaio({ stato, albero, onChiudi, onSposta }: {
   const campi = (
     <>
       <Affiancati>
-        <Meta><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!k} disattivato={bloccato} /></ConErrore></Meta>
-        <Meta><View style={{ opacity: bloccato ? d['opacita-disattivato'] : 1 }} pointerEvents={bloccato ? 'none' : 'auto'}><SceltaIcona valore={icona} onCambia={setIcona} /></View></Meta>
+        <Meta><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Fondo emergenza" autoFocus={!k} /></ConErrore></Meta>
+        <Meta><SceltaIcona valore={icona} onCambia={setIcona} /></Meta>
       </Affiancati>
-      <Tendina etichetta="Dentro a" valore={padre} opzioni={opzioniPadre} onCambia={setPadre} iconaPrima="piggy-bank" disattivato={bloccato} />
+      <Tendina etichetta="Dentro a" valore={padre} opzioni={opzioniPadre} onCambia={setPadre} iconaPrima="piggy-bank" />
       <Affiancati>
-        <Meta><ConErrore campo="traguardo"><Campo etichetta="Traguardo (facoltativo)" valore={bloccato && k?.traguardo ? importoInTesto(k.traguardo) : traguardo} onCambia={setTraguardo} inputMode="decimal" segnaposto="0,00" disattivato={bloccato} /></ConErrore></Meta>
-        <Meta><ConErrore campo="scadenza"><CampoData etichetta="Entro il (facoltativo)" valore={scadenza} onCambia={setScadenza} facoltativa segnaposto="Nessuna data" disattivato={bloccato} /></ConErrore></Meta>
+        <Meta><ConErrore campo="traguardo"><Campo etichetta="Traguardo (facoltativo)" valore={traguardo} onCambia={setTraguardo} inputMode="decimal" segnaposto="0,00" /></ConErrore></Meta>
+        <Meta><ConErrore campo="scadenza"><CampoData etichetta="Entro il (facoltativo)" valore={scadenza} onCambia={setScadenza} facoltativa segnaposto="Nessuna data" /></ConErrore></Meta>
       </Affiancati>
       {numeri}
       <Testo stile="dettaglio-normale" colore="testo-secondario">La cifra dentro si cambia con Versa e Preleva.</Testo>
     </>
-  );
-
-  if (bloccato && k) return (
-    <FinestraModulo titolo="Modifica salvadanaio" aperta={!!stato} onChiudi={onChiudi} onSalva={async () => {}} senzaTessera
-      azioniSinistra={({ chiudi }) => (
-        <>
-          <Pulsante etichetta="Preleva" icona="arrow-up-right" onPress={() => { chiudi(); onSposta(k); }} />
-          <Pulsante etichetta="Versa" icona="arrow-down-left" onPress={() => { chiudi(); onSposta(k); }} />
-        </>
-      )}
-      azioni={({ chiudi }) => <Pulsante tipo="primario" etichetta="Chiudi" onPress={chiudi} />}>
-      <View style={{ flexDirection: compatto ? 'column' : 'row', alignItems: compatto ? 'flex-start' : 'center', gap: d['spazio-colonne'], padding: d['spazio-blocco'], borderRadius: d['raggio-controllo'], backgroundColor: c['sfondo-accento-tenue'] }}>
-        <View style={{ flex: compatto ? undefined : 1, flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-icona'] }}>
-          <Icona nome="info" misura={20} colore="icona-accento" />
-          <Testo colore="testo-accento" style={{ flex: 1 }}>{`Legato alla spesa annuale ${k.spesa?.nome ?? k.nome}. Nome, traguardo e data vengono dalla spesa e si cambiano solo lì.`}</Testo>
-        </View>
-        <Pulsante tipo="testo" etichetta="Apri la spesa" onPress={apriSpesa} />
-      </View>
-      {campi}
-    </FinestraModulo>
   );
 
   return (

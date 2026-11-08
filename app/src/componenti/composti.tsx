@@ -180,9 +180,10 @@ export function Scheda({ titolo, nota, icona, children, azione, dopoTitolo, tito
 
 // ---- CMP-32 Finestra ----
 // Su telefono occupa tutto lo schermo: titolo in alto, campi che scorrono, Annulla/Salva sempre in fondo.
-export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, azioniSinistra, onElimina, etichettaElimina = 'Elimina', larghezza, intestazioneDestra, testaTelefono, senzaTessera }: {
+export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, azioniExtra, azioniSinistra, onElimina, etichettaElimina = 'Elimina', larghezza, intestazioneDestra, testaTelefono, senzaTessera }: {
   titolo: string; icona?: string; aperta: boolean; onChiudi: () => void; children: ReactNode; azioni?: ReactNode; onElimina?: () => void; etichettaElimina?: string; larghezza?: number;
   intestazioneDestra?: ReactNode; // facoltativo: accanto al titolo, prima del pulsante Chiudi
+  azioniExtra?: ReactNode; // a destra, prima di Annulla e Salva (su telefono con testata: a larghezza piena sopra Elimina)
   azioniSinistra?: ReactNode; // a sinistra del piede (dopo Elimina), per i pulsanti che non sono Annulla e Salva
   // Telefono: Annulla (testo) a sinistra, titolo al centro e il pulsante principale a destra, nella testata; in fondo resta solo Elimina.
   testaTelefono?: { annulla: ReactNode; salva: ReactNode };
@@ -199,11 +200,12 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, az
     </View>
   );
   const iconaElimina = onElimina ? 'trash-2' : undefined;
-  const piede = azioni || onElimina || azioniSinistra ? (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], paddingTop: d['spazio-blocco'] }}>
+  const piede = azioni || onElimina || azioniSinistra || azioniExtra ? (
+    <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: d['spazio-colonne'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-separatore'], paddingTop: d['spazio-blocco'] }}>
       {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} icona={iconaElimina} onPress={onElimina} /> : null}
       {azioniSinistra}
       <View style={{ flex: 1 }} />
+      {azioniExtra}
       {azioni}
     </View>
   ) : null;
@@ -217,6 +219,7 @@ export function Finestra({ titolo, icona, aperta, onChiudi, children, azioni, az
         </View>
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: 16, gap: d['spazio-gruppo'] }}>
           {children}
+          {azioniExtra}
           {onElimina ? <Pulsante tipo="pericolo" etichetta={etichettaElimina} icona={iconaElimina} larghezzaPiena onPress={onElimina} /> : null}
         </ScrollView>
       </View>

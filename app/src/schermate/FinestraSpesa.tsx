@@ -1,12 +1,11 @@
-import { useNavigation } from '@react-navigation/native';
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
+import { Barra, Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina, TendinaGiorni } from '../componenti/campi.tsx';
-import { cancella, crea, modifica, useDati } from '../dati/api.ts';
+import { cancella, crea, modifica } from '../dati/api.ts';
 import { opzioniCategorie, opzioniConti, useRiferimenti } from '../dati/contesto.tsx';
-import type { Salvadanaio, Spesa } from '../dati/tipi.ts';
-import { data, dataInTesto, euro, importoInTesto, leggiData, leggiImporto, oggiIso } from '../formato.ts';
+import type { Spesa } from '../dati/tipi.ts';
+import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, oggiIso } from '../formato.ts';
 import { primaOccorrenzaPersonale } from '../mesePersonale.ts';
 import { d, Testo } from '../tema/tema.tsx';
 import { poiDate, proxSpesaDaPagare } from './comuni.tsx';
@@ -18,24 +17,9 @@ type Frequenza = 'mese' | 'n' | 'una';
 // contando per mesi personali (il mese personale in corso è ancora buono). Senza giorno vale tutto il mese personale: si salva il giorno 1.
 export const primaOccorrenza = primaOccorrenzaPersonale;
 
-// Il salvadanaio collegato a una spesa e quello che lo contiene, se ci sono.
-function collegato(albero: Salvadanaio[] | null, spesaId: string | undefined): { nodo: Salvadanaio; padre: Salvadanaio | null } | null {
-  if (!albero || !spesaId) return null;
-  const visita = (xs: Salvadanaio[], padre: Salvadanaio | null): { nodo: Salvadanaio; padre: Salvadanaio | null } | null => {
-    for (const x of xs) {
-      if (x.spesa_id === spesaId) return { nodo: x, padre };
-      const dentro = visita(x.figli, x);
-      if (dentro) return dentro;
-    }
-    return null;
-  };
-  return visita(albero, null);
-}
-
-// Aggiungi o modifica una spesa (decisione 72): nome e categoria, quando si ripete, importo e conto (solo etichetta), divisione e, per le non mensili, «Metti da parte ogni mese».
-export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void }) {
+// Aggiungi o modifica una spesa (decisione 72): nome e categoria, quando si ripete, importo e conto (solo etichetta), divisione e, per le non mensili già salvate, la «Cesta» (quanto hai raccolto: sale con la quota del mese spuntata, scende con la spesa pagata, si corregge a mano; decisione 73).
+export function FinestraSpesa({ spesa, aperta, onChiudi, mese }: { spesa: Spesa | null; aperta: boolean; onChiudi: () => void; mese?: string }) {
   const rif = useRiferimenti();
-  const navigation = useNavigation<{ navigate: (k: string) => void }>();
   const inizio = rif.profilo?.inizio_mese ?? 1;
   const [nome, setNome] = useState('');
   const [categoria, setCategoria] = useState<string | null>(null);
@@ -46,10 +30,8 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const [giornoMese, setGiornoMese] = useState('');
   const [importo, setImporto] = useState('');
   const [conto, setConto] = useState<string | null>(null);
-  const [mettiDaParte, setMettiDaParte] = useState(false);
+  const [raccolto, setRaccolto] = useState('');
   const div = useDivisione({ aperta, voce: 'spesa', rotta: '/spese-previste', origine: spesa ? { id: spesa.id, mia: spesa.mia, condiviso: spesa.condivisa, miaPercentuale: spesa.mia_percentuale } : null });
-  const albero = useDati<Salvadanaio[]>(aperta && spesa ? '/salvadanai' : null).dati;
-  const legato = collegato(albero, spesa?.id);
 
   // Aprire una spesa ricevuta la segna come vista: sparisce l'etichetta «Nuova».
   useEffect(() => {
@@ -64,7 +46,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     setGiornoMese(s?.ogni_mesi === 1 && s.giorno_mese ? String(s.giorno_mese) : '');
     const prossima = s && s.ogni_mesi !== 1 ? (s.ogni_mesi === null ? s.prossima_scadenza : proxSpesaDaPagare(s, oggiIso(), inizio) ?? s.prossima_scadenza) : null;
     setDataScad(dataInTesto(prossima)); setDataIniziale(dataInTesto(prossima));
-    setMettiDaParte(s?.metti_da_parte ?? false);
+    setRaccolto(importoInTesto(s?.raccolto));
   }, [aperta, spesa]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const salva = async () => {
@@ -81,13 +63,20 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     }
     const g = giornoMese ? Number(giornoMese) : null;
     const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 ? g : null,
-      conto_id: conto, categoria_id: categoria, ...(ogni !== 1 && (!spesa || spesa.mia) ? { metti_da_parte: mettiDaParte } : {}) };
+      conto_id: conto, categoria_id: categoria, ...(ogni !== 1 && spesa && spesa.ogni_mesi !== 1 && raccolto !== importoInTesto(spesa.raccolto)
+        ? { raccolto: serve(leggiImporto(raccolto), 'Scrivi quanto hai raccolto, es. 150 (anche negativo)', 'raccolto') } : {}) };
     const salvata = spesa ? await modifica<Spesa>(`/spese-previste/${spesa.id}`, corpo) : await crea<Spesa>('/spese-previste', corpo);
     if (spesa && !spesa.mia) return; // la divisione la decide chi l'ha creata
     await div.salva(salvata.id);
   };
 
-  const apriSalvadanaio = () => { if (!legato) return; onChiudi(); rif.chiedi({ salvadanaio: legato.nodo.id }); navigation.navigate('salvadanai'); };
+  // «Segna pagata»: la spunta d'uscita della scadenza in corso (per_mese = il mese che si guarda nella pagina Uscite); se è già pagata, la toglie.
+  const segnaPagata = async () => {
+    if (!spesa) return;
+    const rotta = `/spese-previste/${spesa.id}/spunta`;
+    if (spesa.uscita) await cancella(`${rotta}?mese=${mese}`); else await crea(rotta, { mese });
+  };
+  const pagabile = !!spesa && spesa.ogni_mesi !== 1 && !!mese;
 
   const percentuale = div.divisione === 'no' ? 100 : div.divisione === 'meta' ? 50 : Number(div.miaQuota.replace(',', '.')) || 0;
   const cifra = leggiImporto(importo);
@@ -98,7 +87,6 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
   const altro = div.nomeAltro ?? 'l’altra persona';
   const nessuno = !!div.persone && div.persone.length === 0;
   const mostraQuota = div.condiviso || div.divisione !== 'no';
-  const possoMettereDaParte = !spesa || spesa.mia;
 
   // Come l'API: ognuno ha la sua quota calcolata da sola e arrotondata al centesimo (api/src/spese.ts).
   let avvisoCentesimi: string | null = null;
@@ -115,19 +103,16 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
     }
   }
 
-  let aiutoDaParte: string;
-  if (mettiDaParte && legato) {
-    const n = legato.nodo;
-    const stato = [n.traguardo ? `${euro(n.dentro)} su ${euro(n.traguardo)}` : euro(n.dentro), n.scadenza ? `entro il ${data(n.scadenza)}` : null].filter(Boolean).join(' ');
-    aiutoDaParte = `Legata al sotto-salvadanaio ${legato.padre?.nome ?? 'Spese annuali'} › ${n.nome}: ${stato}${n.metti_al_mese ? `, metti ${euro(n.metti_al_mese)} al mese` : ''}. Nome, traguardo e data vengono da questa spesa e si cambiano solo qui. Quando spunti la spesa, la cifra esce da lì.`;
-  } else {
-    aiutoDaParte = 'Accendilo e crea un sotto-salvadanaio dentro «Spese annuali» con la cifra della prossima scadenza e la sua data: ti dice quanto mettere da parte ogni mese.';
-  }
+  // La cesta: quanto hai raccolto sulla tua quota della scadenza (un numero sulla spesa: il saldo lo muove la quota spuntata, non lui).
+  const quotaCesta = spesa ? Number(spesa.mia_quota) : 0;
+  const raccoltoNum = Number(leggiImporto(raccolto) ?? spesa?.raccolto ?? 0);
+  const percRaccolto = quotaCesta > 0 ? Math.round((Math.max(0, raccoltoNum) / quotaCesta) * 100) : 0;
 
   return (
     <FinestraModulo titolo={spesa ? 'Modifica spesa' : 'Nuova spesa'} aperta={aperta} onChiudi={onChiudi} onSalva={salva} testaTelefono senzaTessera
+      azioniExtra={pagabile ? ({ esegui, lavoro }) => <Pulsante tipo="secondario" etichetta={spesa!.uscita ? 'Togli pagamento' : 'Segna pagata'} icona={spesa!.uscita ? 'undo-2' : 'circle-check'} onPress={esegui(segnaPagata)} disattivato={lavoro} /> : undefined}
       onElimina={spesa?.mia ? () => cancella(`/spese-previste/${spesa.id}`).then(() => undefined) : undefined} etichettaElimina="Elimina spesa"
-      confermaElimina={spesa ? { nome: `«${spesa.nome}»`, dettaglio: spesa.condivisa ? 'Sparisce anche per l’altra persona.' : spesa.metti_da_parte ? 'Sparisce anche il suo sotto-salvadanaio: i soldi tornano in «Spese annuali».' : 'Sparisce dalla lista.' } : undefined}>
+      confermaElimina={spesa ? { nome: `«${spesa.nome}»`, dettaglio: spesa.condivisa ? 'Sparisce anche per l’altra persona.' : 'Sparisce dalla lista.' } : undefined}>
       <Affiancati>
         <Meta><ConErrore campo="nome"><Campo etichetta="Nome" valore={nome} onCambia={setNome} segnaposto="Es. Luce, gas, TIM" autoFocus={!spesa} /></ConErrore></Meta>
         <Meta>
@@ -179,14 +164,17 @@ export function FinestraSpesa({ spesa, aperta, onChiudi }: { spesa: Spesa | null
           ) : null}
         </View>
       ) : <Testo stile="dettaglio-normale" colore="testo-secondario">{`Condivisa con te: la tua quota è ${spesa.mia_percentuale}%. Può cambiarla solo chi l'ha creata.`}</Testo>}
-      {frequenza !== 'mese' && possoMettereDaParte ? (
+      {spesa && spesa.ogni_mesi !== 1 && frequenza !== 'mese' ? (
         <View style={{ gap: d['spazio-icona'] }}>
+          <Testo stile="dettaglio-forte">Cesta</Testo>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
-            <Testo stile="dettaglio-forte" style={{ flex: 1 }}>Metti da parte ogni mese</Testo>
-            <Interruttore acceso={mettiDaParte} onCambia={setMettiDaParte} etichetta="Metti da parte ogni mese" />
+            <Testo colore={raccoltoNum < 0 ? 'testo-errore' : 'testo-primario'}>{`Raccolti ${euro(raccoltoNum)} di ${euro(quotaCesta)}`}</Testo>
+            <Barra valore={percRaccolto} tono={raccoltoNum < 0 ? 'errore' : percRaccolto >= 100 ? 'ok' : 'accento'} />
           </View>
-          <Testo stile="dettaglio-normale" colore="testo-secondario">{aiutoDaParte}</Testo>
-          {mettiDaParte && legato ? <View style={{ alignItems: 'flex-start' }}><Pulsante tipo="testo" etichetta="Apri il salvadanaio" icona="piggy-bank" onPress={apriSalvadanaio} /></View> : null}
+          <ConErrore campo="raccolto">
+            <Campo etichetta="Raccolto (correggilo a mano)" valore={raccolto} onCambia={setRaccolto} inputMode="decimal" segnaposto="0,00"
+              aiuto="Sale con la spunta della quota del mese, scende quando segni la spesa pagata e la correggi a mano quando vuoi." />
+          </ConErrore>
         </View>
       ) : null}
     </FinestraModulo>
