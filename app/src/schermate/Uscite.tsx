@@ -177,7 +177,7 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
       </View>
     </View>
   ) : (
-    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-colonne'], paddingHorizontal: d['margine-voce-h'] }}>
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: d['spazio-colonne'] }}>
       <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
         <Testo stile="titolo-scheda" accessibilityRole="header" aria-level={2}>{titolo}</Testo>
         <Testo stile="dettaglio-normale" colore="testo-secondario">{nota}</Testo>
@@ -192,20 +192,27 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
       </View>
     </View>
   );
+  // Box a righe (2026-11-08): il contenitore ha padding 0; l'intestazione e ogni riga portano il proprio padding (lo stesso in orizzontale, così le colonne
+  // restano allineate); l'ultima riga finisce col suo padding, senza spazio extra sotto.
+  const px = compatto ? d['margine-voce-h'] : d['margine-scheda'] + d['margine-voce-h'];
+  const pTesta = compatto ? d['margine-voce-h'] : d['margine-scheda'];
   return (
-    <Scheda>
-      <View style={{ gap: d['spazio-icona'] }}>
-        {testata}
-                <View>
-          {voci.length ? voci.map((v, i) => (
-            <View key={v.chiave}>
-              {i > 0 ? <Separatore /> : null}
-              <Riga voce={v} onSpunta={() => onSpunta(v)} onApri={() => onApri(v)} />
-            </View>
-          )) : <Testo colore="testo-secondario" style={{ paddingVertical: d['margine-voce-v'], paddingHorizontal: d['margine-voce-h'] }}>{vuoto}</Testo>}
+    <Scheda style={{ padding: 0, gap: 0, overflow: 'hidden' }}>
+      <View style={{ paddingHorizontal: px, paddingTop: pTesta, paddingBottom: d['spazio-icona'] }}>{testata}</View>
+      {voci.length ? voci.map((v, i) => (
+        <View key={v.chiave}>
+          {i > 0 ? <Separatore /> : null}
+          <View style={{ paddingHorizontal: px }}>
+            <Riga voce={v} onSpunta={() => onSpunta(v)} onApri={() => onApri(v)} />
+          </View>
         </View>
-        {azione ? <View style={{ alignItems: 'flex-start' }}>{azione}</View> : null}
-      </View>
+      )) : <Testo colore="testo-secondario" style={{ paddingVertical: d['margine-voce-v'], paddingHorizontal: px, paddingBottom: pTesta }}>{vuoto}</Testo>}
+      {azione ? (
+        <View>
+          <Separatore />
+          <View style={{ alignItems: 'flex-start', paddingHorizontal: px, paddingVertical: d['spazio-testo'] }}>{azione}</View>
+        </View>
+      ) : null}
     </Scheda>
   );
 }
@@ -249,7 +256,7 @@ function Riga({ voce: v, onSpunta, onApri }: { voce: Voce; onSpunta: () => void;
     </View>
   );
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingHorizontal: d['margine-voce-h'], paddingVertical: d['spazio-testo'] }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-icona'], paddingVertical: d['spazio-testo'] }}>
       {spunta}
       <Pressable accessibilityRole="button" accessibilityLabel={v.nome} onPress={onApri} style={{ flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'], paddingVertical: d['spazio-icona'] }}>
         <Tessera icona={v.icona} misura="piccola" tono={v.colore ? 'accento' : 'neutro'} tinta={v.colore ?? undefined} />
