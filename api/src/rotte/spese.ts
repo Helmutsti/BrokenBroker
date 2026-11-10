@@ -44,6 +44,12 @@ async function categoriaMia(db: PoolClient, id: string | null | undefined) {
   if (!(await db.query('select 1 from categorie where id = $1 and proprietario_id = fp_me()', [id])).rowCount) throw nonTrovato('Categoria');
 }
 
+// I gruppi non si condividono (decisione 74): su una spesa si sceglie solo un gruppo proprio.
+async function gruppoMio(db: PoolClient, id: string | null | undefined) {
+  if (!id) return;
+  if (!(await db.query('select 1 from gruppi where id = $1 and proprietario_id = fp_me()', [id])).rowCount) throw nonTrovato('Gruppo');
+}
+
 function leggi(c: Record<string, unknown>, nuova: boolean) {
   const importo = v.importo(c, 'importo', nuova);
   if (importo !== undefined && Number(importo) <= 0) throw new ErroreApi(400, "L'importo deve essere positivo");
@@ -58,6 +64,7 @@ function leggi(c: Record<string, unknown>, nuova: boolean) {
     giorno_mese: v.annullabile(c, 'giorno_mese', () => v.intero(c, 'giorno_mese', 1, 31)),
     conto_id: v.annullabile(c, 'conto_id', () => v.id(c, 'conto_id')),
     categoria_id: v.annullabile(c, 'categoria_id', () => v.id(c, 'categoria_id')),
+    gruppo_id: v.annullabile(c, 'gruppo_id', () => v.id(c, 'gruppo_id')),
     tipo: v.scelta(c, 'tipo', TIPI),
     attiva: v.booleano(c, 'attiva'),
     note: v.annullabile(c, 'note', () => v.testo(c, 'note', false, 500)),
@@ -97,6 +104,7 @@ rotteSpese.post('/', async (req, res) => {
   if (campi.raccolto !== undefined && campi.ogni_mesi === 1) throw new ErroreApi(400, ERRORE_RACCOLTO_MENSILE);
   const spesa = await conUtente(res.locals.utenteId, async (db) => {
     await categoriaMia(db, campi.categoria_id);
+    await gruppoMio(db, campi.gruppo_id);
     const voci = Object.entries(campi).filter(([, x]) => x !== undefined);
     const { rows } = await db.query<{ id: string }>(
       `insert into spese_previste (proprietario_id, ${voci.map(([k]) => k).join(', ')})
@@ -123,9 +131,10 @@ rotteSpese.patch('/:id', async (req, res) => {
       throw new ErroreApi(400, campi.ogni_mesi === null ? 'Una spesa una tantum ha bisogno della data' : 'Una spesa non mensile ha bisogno almeno del mese');
     }
     await categoriaMia(db, campi.categoria_id);
+    await gruppoMio(db, campi.gruppo_id);
     // Chi riceve la spesa cambia solo la SUA categoria, senza toccare quella del creatore.
     const categoriaRicevuta = sua.mia ? undefined : campi.categoria_id;
-    const modifiche = sua.mia ? campi : { ...campi, categoria_id: undefined };
+    const modifiche = sua.mia ? campi : { ...campi, categoria_id: undefined, gruppo_id: undefined };
     const vuote = Object.values(modifiche).every((x) => x === undefined);
     if (vuote && categoriaRicevuta === undefined) throw new ErroreApi(400, 'Nessun campo da modificare');
     const set = vuote ? null : v.setParziale(modifiche, 2);

@@ -9,6 +9,7 @@ import type { Profilo } from './dati/tipi.ts';
 import { Accesso } from './schermate/Accesso.tsx';
 import { Categorie } from './schermate/Categorie.tsx';
 import { Conti } from './schermate/Conti.tsx';
+import { Gruppi } from './schermate/Gruppi.tsx';
 import { Impostazioni } from './schermate/Impostazioni.tsx';
 import { Investimenti } from './schermate/Investimenti.tsx';
 import { Salvadanai } from './schermate/Salvadanai.tsx';
@@ -16,17 +17,18 @@ import { Uscite } from './schermate/Uscite.tsx';
 import { useCompatto } from './tema/compatto.ts';
 import { d, FornitoreTema, useTema } from './tema/tema.tsx';
 
-// Sezioni della barra laterale (decisione 72): Uscite (la pagina iniziale), Salvadanai, Investimenti, e in fondo Conti e Categorie.
+// Sezioni della barra laterale (decisione 72): Uscite (la pagina iniziale), Salvadanai, Investimenti, e in fondo Conti, Gruppi e Categorie.
 // Panoramica, Movimenti, Analisi e Obiettivi non sono nel menu (i loro file restano).
 const SEZIONI: (VoceMenu & { percorso: string; schermata: () => React.JSX.Element })[] = [
   { chiave: 'uscite', testo: 'Uscite', icona: 'calendar-check', percorso: '', schermata: Uscite },
   { chiave: 'salvadanai', testo: 'Salvadanai', breve: 'Salvad.', icona: 'piggy-bank', percorso: 'salvadanai', schermata: Salvadanai },
   { chiave: 'investimenti', testo: 'Investimenti', breve: 'Invest.', icona: 'chart-line', percorso: 'investimenti', schermata: Investimenti },
   { chiave: 'conti', testo: 'Conti', icona: 'wallet', percorso: 'conti', schermata: Conti },
+  { chiave: 'gruppi', testo: 'Gruppi', icona: 'folder', percorso: 'gruppi', schermata: Gruppi },
   { chiave: 'categorie', testo: 'Categorie', icona: 'tags', percorso: 'categorie', schermata: Categorie },
 ];
 
-// Barra in basso del telefono: 3 sezioni e «Altro», che apre le altre (Conti, Categorie, Impostazioni).
+// Barra in basso del telefono: 3 sezioni e «Altro», che apre le altre (Conti, Gruppi, Categorie, Impostazioni).
 const IN_BARRA = ['uscite', 'salvadanai', 'investimenti'];
 const ALTRE: VoceMenu[] = [
   ...SEZIONI.filter((s) => !IN_BARRA.includes(s.chiave)),

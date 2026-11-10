@@ -10,9 +10,12 @@ export type Conto = { id: string; nome: string; icona: string; archiviato: boole
 export type Categoria = { id: string; proprietario_id: string; padre_id: string | null; nome: string; tipo: 'uscita' | 'entrata'; colore: string | null; icona: string | null; ordine: number; figli?: Categoria[];
   n_uscite?: number }; // quante uscite (transazioni) hanno questa categoria
 
+// Un gruppo: cartella per raccogliere le spese, solo etichetta con nome e icona.
+export type Gruppo = { id: string; nome: string; icona: string };
+
 export type TipoSpesa = 'fissa' | 'investimento';
 export type Spesa = {
-  id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; conto_id: string | null; conto: string | null;
+  id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null; conto_id: string | null; conto: string | null; gruppo_id: string | null; gruppo: string | null; gruppo_icona: string | null;
   categoria_id: string | null; categoria: string | null; categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: TipoSpesa; attiva: boolean; note: string | null; mia: boolean; condivisa: boolean;
   nuova: boolean; creata_da: string | null; // ricevuta e non ancora aperta né categorizzata (decisione 43); chi l'ha creata

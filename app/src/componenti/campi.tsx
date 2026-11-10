@@ -182,10 +182,10 @@ export function TendinaGriglia<T extends string>({ etichetta, valore, opzioni, o
 }
 
 // Le icone tra cui scegliere per conti e salvadanai: un sottoinsieme di quelle già nel pacchetto.
-export const ICONE_SCELTA = ['landmark', 'wallet', 'credit-card', 'banknote', 'piggy-bank', 'smartphone', 'house', 'car', 'plane', 'tree-palm', 'heart', 'gift', 'shield', 'shield-check',
+export const ICONE_SCELTA = ['landmark', 'wallet', 'folder', 'credit-card', 'banknote', 'piggy-bank', 'smartphone', 'house', 'car', 'plane', 'tree-palm', 'heart', 'gift', 'shield', 'shield-check',
   'briefcase', 'laptop', 'camera', 'gamepad-2', 'music', 'shirt', 'stethoscope', 'pill', 'bed', 'sofa', 'wrench', 'utensils', 'shopping-cart', 'coffee', 'cat', 'package', 'target', 'trending-up'];
 
-const NOME_ICONA: Record<string, string> = { landmark: 'Banca', wallet: 'Portafoglio', 'credit-card': 'Carta', banknote: 'Contanti', 'piggy-bank': 'Salvadanaio', smartphone: 'Telefono',
+const NOME_ICONA: Record<string, string> = { landmark: 'Banca', wallet: 'Portafoglio', folder: 'Cartella', 'credit-card': 'Carta', banknote: 'Contanti', 'piggy-bank': 'Salvadanaio', smartphone: 'Telefono',
   house: 'Casa', car: 'Auto', plane: 'Viaggio', 'tree-palm': 'Vacanza', heart: 'Cuore', gift: 'Regalo', shield: 'Scudo', 'shield-check': 'Sicurezza', briefcase: 'Lavoro', laptop: 'Computer',
   camera: 'Foto', 'gamepad-2': 'Svago', music: 'Musica', shirt: 'Vestiti', stethoscope: 'Salute', pill: 'Medicine', bed: 'Letto', sofa: 'Arredo', wrench: 'Lavori', utensils: 'Cibo',
   'shopping-cart': 'Spesa', coffee: 'Caffè', cat: 'Animali', package: 'Pacco', target: 'Obiettivo', 'trending-up': 'Crescita' };

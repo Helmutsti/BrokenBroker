@@ -2,12 +2,12 @@ import { createContext, type ReactNode, useContext, useMemo, useState } from 're
 import { oggiIso } from '../formato.ts';
 import { meseDi } from '../mesePersonale.ts';
 import { useDati } from './api.ts';
-import type { Categoria, Conto, Profilo } from './tipi.ts';
+import type { Categoria, Conto, Gruppo, Profilo } from './tipi.ts';
 
-// Dati che servono a tutte le schermate: profilo, conti (etichette), categorie e mese scelto.
+// Dati che servono a tutte le schermate: profilo, conti e gruppi (etichette), categorie e mese scelto.
 
 type Riferimenti = {
-  profilo: Profilo | null; conti: Conto[]; categorie: Categoria[];
+  profilo: Profilo | null; conti: Conto[]; gruppi: Gruppo[]; categorie: Categoria[];
   categoria: (id: string | null | undefined) => Categoria | undefined;
   percorsoCategoria: (id: string | null | undefined) => string;
   iconaCategoria: (id: string | null | undefined) => string;
@@ -26,6 +26,7 @@ export const meseInCorso = (inizio: number): string => meseDi(oggiIso(), inizio)
 export function FornitoreRiferimenti({ children }: { children: ReactNode }) {
   const profilo = useDati<Profilo>('/profilo').dati;
   const conti = useDati<Conto[]>('/conti?archiviati=true').dati ?? [];
+  const gruppi = useDati<Gruppo[]>('/gruppi').dati ?? [];
   const categorie = useDati<Categoria[]>('/categorie?formato=elenco').dati ?? [];
   const [meseScelto, setMese] = useState<string | null>(null);
   const [richiesta, chiedi] = useState<Richiesta>({});
@@ -41,11 +42,11 @@ export function FornitoreRiferimenti({ children }: { children: ReactNode }) {
       const p = categoria(c.padre_id); return p ? `${p.nome} › ${c.nome}` : c.nome;
     };
     return {
-      profilo, conti, categorie, categoria, percorsoCategoria, iconaCategoria,
+      profilo, conti, gruppi, categorie, categoria, percorsoCategoria, iconaCategoria,
       conto: (id) => conti.find((c) => c.id === id),
       mese: meseScelto ?? meseInCorso(profilo?.inizio_mese ?? 1), meseOggi: meseInCorso(profilo?.inizio_mese ?? 1), setMese, richiesta, chiedi,
     };
-  }, [profilo, conti, categorie, meseScelto, richiesta]);
+  }, [profilo, conti, gruppi, categorie, meseScelto, richiesta]);
   return <Contesto.Provider value={valore}>{children}</Contesto.Provider>;
 }
 
@@ -60,6 +61,12 @@ export function opzioniConti(conti: Conto[], { tenere = [], escludi = [] }: { te
   return conti.filter((c) => !escludi.includes(c.id))
     .sort((a, b) => a.nome.localeCompare(b.nome, 'it'))
     .map((conto) => ({ valore: conto.id, testo: conto.nome, icona: conto.icona, rientro: 0 }));
+}
+
+// Opzioni per la tendina dei gruppi, in ordine di nome.
+export function opzioniGruppi(gruppi: Gruppo[]) {
+  return [...gruppi].sort((a, b) => a.nome.localeCompare(b.nome, 'it'))
+    .map((g) => ({ valore: g.id, testo: g.nome, icona: g.icona, rientro: 0 }));
 }
 
 // Albero per le tendine: categorie con rientro, di un tipo.

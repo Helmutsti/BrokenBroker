@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import { Barra, Esito, Etichetta, Pulsante, Spunta, Tessera } from '../componenti/base.tsx';
+import { Barra, Esito, Etichetta, Pulsante, SceltaSegmenti, Spunta, Tessera } from '../componenti/base.tsx';
 import { Campo } from '../componenti/campi.tsx';
 import { Icona } from '../componenti/Icona.tsx';
 import { Intestazione, NumeroChiave, RiquadroARighe, SelettorePeriodo } from '../componenti/composti.tsx';
@@ -20,6 +20,7 @@ import { FinestraModulo, serve } from './moduli.tsx';
 // spuntare una voce lo fa scendere). Sotto tre riquadri: Mensili, Rate e Annuali (ogni 2 mesi o più, anche una volta sola). Nel mese contano le mensili,
 // le rate che cadono quel mese e le annuali che scadono quel mese (importo pieno). La spunta delle mensili vale per il mese che si guarda; quella delle rate per la rata in corso (come le annuali, anche in anticipo: conta nel mese in cui la spunti); quella delle annuali
 // c'è in ogni mese e segna la QUOTA DEL MESE (decisione 73): spuntarla fa scendere il saldo e salire la cesta («raccolti X di Y») e la toglie da «Quanto deve uscire».
+// Sotto il selettore del mese, «Per tipo» (Mensili, Rate, Annuali), «Per gruppo» (un riquadro per gruppo con dentro mensili e annuali, poi «Senza gruppo» e le Rate) o «Per conto» (un riquadro per conto con spese e rate che escono da lì, poi «Senza conto»; solo etichetta, decisione 72). I quattro numeri non cambiano.
 // «Segna pagata» sta nei pulsanti della finestra della spesa (FinestraSpesa): la spesa è uscita davvero (scadenza in corso, anche in anticipo); scende solo la cesta, il saldo no. Sulla riga resta « · pagata il …» nel sottotesto.
 
 type Voce = {
@@ -40,6 +41,7 @@ export function Uscite() {
   const [spesa, setSpesa] = useState<Spesa | 'nuova' | null>(null);
   const [rata, setRata] = useState<Rata | 'nuova' | null>(null);
   const [scriviSaldo, setScriviSaldo] = useState(false);
+  const [vista, setVista] = useState<'tipo' | 'gruppo' | 'conto'>('tipo');
   const { richiesta, chiedi } = rif;
   // Richiesta da un'altra schermata: «Nuova spesa» della barra laterale.
   useEffect(() => {
@@ -125,7 +127,28 @@ export function Uscite() {
       if (v.fatta) await cancella(`${rotta}?mese=${mese}`); else await crea(rotta, { mese });
     } catch (e) { setErrore((e as Error).message); }
   };
+  const tutteLeVoci = [...mensili, ...annuali].sort(perOrdine);
+  const idGruppi = new Set(rif.gruppi.map((g) => g.id));
   const apri = (v: Voce) => (v.spesa ? setSpesa(v.spesa) : setRata(v.rata!));
+  // Riquadri per etichetta (gruppi o conti): uno per elemento con almeno una voce, poi «Senza ...» con le voci che non hanno un'etichetta nota.
+  const perEtichetta = (elementi: { id: string; nome: string; icona: string }[], idDi: (v: Voce) => string | null | undefined, voceTutte: Voce[], notaElemento: string, titoloSenza: string, notaSenza: string) => {
+    const noti = new Set(elementi.map((e) => e.id));
+    const senza = voceTutte.filter((v) => { const id = idDi(v); return !id || !noti.has(id); });
+    return (
+      <>
+        {elementi.map((e) => {
+          const dentro = voceTutte.filter((v) => idDi(v) === e.id);
+          return dentro.length ? <Riquadro key={e.id} titolo={e.nome} icona={e.icona} nota={notaElemento} voci={dentro} vuoto="" onSpunta={spunta} onApri={apri} /> : null;
+        })}
+        {senza.length ? <Riquadro titolo={titoloSenza} nota={notaSenza} voci={senza} vuoto="" onSpunta={spunta} onApri={apri} /> : null}
+      </>
+    );
+  };
+  const vociDelConto = [...mensili, ...annuali, ...dellaRata].sort(perOrdine);
+  const riquadroRate = (
+    <Riquadro titolo="Rate" nota={`Senza categoria. La casella c’è quando la rata scade entro ${nomeDelMese}.`} voci={dellaRata} vuoto="Nessuna rata." rimanenti onSpunta={spunta} onApri={apri}
+      azione={<Pulsante tipo="testo" etichetta="Nuova rata" icona="plus" onPress={() => setRata('nuova')} />} />
+  );
 
   const cella = (pieno: boolean, figlio: ReactNode) => (
     <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, flexBasis: compatto ? (pieno ? '100%' : '45%') : 0 }}>{figlio}</View>
@@ -136,6 +159,7 @@ export function Uscite() {
       <Intestazione titolo="Uscite" sottotitolo="Tutte le uscite, al mese e all’anno. Importi: la tua quota."
         azioni={<Pulsante tipo="primario" etichetta="Nuova spesa" icona="plus" onPress={() => setSpesa('nuova')} />} />
       <SelettorePeriodo mese={mese} meseOggi={rif.meseOggi} onCambia={setMese} />
+      <SceltaSegmenti etichetta="Raggruppa le uscite" valore={vista} onCambia={setVista} opzioni={[{ valore: 'tipo', testo: 'Per tipo' }, { valore: 'gruppo', testo: 'Per gruppo' }, { valore: 'conto', testo: 'Per conto' }]} />
       <View style={{ flexDirection: 'row', flexWrap: compatto ? 'wrap' : 'nowrap', alignItems: 'stretch', gap: compatto ? d['spazio-colonne'] : d['spazio-blocco'] }}>
         {cella(true, (
           <NumeroChiave etichetta="Saldo" valore={sal === null ? 'Scrivilo' : euro(sal)} icona="wallet" tono={sal !== null && sal < 0 ? 'errore' : 'normale'}
@@ -150,10 +174,20 @@ export function Uscite() {
         ))}
       </View>
       {errore ? <Esito tono="errore" testo={errore} /> : null}
-      <Riquadro titolo="Mensili" nota={`Ogni mese. La spunta vale per ${nomeDelMese}.`} voci={mensili} vuoto="Nessuna spesa mensile. Aggiungi affitto, bollette e abbonamenti." onSpunta={spunta} onApri={apri} />
-      <Riquadro titolo="Rate" nota={`Senza categoria. La casella c’è quando la rata scade entro ${nomeDelMese}.`} voci={dellaRata} vuoto="Nessuna rata." rimanenti onSpunta={spunta} onApri={apri}
-        azione={<Pulsante tipo="testo" etichetta="Nuova rata" icona="plus" onPress={() => setRata('nuova')} />} />
-      <Riquadro titolo="Annuali" nota="Ogni 2 mesi o più, anche una volta sola. La casella segna la quota del mese; dalla finestra della spesa la segni pagata quando esce per intero." voci={annuali} vuoto="Nessuna spesa annuale." onSpunta={spunta} onApri={apri} />
+      {vista === 'tipo' ? (
+        <>
+          <Riquadro titolo="Mensili" nota={`Ogni mese. La spunta vale per ${nomeDelMese}.`} voci={mensili} vuoto="Nessuna spesa mensile. Aggiungi affitto, bollette e abbonamenti." onSpunta={spunta} onApri={apri} />
+          {riquadroRate}
+          <Riquadro titolo="Annuali" nota="Ogni 2 mesi o più, anche una volta sola. La casella segna la quota del mese; dalla finestra della spesa la segni pagata quando esce per intero." voci={annuali} vuoto="Nessuna spesa annuale." onSpunta={spunta} onApri={apri} />
+        </>
+      ) : vista === 'gruppo' ? (
+        <>
+          {perEtichetta(rif.gruppi, (v) => v.spesa?.gruppo_id, tutteLeVoci, 'Mensili e annuali del gruppo', 'Senza gruppo', 'Mensili e annuali senza gruppo')}
+          {riquadroRate}
+        </>
+      ) : (
+        perEtichetta(rif.conti, (v) => v.spesa?.conto_id ?? v.rata?.conto_id, vociDelConto, 'Spese e rate che escono da questo conto', 'Senza conto', 'Spese e rate senza conto')
+      )}
       <FinestraSpesa spesa={spesa === 'nuova' ? null : spesa} aperta={!!spesa} onChiudi={() => setSpesa(null)} mese={mese} />
       <FinestraRata rata={rata === 'nuova' ? null : rata} aperta={!!rata} onChiudi={() => setRata(null)} />
       <FinestraSaldo saldo={saldo.dati} aperta={scriviSaldo} onChiudi={() => setScriviSaldo(false)} />
@@ -163,7 +197,7 @@ export function Uscite() {
 
 // Un riquadro: titolo e nota a sinistra, a destra i totali al mese e all'anno (piccoli: contano meno delle cifre delle voci). Nessuna linea sotto la testata,
 // linee tra le righe, nessuna riga di totale.
-function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanenti }: { titolo: string; nota: string; voci: Voce[]; vuoto: string; onSpunta: (v: Voce) => void; onApri: (v: Voce) => void; azione?: ReactNode; rimanenti?: boolean }) {
+function Riquadro({ titolo, icona, nota, voci, vuoto, onSpunta, onApri, azione, rimanenti }: { titolo: string; icona?: string; nota: string; voci: Voce[]; vuoto: string; onSpunta: (v: Voce) => void; onApri: (v: Voce) => void; azione?: ReactNode; rimanenti?: boolean }) {
   const compatto = useCompatto();
   // Nel riquadro delle rate la seconda colonna è quanto resta da pagare, non il totale all'anno.
   const alMese = voci.reduce((t, v) => t + v.alMese, 0), allAnno = voci.reduce((t, v) => t + (rimanenti ? v.residuo ?? 0 : v.all_anno), 0);
@@ -186,7 +220,7 @@ function Riquadro({ titolo, nota, voci, vuoto, onSpunta, onApri, azione, rimanen
     </>
   );
   return (
-    <RiquadroARighe titolo={titolo} nota={nota} destra={destra} vuoto={vuoto} azione={azione}>
+    <RiquadroARighe titolo={titolo} icona={icona} nota={nota} destra={destra} vuoto={vuoto} azione={azione}>
       {voci.map((v) => <Riga key={v.chiave} voce={v} onSpunta={() => onSpunta(v)} onApri={() => onApri(v)} />)}
     </RiquadroARighe>
   );

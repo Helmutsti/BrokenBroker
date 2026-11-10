@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { Barra, Esito, Interruttore, Pulsante, SceltaSegmenti } from '../componenti/base.tsx';
 import { Campo, CampoData, Tendina, TendinaGiorni } from '../componenti/campi.tsx';
 import { cancella, crea, modifica } from '../dati/api.ts';
-import { opzioniCategorie, opzioniConti, useRiferimenti } from '../dati/contesto.tsx';
+import { opzioniCategorie, opzioniConti, opzioniGruppi, useRiferimenti } from '../dati/contesto.tsx';
 import type { Spesa } from '../dati/tipi.ts';
 import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, oggiIso } from '../formato.ts';
 import { primaOccorrenzaPersonale } from '../mesePersonale.ts';
@@ -30,6 +30,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi, mese }: { spesa: Spesa 
   const [giornoMese, setGiornoMese] = useState('');
   const [importo, setImporto] = useState('');
   const [conto, setConto] = useState<string | null>(null);
+  const [gruppo, setGruppo] = useState<string | null>(null);
   const [raccolto, setRaccolto] = useState('');
   const div = useDivisione({ aperta, voce: 'spesa', rotta: '/spese-previste', origine: spesa ? { id: spesa.id, mia: spesa.mia, condiviso: spesa.condivisa, miaPercentuale: spesa.mia_percentuale } : null });
 
@@ -41,7 +42,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi, mese }: { spesa: Spesa 
   useEffect(() => {
     if (!aperta) return;
     const s = spesa;
-    setNome(s?.nome ?? ''); setCategoria(s?.categoria_id ?? null); setImporto(importoInTesto(s?.importo)); setConto(s?.conto_id ?? null);
+    setNome(s?.nome ?? ''); setCategoria(s?.categoria_id ?? null); setImporto(importoInTesto(s?.importo)); setConto(s?.conto_id ?? null); setGruppo(s?.gruppo_id ?? null);
     setFrequenza(!s || s.ogni_mesi === 1 ? 'mese' : s.ogni_mesi === null ? 'una' : 'n'); setOgniN(String(s?.ogni_mesi && s.ogni_mesi > 1 ? s.ogni_mesi : 6));
     setGiornoMese(s?.ogni_mesi === 1 && s.giorno_mese ? String(s.giorno_mese) : '');
     const prossima = s && s.ogni_mesi !== 1 ? (s.ogni_mesi === null ? s.prossima_scadenza : proxSpesaDaPagare(s, oggiIso(), inizio) ?? s.prossima_scadenza) : null;
@@ -63,7 +64,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi, mese }: { spesa: Spesa 
     }
     const g = giornoMese ? Number(giornoMese) : null;
     const corpo = { nome: serve(nome.trim(), 'Scrivi il nome', 'nome'), importo: valore, ogni_mesi: ogni, prossima_scadenza: prima, senza_giorno: senzaGiorno, giorno_mese: ogni === 1 ? g : null,
-      conto_id: conto, categoria_id: categoria, ...(ogni !== 1 && spesa && spesa.ogni_mesi !== 1 && raccolto !== importoInTesto(spesa.raccolto)
+      conto_id: conto, gruppo_id: gruppo, categoria_id: categoria, ...(ogni !== 1 && spesa && spesa.ogni_mesi !== 1 && raccolto !== importoInTesto(spesa.raccolto)
         ? { raccolto: serve(leggiImporto(raccolto), 'Scrivi quanto hai raccolto, es. 150 (anche negativo)', 'raccolto') } : {}) };
     const salvata = spesa ? await modifica<Spesa>(`/spese-previste/${spesa.id}`, corpo) : await crea<Spesa>('/spese-previste', corpo);
     if (spesa && !spesa.mia) return; // la divisione la decide chi l'ha creata
@@ -140,6 +141,7 @@ export function FinestraSpesa({ spesa, aperta, onChiudi, mese }: { spesa: Spesa 
         <Meta><ConErrore campo="importo"><Campo etichetta="Importo a ogni scadenza" valore={importo} onCambia={setImporto} segnaposto="0,00" inputMode="decimal" aiuto={aiutoImporto} /></ConErrore></Meta>
         <Meta><Tendina etichetta="Conto (solo etichetta)" valore={conto ?? ''} opzioni={[{ valore: '', testo: 'Nessun conto' }, ...opzioniConti(rif.conti, { tenere: [conto] })]} onCambia={(v) => setConto(v || null)} iconaPrima="wallet" /></Meta>
       </Affiancati>
+      <Tendina etichetta="Gruppo" valore={gruppo ?? ''} opzioni={[{ valore: '', testo: 'Nessun gruppo' }, ...opzioniGruppi(rif.gruppi)]} onCambia={(v) => setGruppo(v || null)} iconaPrima="folder" />
       {!spesa || spesa.mia ? (
         <View style={{ gap: d['spazio-blocco'] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>

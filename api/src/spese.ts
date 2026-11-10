@@ -8,7 +8,9 @@ import { meseDi, type Periodo, periodo, prossimaUscita, scadenzaNelPeriodo } fro
 export type SpesaDelMese = {
   id: string; nome: string; importo: string; ogni_mesi: number | null; prossima_scadenza: string | null; senza_giorno: boolean; giorno_mese: number | null;
   // Il conto è solo un'etichetta (decisione 72): non cambia nessun numero.
-  conto_id: string | null; conto: string | null; categoria_id: string | null; categoria: string | null;
+  conto_id: string | null; conto: string | null;
+  // Il gruppo (decisione 74) è solo un'etichetta, propria di chi lo crea: per una spesa condivisa di un altro utente è null.
+  gruppo_id: string | null; gruppo: string | null; gruppo_icona: string | null; categoria_id: string | null; categoria: string | null;
   categoria_padre: string | null; icona: string | null; colore: string | null;
   tipo: 'fissa' | 'investimento'; attiva: boolean; note: string | null;
   mia: boolean; condivisa: boolean;
@@ -59,6 +61,7 @@ const cent = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string): Promise<SpesaDelMese[]> {
   const { rows } = await db.query(
     `select s.id, s.nome, s.importo::text as importo, s.ogni_mesi, s.prossima_scadenza, s.senza_giorno, s.giorno_mese, s.conto_id, co.nome as conto,
+            s.gruppo_id, g.nome as gruppo, g.icona as gruppo_icona,
             s.raccolto::text as raccolto,
             c.id as categoria_id, c.nome as categoria, pc.nome as categoria_padre,
             (with recursive su as (
@@ -77,6 +80,7 @@ export async function speseDelMese(db: PoolClient, p: Periodo, soloId?: string):
             exists (select 1 from quote_annuali qa where qa.spesa_prevista_id = s.id and qa.utente_id = fp_me() and qa.per_mese = $4::date) as quota_spuntata
        from spese_previste s
        left join conti co on co.id = s.conto_id
+       left join gruppi g on g.id = s.gruppo_id
        left join spese_dati_utente d on d.spesa_prevista_id = s.id and d.utente_id = fp_me()
        left join categorie c on c.proprietario_id = fp_me()
                             and c.id = case when s.proprietario_id = fp_me() then s.categoria_id else d.categoria_id end

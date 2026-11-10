@@ -29,7 +29,8 @@ const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0
 const meseFa = (n, g) => { const d = new Date(oggi.getFullYear(), oggi.getMonth() - n, g); return iso(d); };
 
 await r('PATCH', '/profilo', M, { stipendio_netto: '1800', giorno_paga: 27, inizio_mese: 1 });
-await r('PUT', '/regole', M, { max_rate_contemporanee: '2', tetto_rate_percentuale: '15', max_mensilita_debito: '3' });
+// Saldo unico (decisione 72): la cifra sul conto, da cui il saldo effettivo riparte.
+await r('PUT', '/saldo', M, { importo: '2350.40' });
 
 const cat = await r('GET', '/categorie?formato=elenco', M);
 // padre: nome della categoria padre; null = categoria principale; assente = la prima con quel nome.
@@ -44,24 +45,30 @@ const revolut = await conto('Revolut');
 const paypal = await conto('PayPal');
 const tr = await conto('Trade Republic');
 
+// Gruppi (decisione 74): cartelle contenitore per le spese, solo etichette.
+const gruppo = async (nome, icona) => (await r('POST', '/gruppi', M, { nome, icona })).id;
+const gCasa = await gruppo('Casa', 'house');
+const gAuto = await gruppo('Auto', 'car');
+const gAbb = await gruppo('Abbonamenti', 'folder');
+
 const spesa = async (nome, importo, extra) => (await r('POST', '/spese-previste', M, { nome, importo, ...extra })).id;
 const meta = async (id) => r('POST', '/condivisioni', M, { voce: 'spesa', id, email: 'ele@brokenbroker.test' });
-const affitto = await spesa('Affitto casa', '612', { conto_id: bper, categoria_id: C('Affitto'), prossima_scadenza: meseFa(6, 1) }); await meta(affitto);
-const box = await spesa('Affitto box', '165', { conto_id: bper, categoria_id: C('Parcheggio e box'), prossima_scadenza: meseFa(6, 1) }); await meta(box);
-const luce = await spesa('Luce, gas, TIM', '117.80', { conto_id: bper, categoria_id: C('Bollette'), prossima_scadenza: meseFa(6, 5), note: 'Luce 50 · gas 40 · TIM 27,80' }); await meta(luce);
-const spotify = await spesa('Spotify duo', '16.99', { conto_id: paypal, categoria_id: C('Musica'), prossima_scadenza: meseFa(6, 12) }); await meta(spotify);
-await spesa('Claude', '21.96', { conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 24) });
-await spesa('Figma', '25', { conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 26) });
-await spesa('Adobe', '18.45', { conto_id: paypal, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 27) });
+const affitto = await spesa('Affitto casa', '612', { gruppo_id: gCasa, conto_id: bper, categoria_id: C('Affitto'), prossima_scadenza: meseFa(6, 1) }); await meta(affitto);
+const box = await spesa('Affitto box', '165', { gruppo_id: gCasa, conto_id: bper, categoria_id: C('Parcheggio e box'), prossima_scadenza: meseFa(6, 1) }); await meta(box);
+const luce = await spesa('Luce, gas, TIM', '117.80', { gruppo_id: gCasa, conto_id: bper, categoria_id: C('Bollette'), prossima_scadenza: meseFa(6, 5), note: 'Luce 50 · gas 40 · TIM 27,80' }); await meta(luce);
+const spotify = await spesa('Spotify duo', '16.99', { gruppo_id: gAbb, conto_id: paypal, categoria_id: C('Musica'), prossima_scadenza: meseFa(6, 12) }); await meta(spotify);
+await spesa('Claude', '21.96', { gruppo_id: gAbb, conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 24) });
+await spesa('Figma', '25', { gruppo_id: gAbb, conto_id: intesa, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 26) });
+await spesa('Adobe', '18.45', { gruppo_id: gAbb, conto_id: paypal, categoria_id: C('Software', 'Abbonamenti'), prossima_scadenza: meseFa(6, 27) });
 // Cifre del mese di tutti i giorni: spese mensili normali (non c'è più il budget).
 await meta(await spesa('Spesa al supermercato', '500', { conto_id: comune, categoria_id: C('Supermercato'), prossima_scadenza: meseFa(6, 28) }));
 await spesa('Pranzo fuori', '200', { conto_id: revolut, categoria_id: C('Pranzo fuori'), prossima_scadenza: meseFa(6, 28) });
-await meta(await spesa('Carburante', '70', { conto_id: comune, categoria_id: C('Carburante'), prossima_scadenza: meseFa(6, 28) }));
+await meta(await spesa('Carburante', '70', { gruppo_id: gAuto, conto_id: comune, categoria_id: C('Carburante'), prossima_scadenza: meseFa(6, 28) }));
 await spesa('ETF MSCI World', '500', { tipo: 'investimento', conto_id: tr, categoria_id: C('Risparmio e investimenti'), prossima_scadenza: meseFa(6, 2) });
-await spesa('Tari', '250', { ogni_mesi: 6, conto_id: bper, categoria_id: C('Tari'), prossima_scadenza: meseFa(-1, 20) });
-await spesa('Assicurazione auto', '430.86', { ogni_mesi: 6, conto_id: intesa, categoria_id: C('Assicurazione'), prossima_scadenza: meseFa(-2, 15) });
+await spesa('Tari', '250', { gruppo_id: gCasa, ogni_mesi: 6, conto_id: bper, categoria_id: C('Tari'), prossima_scadenza: meseFa(-1, 20) });
+await spesa('Assicurazione auto', '430.86', { gruppo_id: gAuto, ogni_mesi: 6, conto_id: intesa, categoria_id: C('Assicurazione'), prossima_scadenza: meseFa(-2, 15) });
 await spesa('Vacanze invernali', '300', { ogni_mesi: 12, conto_id: revolut, categoria_id: C('Viaggi e vacanze'), prossima_scadenza: meseFa(-2, 20) });
-await spesa('Bollo Aygo', '150.52', { ogni_mesi: 12, conto_id: intesa, categoria_id: C('Bollo'), prossima_scadenza: meseFa(-7, 10) });
+await spesa('Bollo Aygo', '150.52', { gruppo_id: gAuto, ogni_mesi: 12, conto_id: intesa, categoria_id: C('Bollo'), prossima_scadenza: meseFa(-7, 10) });
 
 // Movimenti scritti a mano negli ultimi mesi (entrate e uscite; le uscite con categoria) e spunte.
 const mov = (conto_id, importo, descrizione, categoria_id, data) => r('POST', '/movimenti', M, Number(importo) < 0
@@ -79,9 +86,9 @@ const mese = iso(oggi).slice(0, 7);
 for (const id of [affitto, box, luce, spotify]) await r('POST', `/spese-previste/${id}/spunta`, M, { mese });
 
 // Rate.
-await r('POST', '/rate', M, { oggetto: 'American Express', finanziaria: 'Amex', importo_rata: '300', numero_rate: 10, prima_scadenza: meseFa(8, 15), conto_id: intesa, categoria_id: C('Rate') });
-await r('POST', '/rate', M, { oggetto: 'Pinguino', finanziaria: 'Cofidis', importo_rata: '83.60', numero_rate: 5, prima_scadenza: meseFa(3, 10), conto_id: intesa, categoria_id: C('Rate') });
-await r('POST', '/rate', M, { oggetto: 'Telefono', finanziaria: 'Findomestic', importo_rata: '69.25', ultima_scadenza: meseFa(-5, 5), prima_scadenza: meseFa(1, 5), conto_id: intesa, categoria_id: C('Rate') });
+await r('POST', '/rate', M, { oggetto: 'American Express', finanziaria: 'Amex', importo_rata: '300', numero_rate: 10, prima_scadenza: meseFa(8, 15), conto_id: intesa });
+await r('POST', '/rate', M, { oggetto: 'Pinguino', finanziaria: 'Cofidis', importo_rata: '83.60', numero_rate: 5, prima_scadenza: meseFa(3, 10), conto_id: intesa });
+await r('POST', '/rate', M, { oggetto: 'Telefono', finanziaria: 'Findomestic', importo_rata: '69.25', ultima_scadenza: meseFa(-5, 5), prima_scadenza: meseFa(1, 5), conto_id: intesa });
 
 // Salvadanai (decisione 72): liberi e annidabili. Fondo di emergenza con traguardi di copertura, viaggio con sotto-salvadanai, un salvadanaio a sé.
 const fondo = await r('POST', '/ceste', M, { nome: 'Fondo emergenza', traguardo: '8000' });

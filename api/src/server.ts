@@ -8,6 +8,7 @@ import { rotteCategorie } from './rotte/categorie.ts';
 import { rotteCeste } from './rotte/ceste.ts';
 import { rotteCondivisioni, rottePersone } from './rotte/condivisioni.ts';
 import { rotteConti } from './rotte/conti.ts';
+import { rotteGruppi } from './rotte/gruppi.ts';
 import { rotteInvestimenti } from './rotte/investimenti.ts';
 import { rotteMovimenti } from './rotte/movimenti.ts';
 import { rotteProfilo } from './rotte/profilo.ts';
@@ -27,6 +28,7 @@ app.get('/salute', async (_req, res) => {
 app.use('/accesso', rotteAccesso);
 app.use('/profilo', autentica, rotteProfilo);
 app.use('/conti', autentica, rotteConti);
+app.use('/gruppi', autentica, rotteGruppi);
 app.use('/saldo', autentica, rotteSaldo);
 app.use('/categorie', autentica, rotteCategorie);
 app.use('/spese-previste', autentica, rotteSpese);
