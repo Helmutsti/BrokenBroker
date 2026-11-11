@@ -1,0 +1,24 @@
+DA FARE IN FUTURO - nuove entità
+================================
+
+[ ] SPESA
+    - periodo, durata e scadenza
+    - fine (rata)
+    - categoria
+    - cifra
+    - conto di uscita
+    - obiettivo interno: mostra un accumulo interno e l'uscita diventa
+      una frazione del totale
+
+[ ] OBIETTIVO
+    - durata
+    - ha un totale oppure è un semplice accumulo
+    - può avere sotto-obiettivi
+    - può avere dentro un link a un asset di investimento di un
+      portafoglio (e ne mostra il valore)
+
+[ ] ASSET
+    - come ora
+
+[ ] PORTAFOGLIO
+    - insieme di asset
