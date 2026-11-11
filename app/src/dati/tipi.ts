@@ -39,6 +39,13 @@ export type Salvadanaio = {
   traguardi: Traguardo[]; figli: Salvadanaio[];
 };
 
+// Un investimento collegato a un salvadanaio (decisione 75): solo etichetta. `id` è quello del collegamento (vuoto nell'elenco degli asset tra cui scegliere).
+export type AssetCollegato = {
+  id: string; tipo: 'titolo' | 'bene'; titolo_id: string | null; portafoglio_id: string | null; bene_id: string | null;
+  nome: string; portafoglio: string | null; valore: string | null; stato: string;
+};
+export type AssetDelSalvadanaio = { totale: string; incompleto: boolean; asset: AssetCollegato[] };
+
 export type Rata = {
   id: string; oggetto: string; finanziaria: string | null; importo_totale: string | null; importo_rata: string; numero_rate: number; prima_scadenza: string;
   conto_id: string | null; conto: string | null; chiusa: boolean; ultima_scadenza: string; pagate: number; rimanenti: number; residuo: string; attiva: boolean;

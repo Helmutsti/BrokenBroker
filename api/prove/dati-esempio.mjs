@@ -125,4 +125,8 @@ await r('PUT', `/investimenti/titoli/${eimi.id}/esposizioni`, M, { dimensione: '
 await r('PUT', `/investimenti/titoli/${vwce.id}/esposizioni`, M, { dimensione: 'settore', voci: [{ voce: 'Tecnologia', peso: '25' }, { voce: 'Finanza', peso: '16' }, { voce: 'Salute', peso: '11' }, { voce: 'Industria', peso: '11' }, { voce: 'Altri', peso: '37' }] });
 for (const t of [vwce, eimi]) await r('PUT', `/investimenti/titoli/${t.id}/esposizioni`, M, { dimensione: 'classe', voci: [{ voce: 'Azioni', peso: '100' }] });
 
+// Investimenti collegati a un salvadanaio (decisione 75): solo etichetta, nessun numero cambia.
+await r('POST', `/ceste/${fondo.id}/asset`, M, { titolo_id: vwce.id, portafoglio_id: portafoglio.id });
+await r('POST', `/ceste/${fondo.id}/asset`, M, { titolo_id: eimi.id, portafoglio_id: portafoglio.id });
+
 console.log('Dati di prova creati: accesso con prova@brokenbroker.test');

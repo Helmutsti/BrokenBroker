@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { assetDelSalvadanaio, assetDisponibili } from '../asset-dei-salvadanai.ts';
 import { alberoSalvadanai, cent, eliminaSalvadanaio, trova, versatoProprio } from '../ceste.ts';
 import { conUtente } from '../db.ts';
 import { ErroreApi, nonTrovato } from '../errori.ts';
@@ -148,5 +149,51 @@ rotteCeste.delete('/traguardi/:id', async (req, res) => {
   const cancellati = await conUtente(res.locals.utenteId, async (db) =>
     (await db.query('delete from traguardi_copertura where id = $1', [id])).rowCount);
   if (!cancellati) throw nonTrovato('Traguardo');
+  res.status(204).end();
+});
+
+// Investimenti collegati (decisione 75): solo etichetta, nessun numero del salvadanaio cambia. Privati di chi li collega.
+// GET /asset/disponibili: gli asset di chi chiede (titoli per portafoglio e beni) con il valore di oggi, da cui scegliere.
+rotteCeste.get('/asset/disponibili', async (_req, res) => {
+  res.json(await conUtente(res.locals.utenteId, assetDisponibili));
+});
+
+rotteCeste.get('/:id/asset', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  res.json(await conUtente(res.locals.utenteId, async (db) => {
+    if (!(await db.query('select 1 from ceste where id = $1', [id])).rowCount) throw nonTrovato('Salvadanaio');
+    return assetDelSalvadanaio(db, id);
+  }));
+});
+
+// Corpo: o `bene_id`, oppure `titolo_id` + `portafoglio_id` (una posizione). Già collegato: 409.
+rotteCeste.post('/:id/asset', async (req, res) => {
+  const id = v.idPercorso(req.params.id);
+  const c = v.corpo(req.body);
+  const beneId = v.id(c, 'bene_id'), titoloId = v.id(c, 'titolo_id'), portafoglioId = v.id(c, 'portafoglio_id');
+  if (beneId ? titoloId || portafoglioId : !(titoloId && portafoglioId)) throw new ErroreApi(400, 'Indica un bene, oppure un titolo con il suo portafoglio');
+  const esito = await conUtente(res.locals.utenteId, async (db) => {
+    if (!(await db.query('select 1 from ceste where id = $1', [id])).rowCount) throw nonTrovato('Salvadanaio');
+    const esiste = beneId
+      ? await db.query('select 1 from beni where id = $1', [beneId])
+      : await db.query(`select 1 from lotti where titolo_id = $1 and portafoglio_id = $2 and verso = 'acquisto' limit 1`, [titoloId, portafoglioId]);
+    if (!esiste.rowCount) throw nonTrovato(beneId ? 'Bene' : 'Titolo nel portafoglio');
+    const doppio = await db.query(
+      `select 1 from collegamenti_asset where cesta_id = $1 and proprietario_id = fp_me() and (($2::uuid is not null and bene_id = $2) or ($2::uuid is null and titolo_id = $3 and portafoglio_id = $4))`,
+      [id, beneId ?? null, titoloId ?? null, portafoglioId ?? null]);
+    if (doppio.rowCount) throw new ErroreApi(409, 'Questo investimento è già collegato al salvadanaio');
+    await db.query(
+      'insert into collegamenti_asset (proprietario_id, cesta_id, titolo_id, portafoglio_id, bene_id) values (fp_me(), $1, $2, $3, $4)',
+      [id, titoloId ?? null, portafoglioId ?? null, beneId ?? null]);
+    return assetDelSalvadanaio(db, id);
+  });
+  res.status(201).json(esito);
+});
+
+rotteCeste.delete('/:id/asset/:collegamentoId', async (req, res) => {
+  const id = v.idPercorso(req.params.id), collegamentoId = v.idPercorso(req.params.collegamentoId);
+  await conUtente(res.locals.utenteId, async (db) => {
+    if (!(await db.query('delete from collegamenti_asset where id = $1 and cesta_id = $2 and proprietario_id = fp_me()', [collegamentoId, id])).rowCount) throw nonTrovato('Collegamento');
+  });
   res.status(204).end();
 });

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { View } from 'react-native';
-import { Pulsante } from '../componenti/base.tsx';
+import { Esito, Pulsante, PulsanteIcona } from '../componenti/base.tsx';
 import { Campo, CampoData, SceltaIcona, Tendina } from '../componenti/campi.tsx';
-import { cancella, crea, modifica } from '../dati/api.ts';
-import type { Salvadanaio, Traguardo } from '../dati/tipi.ts';
+import { cancella, crea, modifica, useDati } from '../dati/api.ts';
+import type { AssetCollegato, AssetDelSalvadanaio, Salvadanaio, Traguardo } from '../dati/tipi.ts';
 import { dataInTesto, euro, importoInTesto, leggiData, leggiImporto, percento } from '../formato.ts';
 import { d, Testo, useTema } from '../tema/tema.tsx';
-import { Affiancati, ConErrore, ErroreCampo, FinestraModulo, Meta, serve } from './moduli.tsx';
+import { Affiancati, ConErrore, ErroreCampo, FinestraModulo, Meta, Riquadro, serve } from './moduli.tsx';
 
 // Le finestre dei salvadanai (decisione 72): Versa e Preleva, e il salvadanaio (nuovo o da modificare).
 
@@ -77,6 +77,62 @@ export function FinestraVersa({ stato, onChiudi }: { stato: Salvadanaio | null; 
   );
 }
 
+// ---- Investimenti collegati (decisione 75) ----
+// Solo etichetta: nessun numero del salvadanaio cambia. Si collega e si scollega subito, senza passare da Salva.
+const chiaveAsset = (a: AssetCollegato) => (a.bene_id ? `b:${a.bene_id}` : `t:${a.titolo_id}:${a.portafoglio_id}`);
+
+function InvestimentiCollegati({ salvadanaio }: { salvadanaio: Salvadanaio }) {
+  const { c } = useTema();
+  const collegati = useDati<AssetDelSalvadanaio>(`/salvadanai/${salvadanaio.id}/asset`).dati;
+  const scelta = useDati<AssetCollegato[]>('/salvadanai/asset/disponibili').dati;
+  const [portafoglio, setPortafoglio] = useState('');
+  const [asset, setAsset] = useState('');
+  const [errore, setErrore] = useState<string | null>(null);
+  const [lavoro, setLavoro] = useState(false);
+  const giaCollegati = new Set((collegati?.asset ?? []).map(chiaveAsset));
+  const liberi = (scelta ?? []).filter((a) => !giaCollegati.has(chiaveAsset(a)));
+  const portafogli = [...new Map(liberi.map((a) => [a.portafoglio_id ?? '', a.portafoglio ?? ''])).entries()].sort((x, y) => x[1].localeCompare(y[1], 'it'));
+  const dentroPortafoglio = liberi.filter((a) => a.portafoglio_id === portafoglio);
+  const eseguiTutto = async (fn: () => Promise<unknown>) => {
+    setErrore(null); setLavoro(true);
+    try { await fn(); } catch (e) { setErrore((e as Error).message); } finally { setLavoro(false); }
+  };
+  const collega = () => eseguiTutto(async () => {
+    const a = dentroPortafoglio.find((x) => chiaveAsset(x) === asset);
+    if (!a) throw new Error('Scegli il portafoglio e l’investimento');
+    await crea(`/salvadanai/${salvadanaio.id}/asset`, a.bene_id ? { bene_id: a.bene_id } : { titolo_id: a.titolo_id, portafoglio_id: a.portafoglio_id });
+    setAsset('');
+  });
+  return (
+    <Riquadro titolo="Investimenti collegati" icona="trending-up" nota="Solo un’etichetta: i numeri del salvadanaio non cambiano. Li vedi solo tu.">
+      {collegati?.asset.length ? (
+        <View style={{ gap: d['spazio-elenco'] }}>
+          {collegati.asset.map((a) => (
+            <View key={a.id} style={{ flexDirection: 'row', alignItems: 'center', gap: d['spazio-colonne'] }}>
+              <View style={{ flex: 1, minWidth: 0, gap: d['spazio-testo'] }}>
+                <Testo numberOfLines={1}>{a.nome}</Testo>
+                <Testo stile="dettaglio-normale" colore="testo-secondario" numberOfLines={1}>{a.portafoglio ?? '—'}</Testo>
+              </View>
+              <Testo stile="corpo-forte">{a.valore === null ? 'senza prezzo' : euro(a.valore)}</Testo>
+              <PulsanteIcona icona="x" etichetta={`Scollega ${a.nome}`} fantasma disattivato={lavoro} onPress={() => eseguiTutto(() => cancella(`/salvadanai/${salvadanaio.id}/asset/${a.id}`))} />
+            </View>
+          ))}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingTop: d['spazio-testo'], borderTopWidth: d['misura-bordo'], borderTopColor: c['bordo-scheda'] }}>
+            <Testo stile="corpo-forte">Totale{collegati.incompleto ? ' (senza i titoli senza prezzo)' : ''}</Testo>
+            <Testo stile="corpo-forte">{euro(collegati.totale)}</Testo>
+          </View>
+        </View>
+      ) : <Testo colore="testo-secondario">Nessun investimento collegato.</Testo>}
+      <Affiancati>
+        <Meta><Tendina etichetta="Portafoglio" valore={portafoglio || null} opzioni={portafogli.map(([id, nome]) => ({ valore: id, testo: nome }))} onCambia={(v) => { setPortafoglio(v); setAsset(''); }} iconaPrima="briefcase" segnaposto="Scegli il portafoglio" /></Meta>
+        <Meta><Tendina etichetta="Investimento" valore={asset || null} opzioni={dentroPortafoglio.map((a) => ({ valore: chiaveAsset(a), testo: a.nome, icona: a.bene_id ? 'package' : 'trending-up' }))} onCambia={setAsset} disattivato={!portafoglio} segnaposto="Scegli l’investimento" /></Meta>
+      </Affiancati>
+      {errore ? <Esito tono="errore" testo={errore} /> : null}
+      <View style={{ alignItems: 'flex-start' }}><Pulsante etichetta="Collega" icona="plus" onPress={collega} disattivato={lavoro || !asset} /></View>
+    </Riquadro>
+  );
+}
+
 // ---- Il salvadanaio ----
 export function FinestraSalvadanaio({ stato, albero, onChiudi }: {
   stato: { nodo: Salvadanaio | null; padre?: Salvadanaio } | null; albero: Salvadanaio[]; onChiudi: () => void;
@@ -129,6 +185,7 @@ export function FinestraSalvadanaio({ stato, albero, onChiudi }: {
       </Affiancati>
       {numeri}
       <Testo stile="dettaglio-normale" colore="testo-secondario">La cifra dentro si cambia con Versa e Preleva.</Testo>
+      {k ? <InvestimentiCollegati salvadanaio={k} /> : null}
     </>
   );
 
